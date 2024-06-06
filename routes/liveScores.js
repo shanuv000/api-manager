@@ -3,67 +3,59 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 
 const router = express.Router();
-//
+
+// URL of the website you want to scrape
+const url = "https://www.cricbuzz.com/cricket-match/live-scores"; // Replace with the actual URL
+
 router.get("/", async (req, res) => {
   try {
-    console.log("Fetching live scores");
-    const { data } = await axios.get(
-      "https://www.cricbuzz.com/cricket-match/live-scores"
-    );
-    const $ = cheerio.load(data);
+    const response = await axios.get(url);
+    const html = response.data;
+    const $ = cheerio.load(html);
 
-    let liveScores = [];
+    const matches = [];
 
-    $("div.cb-col.cb-col-100.cb-ltst-wgt-hdr").each((i, elem) => {
-      const matchTitle =
-        $(elem).find("a.cb-lv-scrs-well-live").attr("title") ||
-        $(elem).find("a.cb-lv-scrs-well").attr("title");
-      const matchLink =
-        $(elem).find("a.cb-lv-scrs-well-live").attr("href") ||
-        $(elem).find("a.cb-lv-scrs-well").attr("href");
-      const team1 = $(elem)
-        .find("div.cb-hmscg-bat-txt div.cb-hmscg-tm-nm")
+    $(".cb-mtch-lst .cb-schdl").each((index, element) => {
+      const title = $(element).find("h3 a").text().trim();
+      const matchDetails = $(element)
+        .find("span.text-gray")
         .first()
         .text()
         .trim();
-      const score1 = $(elem)
-        .find("div.cb-hmscg-bat-txt div.cb-ovr-flo")
-        .first()
+      const time = $(element).find("span.ng-binding").text().trim();
+      const location = $(element).find(".text-gray").last().text().trim();
+      const playingTeam = $(element)
+        .find(" .cb-hmscg-bat-txt .cb-ovr-flo ")
+        .eq(0)
         .text()
         .trim();
-      const team2 = $(elem)
-        .find("div.cb-hmscg-bwl-txt div.cb-hmscg-tm-nm")
-        .first()
+      const liveScore = $(element)
+        .find(" .cb-hmscg-bat-txt .cb-ovr-flo ")
+        .eq(1)
         .text()
         .trim();
-      const score2 = $(elem)
-        .find("div.cb-hmscg-bwl-txt div.cb-ovr-flo")
-        .first()
-        .text()
-        .trim();
-      const matchStatus =
-        $(elem).find("div.cb-text-live").text().trim() ||
-        $(elem).find("div.cb-text-complete").text().trim() ||
-        $(elem).find("div.cb-text-preview").text().trim();
+      const liveCommentary = $(element).find(".cb-text-live").text().trim();
+      const liveScoreLink = $(element).find("a.cb-lv-scrs-well").attr("href");
 
-      if (matchTitle && matchLink) {
-        liveScores.push({
-          matchTitle: matchTitle.trim(),
-          matchLink: `https://www.cricbuzz.com${matchLink.trim()}`,
-          team1,
-          score1,
-          team2,
-          score2,
-          matchStatus,
-        });
-      }
+      matches.push({
+        title,
+        matchDetails,
+        time,
+        location,
+        playingTeam,
+        liveScore,
+        liveCommentary,
+        liveScoreLink: liveScoreLink
+          ? `https://www.cricbuzz.com${liveScoreLink}`
+          : null, // Construct full URL if relative
+      });
     });
 
-    console.log("Sending live scores response");
-    res.json(liveScores);
+    // Send the scraped data as a JSON response
+    res.json(matches);
   } catch (error) {
-    console.error("Error fetching live scores:", error);
-    res.status(500).json({ error: "Error fetching live scores" });
+    console.error("Error fetching the webpage:", error);
+    res.status(500).send("Error fetching the webpage");
   }
 });
 
