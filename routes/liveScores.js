@@ -60,16 +60,28 @@ router.get("/", async (req, res) => {
       // Additional match details (team scores and live commentary)
       try {
         const liveDetailsElement = $(element).find(".cb-lv-scrs-well");
-        match.playingTeam =
+        match.playingTeamBat =
           liveDetailsElement
             .find(".cb-hmscg-bat-txt .cb-ovr-flo")
             .first()
             .text()
             .trim() || "N/A";
-        match.liveScore =
+        match.playingTeamBall =
+          liveDetailsElement
+            .find(".cb-ovr-flo .cb-hmscg-tm-nm")
+            .first()
+            .text()
+            .trim() || "N/A";
+        match.liveScorebat =
           liveDetailsElement
             .find(".cb-hmscg-bat-txt .cb-ovr-flo")
             .last()
+            .text()
+            .trim() || "N/A";
+        match.liveScoreball =
+          liveDetailsElement
+            .find(".cb-hmscg-bwl-txt .cb-ovr-flo ")
+            .eq(1)
             .text()
             .trim() || "N/A";
         match.liveCommentary =
