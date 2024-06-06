@@ -20,29 +20,34 @@ async function fetchData() {
 // Function to scrape and structure data into JSON
 async function scrapeData() {
   const html = await fetchData();
-  if (html) {
-    const $ = cheerio.load(html);
-    const data = [];
+  if (!html) {
+    return [];
+  }
 
-    $(".ds-table tbody tr ").each((index, element) => {
-      const teamData = {};
+  const $ = cheerio.load(html);
+  const data = [];
 
-      teamData.position = $(element).find("td").eq(0).text().trim();
-      teamData.team = $(element).find("td").eq(1).text().trim();
-      teamData.matches = $(element).find("td").eq(2).text().trim();
-      teamData.wins = $(element).find("td").eq(3).text().trim();
-      teamData.losses = $(element).find("td").eq(4).text().trim();
-      teamData.ties = $(element).find("td").eq(5).text().trim();
-      teamData.noResult = $(element).find("td").eq(6).text().trim();
-      teamData.points = $(element).find("td").eq(7).text().trim();
-      teamData.netRunRate = $(element).find("td").eq(8).text().trim();
+  $(".ds-table tbody tr").each((index, element) => {
+    const teamData = {};
+    const cells = $(element).find("td");
+    console.log(cells);
+    if (cells.length >= 9) {
+      //   teamData.position = cells.eq(0).text().trim();
+      teamData.team = cells.eq(0).text().trim().slice(1);
+      teamData.matches = cells.eq(1).text().trim();
+      teamData.wins = cells.eq(2).text().trim();
+      teamData.losses = cells.eq(3).text().trim();
+      teamData.ties = cells.eq(4).text().trim();
+      teamData.noResult = cells.eq(5).text().trim();
+      teamData.points = cells.eq(6).text().trim();
+      teamData.netRunRate = cells.eq(7).text().trim();
+      teamData.seriesForm = cells.eq(8).text().trim();
 
       data.push(teamData);
-    });
+    }
+  });
 
-    return data;
-  }
-  return [];
+  return data;
 }
 
 // Define the route
