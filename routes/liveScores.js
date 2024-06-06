@@ -15,40 +15,57 @@ router.get("/", async (req, res) => {
 
     const matches = [];
 
-    $(".cb-mtch-lst .cb-schdl").each((index, element) => {
-      const title = $(element).find("h3 a").text().trim();
-      const matchDetails = $(element)
+    $(".cb-mtch-lst.cb-col.cb-col-100.cb-tms-itm").each((index, element) => {
+      const match = {};
+
+      // Basic match details
+      const titleElement = $(element).find("h3 a");
+      match.title = titleElement.text().trim();
+      match.matchDetails = $(element)
         .find("span.text-gray")
         .first()
         .text()
         .trim();
-      const time = $(element).find("span.ng-binding").text().trim();
-      const location = $(element).find(".text-gray").last().text().trim();
-      const playingTeam = $(element)
-        .find(" .cb-hmscg-bat-txt .cb-ovr-flo ")
-        .eq(0)
-        .text()
-        .trim();
-      const liveScore = $(element)
-        .find(" .cb-hmscg-bat-txt .cb-ovr-flo ")
-        .eq(1)
-        .text()
-        .trim();
-      const liveCommentary = $(element).find(".cb-text-live").text().trim();
-      const liveScoreLink = $(element).find("a.cb-lv-scrs-well").attr("href");
 
-      matches.push({
-        title,
-        matchDetails,
-        time,
-        location,
-        playingTeam,
-        liveScore,
-        liveCommentary,
-        liveScoreLink: liveScoreLink
-          ? `https://www.cricbuzz.com${liveScoreLink}`
-          : null, // Construct full URL if relative
-      });
+      const dateElement = $(element).find("span.ng-binding");
+      match.time = dateElement.text().trim();
+
+      const locationElement = $(element).find(".text-gray").last();
+      match.location = locationElement.text().trim();
+
+      // Additional match details (team scores and live commentary)
+      const liveDetailsElement = $(element).find(".cb-lv-scrs-well");
+      match.playingTeam = liveDetailsElement
+        .find(".cb-hmscg-bat-txt .cb-ovr-flo")
+        .first()
+        .text()
+        .trim();
+      match.liveScore = liveDetailsElement
+        .find(".cb-hmscg-bat-txt .cb-ovr-flo")
+        .last()
+        .text()
+        .trim();
+      match.liveCommentary = liveDetailsElement
+        .find(".cb-text-live")
+        .text()
+        .trim();
+
+      // Links to detailed pages
+      match.liveScoreLink = liveDetailsElement.attr("href")
+        ? `https://www.cricbuzz.com${liveDetailsElement.attr("href")}`
+        : null;
+
+      // Links to additional pages (e.g., scorecard, commentary, news)
+      match.links = {};
+      $(element)
+        .find("nav.cb-col-100.cb-col.padt5 a")
+        .each((i, linkElement) => {
+          const title = $(linkElement).attr("title");
+          const href = $(linkElement).attr("href");
+          match.links[title] = href ? `https://www.cricbuzz.com${href}` : null;
+        });
+
+      matches.push(match);
     });
 
     // Send the scraped data as a JSON response
