@@ -20,39 +20,47 @@ router.get("/", async (req, res) => {
 
       // Basic match details
       const titleElement = $(element).find("h3 a");
-      match.title = titleElement.text().trim();
-      match.matchDetails = $(element)
-        .find("span.text-gray")
-        .first()
-        .text()
-        .trim();
+      match.title = titleElement.text().trim() || "N/A";
 
-      const dateElement = $(element).find("span.ng-binding");
-      match.time = dateElement.text().trim();
+      match.matchDetails =
+        $(element).find("span.text-gray").first().text().trim() || "N/A";
+
+      // Time extraction with error handling
+      const timeElement = $(element).find("span.ng-binding").first();
+      match.time = timeElement.length ? timeElement.text().trim() : "N/A";
+
+      // Heading extraction with error handling
+      const headingElement = $(element)
+        .closest(".cb-plyr-tbody.cb-rank-hdr.cb-lv-main")
+        .find("h2.cb-lv-grn-strip.text-bold.cb-lv-scr-mtch-hdr a");
+      match.heading = headingElement.length
+        ? headingElement.text().trim()
+        : "N/A";
 
       const locationElement = $(element).find(".text-gray").last();
-      match.location = locationElement.text().trim();
+      match.location = locationElement.text().trim() || "N/A";
 
       // Additional match details (team scores and live commentary)
       const liveDetailsElement = $(element).find(".cb-lv-scrs-well");
-      match.playingTeam = liveDetailsElement
-        .find(".cb-hmscg-bat-txt .cb-ovr-flo")
-        .first()
-        .text()
-        .trim();
-      match.liveScore = liveDetailsElement
-        .find(".cb-hmscg-bat-txt .cb-ovr-flo")
-        .last()
-        .text()
-        .trim();
-      match.liveCommentary = liveDetailsElement
-        .find(".cb-text-live")
-        .text()
-        .trim();
+      match.playingTeam =
+        liveDetailsElement
+          .find(".cb-hmscg-bat-txt .cb-ovr-flo")
+          .first()
+          .text()
+          .trim() || "N/A";
+      match.liveScore =
+        liveDetailsElement
+          .find(".cb-hmscg-bat-txt .cb-ovr-flo")
+          .last()
+          .text()
+          .trim() || "N/A";
+      match.liveCommentary =
+        liveDetailsElement.find(".cb-text-live").text().trim() || "N/A";
 
       // Links to detailed pages
-      match.liveScoreLink = liveDetailsElement.attr("href")
-        ? `https://www.cricbuzz.com${liveDetailsElement.attr("href")}`
+      const liveScoreLinkElement = liveDetailsElement.attr("href");
+      match.liveScoreLink = liveScoreLinkElement
+        ? `https://www.cricbuzz.com${liveScoreLinkElement}`
         : null;
 
       // Links to additional pages (e.g., scorecard, commentary, news)
@@ -71,7 +79,7 @@ router.get("/", async (req, res) => {
     // Send the scraped data as a JSON response
     res.json(matches);
   } catch (error) {
-    console.error("Error fetching the webpage:", error);
+    console.error("Error fetching the webpage:", error.message);
     res.status(500).send("Error fetching the webpage");
   }
 });
