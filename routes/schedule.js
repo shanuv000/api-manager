@@ -29,8 +29,8 @@ async function scrapeData() {
 
   $(".ds-table tbody tr").each((index, element) => {
     const teamData = {};
+
     const cells = $(element).find("td");
-    console.log(cells);
     if (cells.length >= 9) {
       //   teamData.position = cells.eq(0).text().trim();
       teamData.team = cells.eq(0).text().trim().slice(1);
@@ -42,14 +42,17 @@ async function scrapeData() {
       teamData.points = cells.eq(6).text().trim();
       teamData.netRunRate = cells.eq(7).text().trim();
       teamData.seriesForm = cells.eq(8).text().trim();
+      teamData.nextMatch = cells.eq(9).text().trim();
+      teamData.for = cells.eq(10).text().trim();
+      teamData.against = cells.eq(11).text().trim();
 
       data.push(teamData);
     }
   });
 
+  console.log(data);
   return data;
 }
-
 // Define the route
 router.get("/", async (req, res) => {
   try {
