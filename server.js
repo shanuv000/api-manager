@@ -4,7 +4,7 @@ const helmet = require("helmet");
 
 const app = express();
 const allowedOrigins = [
-  "https://onlyblog.vercel.app/",
+  "https://onlyblog.vercel.app",
   // "https://your-frontend-domain2.com",
 ];
 
