@@ -62,13 +62,13 @@ router.get("/live-scores", async (req, res) => {
         const liveDetailsElement = $(element).find(".cb-lv-scrs-well");
         match.playingTeamBat =
           liveDetailsElement
-            .find(".cb-hmscg-bat-txt .cb-ovr-flo")
+            .find(".cb-hmscg-bat-txt .cb-hmscg-tm-nm")
             .first()
             .text()
             .trim() || "N/A";
         match.playingTeamBall =
           liveDetailsElement
-            .find(".cb-ovr-flo .cb-hmscg-tm-nm")
+            .find(".cb-hmscg-bwl-txt .cb-hmscg-tm-nm")
             .first()
             .text()
             .trim() || "N/A";
