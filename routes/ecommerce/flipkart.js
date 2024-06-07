@@ -14,6 +14,13 @@ router.post("/flipkart", async (req, res) => {
     const defaultUrl =
       "https://www.flipkart.com/noise-loop-1-85-display-advanced-bluetooth-calling-550-nits-brightness-smartwatch/p/itmac8486a914a48?pid=SMWGG6GFSWZDVG57&lid=LSTSMWGG6GFSWZDVG57BZK6VC&marketplace=FLIPKART&store=ajy%2Fbuh&srno=b_1_6&otracker=browse&fm=organic&iid=baa1d91d-8f76-4f71-acac-a787e4c286db.SMWGG6GFSWZDVG57.SEARCH&ppt=browse&ppn=browse&ssid=gszrcdn0g00000001717749581727";
     const url = req.body.url || defaultUrl;
+
+    if (!url.startsWith("https://www.flipkart.com/")) {
+      return res
+        .status(400)
+        .send("Invalid URL. Please provide a valid Flipkart URL.");
+    }
+
     const { data } = await axios.get(url);
     const $ = cheerio.load(data);
 
@@ -26,6 +33,12 @@ router.post("/flipkart", async (req, res) => {
     const originalPrice = $(".yRaY8j .A6+E6v").first().text();
     const discount = $(".UkUFwK.WW8yVX span").text();
     const specialPrice = $("div._2lX4N0 span").text();
+
+    if (!productName) {
+      throw new Error(
+        "Failed to extract product details. The structure of the page might have changed."
+      );
+    }
 
     // Extracting images
     const images = [];
@@ -45,16 +58,21 @@ router.post("/flipkart", async (req, res) => {
       images,
     });
   } catch (error) {
-    res.status(500).send("Error occurred while scraping");
+    if (error.response) {
+      res
+        .status(error.response.status)
+        .send(`Error occurred while fetching the page: ${error.message}`);
+    } else if (error.request) {
+      res
+        .status(500)
+        .send(
+          "No response received from Flipkart. Please check your network connection."
+        );
+    } else {
+      res.status(500).send(`Error occurred while scraping: ${error.message}`);
+    }
   }
 });
 
 // Use the router
 module.exports = router;
-
-// app.use("/api", router);
-
-// const PORT = process.env.PORT || 5000;
-// app.listen(PORT, () => {
-//   console.log(`Server is running on port ${PORT}`);
-// });
