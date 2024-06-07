@@ -6,7 +6,7 @@ const app = express();
 const router = express.Router();
 
 // Middleware to parse JSON bodies
-app.use(express.json());
+// app.use(express.json());
 
 // Route to scrape data
 router.post("/flipkart", async (req, res) => {
