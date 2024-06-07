@@ -4,20 +4,21 @@ const cors = require("cors");
 const app = express();
 
 app.use(cors());
-app.use(express.json()); // Add this line
+app.use(express.json());
 
 const PORT = process.env.PORT || 5000;
 
 // Import routes
-const liveScoresRoute = require("./routes/liveScores");
-const t20WorldCupRoute = require("./routes/t20Worldcup");
+const liveScoresRoute = require("./routes/Cricket/liveScores");
+const t20WorldCupRoute = require("./routes/Cricket/t20Worldcup");
 const studentRoute = require("./routes/students");
-const ScheduleRoute = require("./routes/schedule");
-
+const ScheduleRoute = require("./routes/Cricket/schedule");
+const FlipkartRoute = require("./routes/ecommerce/flipkart");
 // Use routes
 app.use("/api/cricket", liveScoresRoute);
 app.use("/api/cricket", ScheduleRoute);
 app.use("/api/cricket", t20WorldCupRoute);
+app.use("/api/buy", FlipkartRoute);
 app.use("/api/students", studentRoute);
 
 // Error handling middleware
