@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 
 const app = express();
 const allowedOrigins = [
@@ -28,7 +29,12 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json()); // Middleware to parse JSON bodies
 app.use(helmet()); // Helmet for security headers
-
+const limiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 60, // limit each IP to 60 requests per windowMs
+  message: "Too many requests from this IP, please try again after a minute",
+});
+app.use(limiter);
 const PORT = process.env.PORT || 5000;
 
 // Import routes
