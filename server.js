@@ -8,8 +8,8 @@ const app = express();
 // List of allowed origins for CORS
 const allowedOrigins = [
   "https://onlyblog.vercel.app",
-  "http://localhost:3000/",
-  "http://localhost:4000/",
+  "http://localhost:3000",
+  "http://localhost:4000",
   // "https://your-frontend-domain2.com",
 ];
 
