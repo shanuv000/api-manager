@@ -32,7 +32,15 @@ router.get("/live-scores", async (req, res) => {
 
       // Time extraction with error handling
       try {
-        const timeElement = $(element).find("span.ng-binding").first();
+        const timeElement = $(element)
+          .find("span.ng-binding")
+          .filter(function () {
+            return $(this)
+              .text()
+              .trim()
+              .match(/^\d{1,2}:\d{2} [AP]M$/);
+          })
+          .first();
         match.time = timeElement.length ? timeElement.text().trim() : "N/A";
       } catch (err) {
         match.time = "N/A";
@@ -97,7 +105,9 @@ router.get("/live-scores", async (req, res) => {
 
       // Links to detailed pages
       try {
-        const liveScoreLinkElement = liveDetailsElement.attr("href");
+        const liveScoreLinkElement = $(element)
+          .find(".cb-lv-scrs-well")
+          .attr("href");
         match.liveScoreLink = liveScoreLinkElement
           ? `https://www.cricbuzz.com${liveScoreLinkElement}`
           : null;
