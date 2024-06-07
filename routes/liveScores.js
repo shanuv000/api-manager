@@ -87,6 +87,7 @@ router.get("/", async (req, res) => {
         match.liveCommentary =
           liveDetailsElement.find(".cb-text-live").text().trim() ||
           liveDetailsElement.find(".cb-text-complete").text().trim() ||
+          liveDetailsElement.find(".cb-text-preview").text().trim() ||
           "N/A";
       } catch (err) {
         match.playingTeam = "N/A";
