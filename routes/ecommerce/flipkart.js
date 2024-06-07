@@ -2,11 +2,7 @@ const express = require("express");
 const cheerio = require("cheerio");
 const axios = require("axios");
 
-const app = express();
 const router = express.Router();
-
-// Middleware to parse JSON bodies
-// app.use(express.json());
 
 // Route to scrape data
 router.post("/flipkart", async (req, res) => {
@@ -74,5 +70,4 @@ router.post("/flipkart", async (req, res) => {
   }
 });
 
-// Use the router
 module.exports = router;
