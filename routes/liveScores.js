@@ -7,7 +7,7 @@ const router = express.Router();
 // URL of the website you want to scrape
 const url = "https://www.cricbuzz.com/cricket-match/live-scores"; // Replace with the actual URL
 
-router.get("/", async (req, res) => {
+router.get("/live-scores", async (req, res) => {
   try {
     const response = await axios.get(url);
     const html = response.data;

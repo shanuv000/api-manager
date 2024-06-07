@@ -58,7 +58,7 @@ const t20WorldCup2024 = {
   },
 };
 
-router.get("/", (req, res) => {
+router.get("/t20-world-cup-2024", (req, res) => {
   try {
     console.log("Fetching T20 World Cup data");
     res.json(t20WorldCup2024);

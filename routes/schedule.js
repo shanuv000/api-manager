@@ -55,7 +55,7 @@ async function scrapeData() {
   }
 }
 
-router.get("/", async (req, res) => {
+router.get("/schedule", async (req, res) => {
   try {
     const data = await scrapeData();
 
