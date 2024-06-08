@@ -16,7 +16,7 @@ const fetchScores = async () => {
   regularMatchElements.each((index, element) => {
     try {
       const teams = $(element).find("div.ci-team-score");
-      if (teams.length !== 2) {
+      if (teams.length < 2) {
         return;
       }
 
@@ -46,17 +46,42 @@ const fetchScores = async () => {
       );
       const headingOfMatchStatus = headingElement.text() || "N/A";
 
+      // Extracting the commentary
+      const commentaryElement = $(element).find(
+        "p.ds-text-tight-s.ds-font-medium.ds-truncate.ds-text-typo span"
+      );
+      const commentary = commentaryElement.text() || "N/A";
+
+      // Extracting the time and place
+      const timeAndPlaceElement = $(element).find(
+        "div.ds-text-tight-xs.ds-truncate.ds-text-typo-mid3"
+      );
+      const timeAndPlace = timeAndPlaceElement.text().trim() || "N/A";
+
+      // Extracting the overs and wickets for team1
+      const team1AdditionalInfoElement = team1Data.find(
+        "div.ds-text-compact-s.ds-text-typo.ds-text-right.ds-whitespace-nowrap"
+      );
+
+      const oversAndWickets =
+        team1AdditionalInfoElement.find("span").text() || "N/A";
+      const team1AdditionalScore =
+        team1AdditionalInfoElement.find("strong").text() || "N/A";
+
       matches.push({
         team1: team1Name,
         team1_score: team1Score,
+        team1_overs_and_wickets: oversAndWickets, // Extracted overs and wickets for team1
+        team1_additional_score: team1AdditionalScore, // Extracted additional score for team1
         team2: team2Name,
         team2_score: team2Score,
         result: result,
-        condition: "Regular Match",
         heading_of_match_status: headingOfMatchStatus, // Added heading of match status
+        commentary: commentary, // Added commentary
+        time_and_place: timeAndPlace, // Added time and place
       });
     } catch (error) {
-      console.error(error);
+      console.error("Error parsing match element:", error);
     }
   });
 
