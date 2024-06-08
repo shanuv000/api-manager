@@ -13,7 +13,6 @@ const allowedOrigins = [
   "https://onlyblog.vercel.app",
   "http://localhost:3000",
   "http://localhost:4000",
-  // "https://your-frontend-domain2.com",
 ];
 
 // CORS configuration
@@ -46,7 +45,7 @@ app.use(helmet());
 // Rate limiting middleware
 const limiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
-  max: 10, // Limit each IP to 10 requests per windowMs
+  max: 30, // Limit each IP to 10 requests per windowMs
   message: "Too many requests from this IP, please try again after a minute", // Custom message for rate limiting
 });
 app.use(limiter);
