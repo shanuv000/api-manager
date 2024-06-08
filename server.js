@@ -5,8 +5,8 @@ const rateLimit = require("express-rate-limit");
 
 const app = express();
 
-// Set trust proxy to true to trust the 'X-Forwarded-For' header
-app.set("trust proxy", true);
+// Set trust proxy to 1 to trust the first proxy (like Vercel)
+app.set("trust proxy", 1);
 
 // List of allowed origins for CORS
 const allowedOrigins = [
