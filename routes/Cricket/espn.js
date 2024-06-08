@@ -6,7 +6,9 @@ const router = express.Router();
 
 const fetchScores = async () => {
   const url = "https://www.espncricinfo.com/live-cricket-score";
-  const { data } = await axios.get(url);
+  const url2 =
+    "https://www.espncricinfo.com/live-cricket-score?quick_class_id=intl";
+  const { data } = await axios.get(url2);
   const $ = cheerio.load(data);
 
   const matches = [];
