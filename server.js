@@ -59,11 +59,13 @@ const t20WorldCupRoute = require("./routes/Cricket/t20Worldcup");
 const studentRoute = require("./routes/students");
 const ScheduleRoute = require("./routes/Cricket/schedule");
 const FlipkartRoute = require("./routes/ecommerce/flipkart");
+const EspnRoute = require("./routes/Cricket/espn");
 
 // Use routes
 app.use("/api/cricket", liveScoresRoute);
 app.use("/api/cricket", ScheduleRoute);
 app.use("/api/cricket", t20WorldCupRoute);
+app.use("/api/cricket", EspnRoute);
 app.use("/api/buy", FlipkartRoute);
 app.use("/api/students", studentRoute);
 
