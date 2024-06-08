@@ -10,5 +10,6 @@
       "use": "@vercel/node"
     }
   ],
-  "routes": [{ "src": "/api/(.*)", "dest": "/server.js" }]
+  "routes": [{ "src": "/api/(.*)", "dest": "/server.js" }],
+  "regions": ["iad1", "sfo1", "fra1"]
 }
