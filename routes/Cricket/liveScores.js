@@ -1,22 +1,20 @@
 const express = require("express");
 const axios = require("axios");
 const cheerio = require("cheerio");
-const cron = require("node-cron");
 
 const router = express.Router();
 
 // URL of the website you want to scrape
-const url = "https://www.cricbuzz.com/cricket-match/live-scores"; // Replace with the actual URL
+const url = "https://www.cricbuzz.com/cricket-match/live-scores";
 
 // Variable to store the fetched matches data
 let matches = [];
 
 // Function to fetch and update matches data
-// let i = 0;
 const fetchMatchesData = async () => {
   try {
     console.log(`Fetching data at ${new Date().toISOString()}`);
-    // console.log(i++);
+
     const response = await axios.get(url);
     const html = response.data;
     const $ = cheerio.load(html);
@@ -29,10 +27,10 @@ const fetchMatchesData = async () => {
       try {
         const titleElement = $(element).find("h3 a");
         match.title = titleElement.text().trim() || "N/A";
-
         match.matchDetails =
           $(element).find("span.text-gray").first().text().trim() || "N/A";
       } catch (err) {
+        console.error("Error parsing title or match details:", err.message);
         match.title = "N/A";
         match.matchDetails = "N/A";
       }
@@ -49,6 +47,7 @@ const fetchMatchesData = async () => {
           .first();
         match.time = timeElement.length ? timeElement.text().trim() : "N/A";
       } catch (err) {
+        console.error("Error parsing time:", err.message);
         match.time = "N/A";
       }
 
@@ -60,6 +59,7 @@ const fetchMatchesData = async () => {
           ? headingElement.text().trim()
           : "N/A";
       } catch (err) {
+        console.error("Error parsing heading:", err.message);
         match.heading = "N/A";
       }
 
@@ -67,6 +67,7 @@ const fetchMatchesData = async () => {
         const locationElement = $(element).find(".text-gray").last();
         match.location = locationElement.text().trim() || "N/A";
       } catch (err) {
+        console.error("Error parsing location:", err.message);
         match.location = "N/A";
       }
 
@@ -102,8 +103,11 @@ const fetchMatchesData = async () => {
           liveDetailsElement.find(".cb-text-preview").text().trim() ||
           "N/A";
       } catch (err) {
-        match.playingTeam = "N/A";
-        match.liveScore = "N/A";
+        console.error("Error parsing live details:", err.message);
+        match.playingTeamBat = "N/A";
+        match.playingTeamBall = "N/A";
+        match.liveScorebat = "N/A";
+        match.liveScoreball = "N/A";
         match.liveCommentary = "N/A";
       }
 
@@ -115,6 +119,7 @@ const fetchMatchesData = async () => {
           ? `https://www.cricbuzz.com${liveScoreLinkElement}`
           : null;
       } catch (err) {
+        console.error("Error parsing live score link:", err.message);
         match.liveScoreLink = null;
       }
 
@@ -130,6 +135,7 @@ const fetchMatchesData = async () => {
               : null;
           });
       } catch (err) {
+        console.error("Error parsing links:", err.message);
         match.links = {};
       }
 
@@ -137,13 +143,11 @@ const fetchMatchesData = async () => {
     });
 
     matches = updatedMatches;
+    console.log("Data fetch successful:", matches);
   } catch (error) {
     console.error("Error fetching the webpage:", error.message);
   }
 };
-
-// Schedule the fetchMatchesData function to run every minute
-cron.schedule("* * * * *", fetchMatchesData);
 
 // Initial fetch to populate data
 fetchMatchesData();
