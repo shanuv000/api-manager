@@ -21,14 +21,14 @@ router.post("/flipkart", async (req, res) => {
     const $ = cheerio.load(data);
 
     // Extracting the required data
-    const productName = $("h1._6EBuvT span.VU-ZEz").text();
-    const productRating = $(".XQDdHH").text();
-    const ratingsCount = $(".Wphh3N span span:first-child").text();
-    const reviewsCount = $(".Wphh3N span span:nth-child(3)").text();
-    const price = $(".Nx9bqj.CxhGGd").text();
-    const originalPrice = $(".yRaY8j .A6+E6v").first().text();
-    const discount = $(".UkUFwK.WW8yVX span").text();
-    const specialPrice = $("div._2lX4N0 span").text();
+    const productName = $("h1._6EBuvT span.VU-ZEz").text().trim();
+    const productRating = $(".XQDdHH").text().trim();
+    const ratingsCount = $(".Wphh3N span span:first-child").text().trim();
+    const reviewsCount = $(".Wphh3N span span:nth-child(3)").text().trim();
+    const price = $(".Nx9bqj.CxhGGd").text().trim();
+    const originalPrice = $(".yRaY8j.A6+E6v").first().text().trim();
+    const discount = $(".UkUFwK.WW8yVX span").text().trim();
+    const specialPrice = $("div._2lX4N0 span").text().trim();
 
     if (!productName) {
       throw new Error(
