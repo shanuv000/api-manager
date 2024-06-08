@@ -71,7 +71,7 @@ const fetchMatchesData = async () => {
       }
 
       try {
-        match.test = i++;
+        // match.test =''
         const liveDetailsElement = $(element).find(".cb-lv-scrs-well");
         match.playingTeamBat =
           liveDetailsElement
