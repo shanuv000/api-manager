@@ -55,6 +55,7 @@ router.post("/flipkart", async (req, res) => {
       images,
     });
   } catch (error) {
+    console.error("Scraping error:", error.message);
     if (error.response) {
       res
         .status(error.response.status)

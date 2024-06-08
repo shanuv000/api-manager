@@ -70,7 +70,9 @@ app.use("/api/students", studentRoute);
 // Error handling middleware
 app.use((err, req, res, next) => {
   // Log the error stack trace
-  console.error(err.stack);
+  console.error("Error stack:", err.stack);
+  // Log the request that caused the error
+  console.error("Request body:", req.body);
   // Respond with a 500 status code and a generic message
   res.status(500).send("Something broke!");
 });
