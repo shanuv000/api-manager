@@ -1,22 +1,6 @@
-const express = require("express");
-const axios = require("axios");
-const cheerio = require("cheerio");
-const cron = require("node-cron");
-
-const router = express.Router();
-
-// URL of the website you want to scrape
-const url = "https://www.cricbuzz.com/cricket-match/live-scores"; // Replace with the actual URL
-
-// Variable to store the fetched matches data
-let matches = [];
-
-// Function to fetch and update matches data
-let i = 0;
 const fetchMatchesData = async () => {
+  console.log(`Fetching data at ${new Date().toISOString()}`);
   try {
-    console.log(`Fetching data at ${new Date().toISOString()}`);
-    console.log(i++);
     const response = await axios.get(url);
     const html = response.data;
     const $ = cheerio.load(html);
@@ -71,7 +55,6 @@ const fetchMatchesData = async () => {
       }
 
       try {
-        match.test = i++;
         const liveDetailsElement = $(element).find(".cb-lv-scrs-well");
         match.playingTeamBat =
           liveDetailsElement
@@ -138,21 +121,11 @@ const fetchMatchesData = async () => {
     });
 
     matches = updatedMatches;
+    console.log(`Data fetched successfully at ${new Date().toISOString()}`);
   } catch (error) {
-    console.error("Error fetching the webpage:", error.message);
+    console.error(
+      `Error fetching the webpage at ${new Date().toISOString()}:`,
+      error.message
+    );
   }
 };
-
-// Schedule the fetchMatchesData function to run every minute
-cron.schedule("* * * * *", fetchMatchesData);
-
-// Initial fetch to populate data
-fetchMatchesData();
-
-// Define a GET route to serve the live scores
-router.get("/live-scores", (req, res) => {
-  res.json(matches);
-});
-
-// Export the router for use in the main app
-module.exports = router;
