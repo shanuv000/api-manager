@@ -12,11 +12,11 @@ const url = "https://www.cricbuzz.com/cricket-match/live-scores"; // Replace wit
 let matches = [];
 
 // Function to fetch and update matches data
-
+// let i = 0;
 const fetchMatchesData = async () => {
   try {
     console.log(`Fetching data at ${new Date().toISOString()}`);
-
+    // console.log(i++);
     const response = await axios.get(url);
     const html = response.data;
     const $ = cheerio.load(html);
