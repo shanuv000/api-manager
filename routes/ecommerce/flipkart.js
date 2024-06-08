@@ -17,7 +17,8 @@ router.post("/flipkart", async (req, res) => {
         .send("Invalid URL. Please provide a valid Flipkart URL.");
     }
 
-    const { data } = await axios.get(url);
+    // Setting a timeout for the axios request to prevent long waits
+    const { data } = await axios.get(url, { timeout: 5000 }); // 5 seconds timeout
     const $ = cheerio.load(data);
 
     // Extracting the required data
