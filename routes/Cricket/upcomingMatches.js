@@ -9,7 +9,7 @@ const url =
   "https://www.cricbuzz.com/cricket-match/live-scores/upcoming-matches"; // Replace with the actual URL
 
 // Define a GET route to scrape live scores
-router.get("/upcoming-scores", async (req, res) => {
+router.get("/upcoming-matches", async (req, res) => {
   try {
     // Fetch the webpage
     const response = await axios.get(url);
