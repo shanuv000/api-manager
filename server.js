@@ -54,6 +54,7 @@ const PORT = process.env.PORT || 5000;
 
 // Import routes
 const liveScoresRoute = require("./routes/Cricket/liveScores");
+const recentMatchesRoute = require("./routes/Cricket/recentMatches");
 const t20WorldCupRoute = require("./routes/Cricket/t20Worldcup");
 const studentRoute = require("./routes/students");
 const ScheduleRoute = require("./routes/Cricket/schedule");
@@ -62,6 +63,7 @@ const EspnRoute = require("./routes/Cricket/espn");
 
 // Use routes
 app.use("/api/cricket", liveScoresRoute);
+app.use("/api/cricket", recentMatchesRoute);
 app.use("/api/cricket", ScheduleRoute);
 app.use("/api/cricket", t20WorldCupRoute);
 app.use("/api/cricket", EspnRoute);
