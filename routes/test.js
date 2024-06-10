@@ -1,17 +1,18 @@
 const express = require("express");
 const axios = require("axios");
 const cheerio = require("cheerio");
+const cron = require("node-cron");
+const nodemailer = require("nodemailer");
 
 const router = express.Router();
 
 // URL of the website you want to scrape
-const url =
-  "https://www.cricbuzz.com/cricket-match/live-scores/upcoming-matches"; // Replace with the actual URL
+const url = "https://www.cricbuzz.com/cricket-match/live-scores";
 
-// Define a GET route to scrape live scores
-router.get("/upcoming-matches", async (req, res) => {
+// Function to fetch and scrape the webpage
+async function fetchLiveScores() {
   try {
-    // Fetch the webpage
+    console.log("Fetching live scores...");
     const response = await axios.get(url);
     const html = response.data;
     const $ = cheerio.load(html); // Load HTML into cheerio
@@ -22,11 +23,9 @@ router.get("/upcoming-matches", async (req, res) => {
     $(".cb-mtch-lst.cb-col.cb-col-100.cb-tms-itm").each((index, element) => {
       const match = {}; // Object to hold individual match details
 
-      // Extract basic match details with error handling
       try {
         const titleElement = $(element).find("h3 a");
         match.title = titleElement.text().trim() || "N/A"; // Match title
-
         match.matchDetails =
           $(element).find("span.text-gray").first().text().trim() || "N/A"; // Match details
       } catch (err) {
@@ -34,24 +33,21 @@ router.get("/upcoming-matches", async (req, res) => {
         match.matchDetails = "N/A";
       }
 
-      // Extract match time with error handling
       try {
-        const spanElements = $(element).find("span");
-        let timeElementText = "N/A";
-
-        spanElements.each((i, span) => {
-          const text = $(span).text().trim();
-          if (text.includes("Today")) {
-            timeElementText = text;
-          }
-        });
-
-        match.time = timeElementText;
+        const timeElement = $(element)
+          .find("span.ng-binding")
+          .filter(function () {
+            return $(this)
+              .text()
+              .trim()
+              .match(/^\d{1,2}:\d{2} [AP]M$/);
+          })
+          .first();
+        match.time = timeElement.length ? timeElement.text().trim() : "N/A"; // Match time
       } catch (err) {
         match.time = "N/A";
       }
 
-      // Extract match heading with error handling
       try {
         const headingElement = $(element)
           .closest(".cb-plyr-tbody.cb-rank-hdr.cb-lv-main")
@@ -63,7 +59,6 @@ router.get("/upcoming-matches", async (req, res) => {
         match.heading = "N/A";
       }
 
-      // Extract match location with error handling
       try {
         const locationElement = $(element).find(".text-gray").last();
         match.location = locationElement.text().trim() || "N/A"; // Match location
@@ -71,7 +66,6 @@ router.get("/upcoming-matches", async (req, res) => {
         match.location = "N/A";
       }
 
-      // Extract additional match details (team scores and live commentary) with error handling
       try {
         const liveDetailsElement = $(element).find(".cb-lv-scrs-well");
         match.playingTeamBat =
@@ -99,17 +93,16 @@ router.get("/upcoming-matches", async (req, res) => {
             .text()
             .trim() || "N/A"; // Bowling team score
         match.liveCommentary =
-          liveDetailsElement.find(".cb-text-live").text().trim() || // Live commentary
+          liveDetailsElement.find(".cb-text-live").text().trim() ||
           liveDetailsElement.find(".cb-text-complete").text().trim() ||
           liveDetailsElement.find(".cb-text-preview").text().trim() ||
-          "N/A";
+          "N/A"; // Live commentary
       } catch (err) {
         match.playingTeam = "N/A";
         match.liveScore = "N/A";
         match.liveCommentary = "N/A";
       }
 
-      // Extract link to the detailed live score page with error handling
       try {
         const liveScoreLinkElement = $(element)
           .find(".cb-lv-scrs-well")
@@ -121,7 +114,6 @@ router.get("/upcoming-matches", async (req, res) => {
         match.liveScoreLink = null;
       }
 
-      // Extract links to additional pages (e.g., scorecard, commentary, news) with error handling
       match.links = {};
       try {
         $(element)
@@ -141,12 +133,79 @@ router.get("/upcoming-matches", async (req, res) => {
       matches.push(match);
     });
 
-    // Send the scraped data as a JSON response
-    res.json(matches);
+    console.log("Scraped matches:", JSON.stringify(matches, null, 2)); // Debug log
+    return matches;
   } catch (error) {
-    // Handle errors in fetching the webpage or processing the HTML
     console.error("Error fetching the webpage:", error.message);
-    res.status(500).json({ error: "Error fetching the webpage" });
+    throw new Error("Error fetching the webpage");
+  }
+}
+
+// Variable to store the latest scraped data
+let latestMatches = [];
+
+// Schedule the scraping function to run every minute
+cron.schedule("* * * * *", async () => {
+  try {
+    latestMatches = await fetchLiveScores();
+    console.log("Successfully updated live scores");
+  } catch (error) {
+    console.error("Error updating live scores:", error.message);
+  }
+});
+
+// Function to send email
+async function sendEmail(matches) {
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: "crashxxxbyte@gmail.com", // Your email
+      pass: "cRaHoUtagERa", // Your email password or an app-specific password
+    },
+  });
+
+  const mailOptions = {
+    from: "crashxxxbyte@gmail.com",
+    to: "shanuvatika@gmail.com.com",
+    subject: "Live Cricket Scores",
+    text: JSON.stringify(matches, null, 2), // Format matches as a JSON string
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log("Email sent successfully");
+  } catch (error) {
+    console.error("Error sending email:", error.message);
+  }
+}
+
+// Schedule email sending every minute
+cron.schedule("* * * * *", async () => {
+  try {
+    console.log("Sending email with latest live scores...");
+    await sendEmail(latestMatches);
+  } catch (error) {
+    console.error("Error in scheduled email sending:", error.message);
+  }
+});
+
+// Define a GET route to return the latest live scores
+router.get("/", async (req, res) => {
+  if (latestMatches.length === 0) {
+    console.log(
+      "No live scores available from cron job, fetching immediately..."
+    );
+    try {
+      latestMatches = await fetchLiveScores();
+      res.json(latestMatches);
+    } catch (error) {
+      console.error("Error fetching live scores immediately:", error.message);
+      res
+        .status(503)
+        .json({ error: "Live scores not available. Please try again later." });
+    }
+  } else {
+    res.json(latestMatches);
   }
 });
 
