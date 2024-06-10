@@ -59,19 +59,23 @@ const upcomingMatchRoute = require("./routes/Cricket/upcomingMatches");
 const t20WorldCupRoute = require("./routes/Cricket/t20Worldcup");
 const studentRoute = require("./routes/students");
 const ScheduleRoute = require("./routes/Cricket/schedule");
+const ScheduleRoute2 = require("./routes/Cricket/schedulev2");
 const FlipkartRoute = require("./routes/ecommerce/flipkart");
 const EspnRoute = require("./routes/Cricket/espn");
 const TestRoute = require("./routes/test");
+const Test2Route = require("./routes/test2");
 // Use routes
 app.use("/api/cricket", liveScoresRoute);
 app.use("/api/cricket", recentMatchesRoute);
 app.use("/api/cricket", upcomingMatchRoute);
 app.use("/api/cricket", ScheduleRoute);
+app.use("/api/cricket", ScheduleRoute2);
 app.use("/api/cricket", t20WorldCupRoute);
 app.use("/api/cricket", EspnRoute);
 app.use("/api/buy", FlipkartRoute);
 app.use("/api/students", studentRoute);
 app.use("/api/test", TestRoute);
+app.use("/api/test2", Test2Route);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
