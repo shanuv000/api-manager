@@ -14,7 +14,7 @@ router.get("/schedule2", async (req, res) => {
     const { data } = await axios.get(url);
     const $ = cheerio.load(data);
 
-    const pointsTable = [];
+    const pointsTable = [{ success: true }];
     let groupName = "";
 
     // Find each points table group
