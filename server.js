@@ -66,8 +66,8 @@ const TestRoute = require("./routes/test");
 // const Test2Route = require("./routes/test2");
 // Use routes
 app.use("/api/cricket", liveScoresRoute);
-app.use("/api/cricket", recentMatchesRoute);
-app.use("/api/cricket", upcomingMatchRoute);
+// app.use("/api/cricket", recentMatchesRoute);
+// app.use("/api/cricket", upcomingMatchRoute);
 app.use("/api/cricket", ScheduleRoute);
 // app.use("/api/cricket", ScheduleRoute2);
 app.use("/api/cricket", t20WorldCupRoute);
