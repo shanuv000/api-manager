@@ -1,6 +1,6 @@
 function generateEmailTemplate(matches) {
   let emailContent = `
-    <div style="font-family: Arial, sans-serif; color: #333; padding: 10px;">
+    <div style="font-family: Arial, sans-serif; color: #333; padding: 10px; text-align: center;">
       <h1 style="color: #4CAF50; text-align: center; background-color: #f1f1f1; padding: 20px; border-radius: 10px;">Live Cricket Scores</h1>
       <ul style="list-style-type: none; padding: 0; margin: 20px 0;">
   `;
@@ -15,7 +15,7 @@ function generateEmailTemplate(matches) {
         <p><strong>Teams:</strong> ${match.playingTeamBat} vs ${match.playingTeamBall}</p>
         <br/>
         <h1 style="color: #FF5722; text-align: center; font-size: 24px; margin: 20px 0;">Live Score</h1>
-        <h2 style="color: #4CAF50; text-align: center; font-size: 20px;">${match.playingTeamBat}: ${match.liveScorebat}, ${match.playingTeamBall}: ${match.liveScoreball}</h2>
+        <h2 style="color: #4CAF50; text-align: center; font-size: 30px;">${match.playingTeamBat}: ${match.liveScorebat}, ${match.playingTeamBall}: ${match.liveScoreball}</h2>
         <p><strong>Commentary:</strong> ${match.liveCommentary}</p>
         <div style="margin-top: 20px; text-align: center;">
           <a href="${match.links["Live Score"]}" style="text-decoration: none; color: #fff; background-color: #4CAF50; padding: 10px 15px; border-radius: 5px; display: inline-block; margin: 5px 0;">Live Score</a>
