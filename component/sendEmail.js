@@ -14,7 +14,7 @@ async function sendEmail(matches) {
   const mailOptions = {
     from: process.env.GMAIL_USER,
     to: "crashxxxbyte@gmail.com",
-    subject: "Live Cricket Scores",
+    subject: `Live Cricket Scores by Vaibhav`,
     html: generateEmailTemplate(matches), // Use HTML template
   };
 
