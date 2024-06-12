@@ -25,7 +25,7 @@ router.get("/", async (req, res) => {
       await sendEmail(filteredMatches);
       res.status(200).json({ message: "Email sent successfully" });
     } else {
-      res.status(202).json({ message: "No Indian match is live" });
+      res.status(204).json({ message: "No Indian match is live" });
     }
   } catch (error) {
     console.error("Error in route handler:", error.message); // Logging errors
