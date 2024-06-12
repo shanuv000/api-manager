@@ -159,14 +159,14 @@ async function sendEmail(matches) {
   const transporter = nodemailer.createTransport({
     service: "gmail",
     auth: {
-      user: "crashxxxbyte@gmail.com", // Your email
-      pass: "cRaHoUtagERa", // Your email password or an app-specific password
+      user: "shanuvatika@gmail.com", // Your email
+      pass: "nnmfayrshqakttoi", // Your  an app-specific password
     },
   });
 
   const mailOptions = {
-    from: "crashxxxbyte@gmail.com",
-    to: "shanuvatika@gmail.com.com",
+    from: "shanuvatika@gmail.com",
+    to: "crashxxxbyte@gmail.com",
     subject: "Live Cricket Scores",
     text: JSON.stringify(matches, null, 2), // Format matches as a JSON string
   };
