@@ -13,7 +13,7 @@ async function sendEmail(matches) {
 
   const mailOptions = {
     from: process.env.GMAIL_USER,
-    to: "ai79g@navalcadets.com",
+    to: "crashxxxbyte@gmail.com",
     subject: "Live Cricket Scores",
     html: generateEmailTemplate(matches), // Use HTML template
   };
