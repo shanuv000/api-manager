@@ -62,10 +62,10 @@ const ScheduleRoute = require("./routes/Cricket/schedule");
 // const ScheduleRoute2 = require("./routes/Cricket/schedulev2");
 const FlipkartRoute = require("./routes/ecommerce/flipkart");
 const EspnRoute = require("./routes/Cricket/espn");
-const TestRoute = require("./routes/test");
+const TestRoute = require("./routes/sendLiveScore");
 // const Test2Route = require("./routes/test2");
 // Use routes
-app.use("/api/cricket", liveScoresRoute);
+app.use("/api/cricket", liveScoresRoute.router);
 // app.use("/api/cricket", recentMatchesRoute);
 // app.use("/api/cricket", upcomingMatchRoute);
 app.use("/api/cricket", ScheduleRoute);

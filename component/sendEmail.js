@@ -1,5 +1,6 @@
 require("dotenv").config();
 const nodemailer = require("nodemailer");
+const generateEmailTemplate = require("./emailTemplates/live"); // Correct path
 
 async function sendEmail(matches) {
   const transporter = nodemailer.createTransport({
@@ -12,9 +13,9 @@ async function sendEmail(matches) {
 
   const mailOptions = {
     from: process.env.GMAIL_USER,
-    to: "crashxxxbyte@gmail.com",
+    to: "ai79g@navalcadets.com",
     subject: "Live Cricket Scores",
-    text: JSON.stringify(matches, null, 2), // Format matches as a JSON string
+    html: generateEmailTemplate(matches), // Use HTML template
   };
 
   try {

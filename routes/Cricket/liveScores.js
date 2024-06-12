@@ -110,7 +110,7 @@ const extractMatchInfo = ($, element) => {
 };
 
 // Function to handle scraping
-const scrapeMatches = async (url, res) => {
+const scrapeMatches = async (url) => {
   try {
     const response = await axios.get(url);
     const html = response.data;
@@ -122,21 +122,43 @@ const scrapeMatches = async (url, res) => {
       matches.push(match);
     });
 
-    res.json(matches);
+    return matches;
   } catch (error) {
     console.error("Error fetching the webpage:", error.message);
-    res.status(500).json({ error: "Error fetching the webpage" });
+    throw new Error("Error fetching the webpage");
   }
 };
 
 // Define routes
-router.get("/recent-scores", (req, res) =>
-  scrapeMatches(urls.recentMatches, res)
-);
-router.get("/live-scores", (req, res) => scrapeMatches(urls.liveScores, res));
-router.get("/upcoming-matches", (req, res) =>
-  scrapeMatches(urls.upcomingMatches, res)
-);
+router.get("/recent-scores", async (req, res) => {
+  try {
+    const matches = await scrapeMatches(urls.recentMatches);
+    res.json(matches);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get("/live-scores", async (req, res) => {
+  try {
+    const matches = await scrapeMatches(urls.liveScores);
+    res.json(matches);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get("/upcoming-matches", async (req, res) => {
+  try {
+    const matches = await scrapeMatches(urls.upcomingMatches);
+    res.json(matches);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // Export the router for use in the main app
-module.exports = router;
+module.exports = {
+  router,
+  scrapeMatches,
+};
