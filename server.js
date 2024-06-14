@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
+const path = require("path"); // Correctly require the path module
 
 const app = express();
 
@@ -45,10 +46,18 @@ app.use(helmet());
 // Rate limiting middleware
 const limiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
-  max: 30, // Limit each IP to 10 requests per windowMs
+  max: 30, // Limit each IP to 30 requests per windowMs
   message: "Too many requests from this IP, please try again after a minute", // Custom message for rate limiting
 });
 app.use(limiter);
+
+// Serve static files from the "public" directory
+app.use(express.static(path.join(__dirname, "public")));
+
+// Serve the HTML file at the root URL
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
 
 const PORT = process.env.PORT || 5000;
 
@@ -58,24 +67,25 @@ const liveScoresRoute = require("./routes/Cricket/liveScores");
 // const upcomingMatchRoute = require("./routes/Cricket/upcomingMatches");
 const t20WorldCupRoute = require("./routes/Cricket/t20Worldcup");
 const studentRoute = require("./routes/students");
-const ScheduleRoute = require("./routes/Cricket/schedule");
-// const ScheduleRoute2 = require("./routes/Cricket/schedulev2");
-const FlipkartRoute = require("./routes/ecommerce/flipkart");
-const EspnRoute = require("./routes/Cricket/espn");
-const TestRoute = require("./routes/sendLiveScore");
-// const Test2Route = require("./routes/test2");
+const scheduleRoute = require("./routes/Cricket/schedule");
+// const scheduleRoute2 = require("./routes/Cricket/schedulev2");
+const flipkartRoute = require("./routes/ecommerce/flipkart");
+const espnRoute = require("./routes/Cricket/espn");
+const testRoute = require("./routes/sendLiveScore");
+// const test2Route = require("./routes/test2");
+
 // Use routes
 app.use("/api/cricket", liveScoresRoute.router);
 // app.use("/api/cricket", recentMatchesRoute);
 // app.use("/api/cricket", upcomingMatchRoute);
-app.use("/api/cricket", ScheduleRoute);
-// app.use("/api/cricket", ScheduleRoute2);
+app.use("/api/cricket", scheduleRoute);
+// app.use("/api/cricket", scheduleRoute2);
 app.use("/api/cricket", t20WorldCupRoute);
-app.use("/api/cricket", EspnRoute);
-app.use("/api/buy", FlipkartRoute);
+app.use("/api/cricket", espnRoute);
+app.use("/api/buy", flipkartRoute);
 app.use("/api/students", studentRoute);
-app.use("/api/test", TestRoute);
-// app.use("/api/test2", Test2Route);
+app.use("/api/test", testRoute);
+// app.use("/api/test2", test2Route);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
