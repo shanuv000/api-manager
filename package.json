@@ -20,6 +20,8 @@
     "helmet": "^7.1.0",
     "node-cron": "^3.0.3",
     "nodemailer": "^6.9.13",
-    "puppeteer": "^22.10.0"
+    "path": "^0.12.7",
+    "puppeteer": "^22.10.0",
+    "ws": "^8.17.0"
   }
 }
