@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "nodemon server"
   },
   "keywords": [],
   "author": "",
@@ -22,6 +23,7 @@
     "nodemailer": "^6.9.13",
     "path": "^0.12.7",
     "puppeteer": "^22.10.0",
+    "twilio": "^5.2.0",
     "ws": "^8.17.0"
   }
 }

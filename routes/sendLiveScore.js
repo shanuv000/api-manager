@@ -4,7 +4,7 @@ const cheerio = require("cheerio");
 const sendEmail = require("../component/sendEmail"); // Correct import
 const { scrapeMatches } = require("./Cricket/liveScores");
 const router = express.Router();
-
+const whatsappMessage = require("../component/sendWhatsAppMeassage");
 // URL of the website you want to scrape
 const recenturl =
   "https://www.cricbuzz.com/cricket-match/live-scores/recent-matches";
@@ -22,7 +22,8 @@ router.get("/", async (req, res) => {
     console.log(filteredMatches);
 
     if (filteredMatches.length > 0) {
-      await sendEmail(filteredMatches);
+      await whatsappMessage(filteredMatches);
+      // await sendEmail(filteredMatches);
       res
         .status(200)
         .json({ message: "Email sent successfully", filteredMatches });
