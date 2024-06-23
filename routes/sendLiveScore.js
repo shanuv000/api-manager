@@ -19,11 +19,11 @@ router.get("/", async (req, res) => {
     const filteredMatches = matches.filter((match) => {
       return match.playingTeamBat === "IND" || match.playingTeamBall === "IND";
     });
-    console.log(filteredMatches);
+    // console.log(filteredMatches);
 
-    if (matches.length > 0) {
+    if (filteredMatches.length > 0) {
       // await whatsappMessage(filteredMatches);
-      await sendEmail(matches);
+      await sendEmail(filteredMatches);
       res
         .status(200)
         .json({ message: "Email sent successfully", filteredMatches });
