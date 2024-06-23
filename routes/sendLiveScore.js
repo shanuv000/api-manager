@@ -21,7 +21,7 @@ router.get("/", async (req, res) => {
     });
     console.log(filteredMatches);
 
-    if (matches.length > 0) {
+    if (matches.length > 0 && match.playingTeamBat) {
       // await whatsappMessage(filteredMatches);
       await sendEmail(filteredMatches);
       res
