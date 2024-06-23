@@ -21,7 +21,7 @@ router.get("/", async (req, res) => {
     });
     console.log(filteredMatches);
 
-    if (filteredMatches.length > 0) {
+    if (matches.length > 0) {
       // await whatsappMessage(filteredMatches);
       await sendEmail(filteredMatches);
       res
