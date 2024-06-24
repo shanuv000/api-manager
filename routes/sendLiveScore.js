@@ -28,7 +28,7 @@ router.get("/", async (req, res) => {
 *Live Commentary:* ${match.liveCommentary}
 `;
 
-      await sendWhatsAppMessage(WAmessageBody, phoneNumbers);
+      // await sendWhatsAppMessage(WAmessageBody, phoneNumbers);
       await sendEmail(filteredMatches);
       res
         .status(200)
