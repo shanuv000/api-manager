@@ -5,7 +5,7 @@ const sendWhatsAppMessage = require("../../component/sendWhatsAppMeassage"); // 
 const router = express.Router();
 
 router.post("/3d", async (req, res) => {
-  const { name, email, message, platform } = req.body;
+  const { name, email, message, platform, web } = req.body;
 
   // Validate the request body
   if (!name || !email || !message) {
@@ -18,6 +18,7 @@ router.post("/3d", async (req, res) => {
     *Email:* ${email}
     *Message:* ${message}
     *platform:* ${platform}
+    *Website:* ${web}
   `;
 
   // Define the phone numbers to send the message to
