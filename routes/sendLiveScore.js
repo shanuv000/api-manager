@@ -1,39 +1,45 @@
 const express = require("express");
-const axios = require("axios");
-const cheerio = require("cheerio");
-const sendEmail = require("../component/sendEmail"); // Correct import
+const sendEmail = require("../component/sendEmail");
 const { scrapeMatches } = require("./Cricket/liveScores");
-const router = express.Router();
-const whatsappMessage = require("../component/sendWhatsAppMeassage");
-// URL of the website you want to scrape
-const recenturl =
-  "https://www.cricbuzz.com/cricket-match/live-scores/recent-matches";
+const sendWhatsAppMessage = require("../component/sendWhatsAppMeassage");
 
+const router = express.Router();
+const phoneNumbers = ["whatsapp:+917903778038"];
 const liveUrl = "https://www.cricbuzz.com/cricket-match/live-scores";
-// API route to fetch live scores and send email
+
 router.get("/", async (req, res) => {
   try {
     const matches = await scrapeMatches(liveUrl);
-    // console.log("Matches fetched:", matches); // Logging fetched matches
 
-    const filteredMatches = matches.filter((match) => {
-      return match.playingTeamBat === "IND" || match.playingTeamBall === "IND";
-    });
-    // console.log(filteredMatches);
+    const filteredMatches = matches.filter(
+      (match) =>
+        match.playingTeamBat === "IND" || match.playingTeamBall === "IND"
+    );
 
     if (filteredMatches.length > 0) {
-      // await whatsappMessage(filteredMatches);
+      const match = filteredMatches[0]; // Assuming you only want to send the first match
+      const WAmessageBody = `
+*Title:* ${match.title}
+*Match Details:* ${match.matchDetails}
+*Heading:* ${match.heading}
+*Location:* ${match.location}
+*Playing Team Bat:* ${match.playingTeamBat} ${match.liveScorebat}
+*Playing Team Ball:* ${match.playingTeamBall} ${match.liveScoreball}
+*Live Commentary:* ${match.liveCommentary}
+`;
+
+      await sendWhatsAppMessage(WAmessageBody, phoneNumbers);
       await sendEmail(filteredMatches);
       res
         .status(200)
-        .json({ message: "Email sent successfully", filteredMatches });
+        .json({ message: "Messages sent successfully", filteredMatches });
     } else {
       res
         .status(200)
         .json({ message: "No Indian match is live", filteredMatches });
     }
   } catch (error) {
-    console.error("Error in route handler:", error.message); // Logging errors
+    console.error("Error in route handler:", error.message);
     res.status(500).json({ error: error.message });
   }
 });

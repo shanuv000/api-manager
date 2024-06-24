@@ -14,6 +14,8 @@ const allowedOrigins = [
   "https://onlyblog.vercel.app",
   "http://localhost:3000",
   "http://localhost:4000",
+  "http://localhost:5000",
+  "https://vaibhav.vercel.app",
 ];
 
 // CORS configuration
@@ -73,7 +75,7 @@ const flipkartRoute = require("./routes/ecommerce/flipkart");
 const espnRoute = require("./routes/Cricket/espn");
 const sendLiveScore = require("./routes/sendLiveScore");
 // const test2Route = require("./routes/test2");
-
+const send3dContactInfo = require("./routes/hanldeFrontend/SendContactWA");
 // Use routes
 app.use("/api/cricket", liveScoresRoute.router);
 // app.use("/api/cricket", recentMatchesRoute);
@@ -85,6 +87,7 @@ app.use("/api/cricket", espnRoute);
 app.use("/api/buy", flipkartRoute);
 app.use("/api/students", studentRoute);
 app.use("/api/test", sendLiveScore);
+app.use("/api/contact", send3dContactInfo);
 // app.use("/api/test2", test2Route);
 
 // Error handling middleware

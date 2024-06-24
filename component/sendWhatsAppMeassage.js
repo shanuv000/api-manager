@@ -14,31 +14,11 @@ if (!accountSid || !authToken) {
 
 const client = new twilio(accountSid, authToken);
 
-// List of phone numbers to send the message to
-const phoneNumbers = [
-  "whatsapp:+917903778038",
-  // "whatsapp:+12345678901",
-  // Add more numbers as needed
-];
-
-async function sendWhatsAppMessage(filteredMatches) {
+async function sendWhatsAppMessage(WAmessageBody, phoneNumbers) {
   try {
-    const match = filteredMatches[0]; // Assuming you only want to send the first match
-
-    const messageBody = `
-*Title:* ${match.title}
-*Match Details:* ${match.matchDetails}
-*Heading:* ${match.heading}
-*Location:* ${match.location}
-*Playing Team Bat:* ${match.playingTeamBat} ${match.liveScorebat}
-*Playing Team Ball:* ${match.playingTeamBall} ${match.liveScoreball}
-*Live Commentary:* ${match.liveCommentary}
-`;
-
-    // Send message to all phone numbers in the list
     for (const phoneNumber of phoneNumbers) {
       const message = await client.messages.create({
-        body: messageBody,
+        body: WAmessageBody,
         from: "whatsapp:+14155238886", // Twilio Sandbox WhatsApp number
         to: phoneNumber,
       });
