@@ -16,6 +16,11 @@ async function sendEmail(matches) {
     to: "crashxxxbyte@gmail.com, sarvila1212@gmail.com, sarvila5525@gmail.com",
     subject: `Live Cricket Scores by Vaibhav`,
     html: generateEmailTemplate(matches), // Use HTML template
+    headers: {
+      "X-Priority": "1 (Highest)",
+      "X-MSMail-Priority": "High",
+      Importance: "High",
+    },
   };
 
   try {

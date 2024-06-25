@@ -13,7 +13,7 @@ router.get("/", async (req, res) => {
 
     const filteredMatches = matches.filter(
       (match) =>
-        match.playingTeamBat === "IND" || match.playingTeamBall === "IND"
+        match.playingTeamBat === "AFG" || match.playingTeamBall === "AFG"
     );
 
     if (filteredMatches.length > 0) {
