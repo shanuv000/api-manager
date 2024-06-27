@@ -5,7 +5,8 @@ const cheerio = require("cheerio");
 const router = express.Router();
 const url =
   "https://www.espncricinfo.com/series/icc-men-s-t20-world-cup-2024-1411166/points-table-standings";
-
+const url2 =
+  "https://www.espncricinfo.com/series/indian-premier-league-2023-1345038/points-table-standings";
 async function fetchData() {
   try {
     const response = await axios.get(url);
