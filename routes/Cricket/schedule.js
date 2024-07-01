@@ -5,8 +5,7 @@ const cheerio = require("cheerio");
 const router = express.Router();
 const url =
   "https://www.espncricinfo.com/series/icc-men-s-t20-world-cup-2024-1411166/points-table-standings";
-const url2 =
-  "https://www.espncricinfo.com/series/indian-premier-league-2023-1345038/points-table-standings";
+
 async function fetchData() {
   try {
     const response = await axios.get(url);
@@ -49,9 +48,13 @@ async function scrapeData() {
       } else {
         // This is a team data row
         const cells = $(element).find("td");
-        if (cells.length >= 12) {
+        if (cells.length >= 11) {
           const teamData = {
-            team: cells.eq(0).text().trim().slice(1),
+            team: cells
+              .eq(0)
+              .find("a span.ds-text-tight-s.ds-font-bold.ds-uppercase")
+              .text()
+              .trim(),
             matches: cells.eq(1).text().trim(),
             wins: cells.eq(2).text().trim(),
             losses: cells.eq(3).text().trim(),
@@ -59,11 +62,10 @@ async function scrapeData() {
             noResult: cells.eq(5).text().trim(),
             points: cells.eq(6).text().trim(),
             netRunRate: cells.eq(7).text().trim(),
-            seriesForm: cells.eq(8).text().trim(),
+            seriesForm: cells.eq(8).find("span.ds-text-tight-xs").text().trim(),
             nextMatch: {
-              nextMatches: cells.eq(9).text().trim(),
-              for: cells.eq(10).text().trim(),
-              against: cells.eq(11).text().trim(),
+              for: cells.eq(9).text().trim(),
+              against: cells.eq(10).text().trim(),
             },
           };
           currentGroup.teams.push(teamData);
