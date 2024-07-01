@@ -55,6 +55,7 @@ async function scrapeData() {
               .find("a span.ds-text-tight-s.ds-font-bold.ds-uppercase")
               .text()
               .trim(),
+            teamImage: cells.eq(0).find("img").attr("src"),
             matches: cells.eq(1).text().trim(),
             wins: cells.eq(2).text().trim(),
             losses: cells.eq(3).text().trim(),
