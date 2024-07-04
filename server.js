@@ -76,6 +76,7 @@ const espnRoute = require("./routes/Cricket/espn");
 const sendLiveScore = require("./routes/sendLiveScore");
 // const test2Route = require("./routes/test2");
 const send3dContactInfo = require("./routes/hanldeFrontend/SendContactWA");
+const rashi = require("./routes/Horoscope/rashi");
 // Use routes
 app.use("/api/cricket", liveScoresRoute.router);
 // app.use("/api/cricket", recentMatchesRoute);
@@ -88,8 +89,8 @@ app.use("/api/cricket", espnRoute);
 // app.use("/api/students", studentRoute);
 app.use("/api/test", sendLiveScore);
 app.use("/api/contact", send3dContactInfo);
+app.use("/api", rashi);
 // app.use("/api/test2", test2Route);
-
 // Error handling middleware
 app.use((err, req, res, next) => {
   // Log the error stack trace
