@@ -13,9 +13,7 @@ router.get("/", async (req, res) => {
 
     const filteredMatches = matches.filter(
       (match) =>
-        match.playingTeamBat === "IND" ||
-        match.playingTeamBall === "IND" ||
-        match.heading === "ICC MENS T20 WORLD CUP 2024"
+        match.playingTeamBat === "IND" || match.playingTeamBall === "IND"
     );
 
     if (filteredMatches.length > 0) {
