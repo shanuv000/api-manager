@@ -22,11 +22,12 @@ router.get("/", async (req, res) => {
 
       const WAmessageBody = `
 *Title:* ${match.title}
+*Playing Team Bat:* ${match.playingTeamBat} *${match.liveScorebat}*
+*Playing Team Ball:* ${match.playingTeamBall} *${match.liveScoreball}*
 *Match Details:* ${match.matchDetails}
 *Heading:* ${match.heading}
 *Location:* ${match.location}
-*Playing Team Bat:* ${match.playingTeamBat} *${match.liveScorebat}*
-*Playing Team Ball:* ${match.playingTeamBall} *${match.liveScoreball}*
+
 *Live Commentary:* ${match.liveCommentary}
 `;
 
