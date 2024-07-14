@@ -2,18 +2,19 @@ const express = require("express");
 const sendEmail = require("../component/sendEmail");
 const { scrapeMatches } = require("./Cricket/liveScores");
 const sendWhatsAppMessage = require("../component/sendWhatsAppMeassage");
-
+const { sendMessage } = require("../component/telegram/telegramBot"); // Correct import
 const router = express.Router();
 const phoneNumbers = ["whatsapp:+917903778038"];
 const liveUrl = "https://www.cricbuzz.com/cricket-match/live-scores";
 
+const chatId = "866021016"; // Define your chat ID globally or fetch dynamically if needed
+
 router.get("/", async (req, res) => {
   try {
     const matches = await scrapeMatches(liveUrl);
-
     const filteredMatches = matches.filter(
       (match) =>
-        match.playingTeamBat === "IND" || match.playingTeamBall === "IND"
+        match.playingTeamBat === "SWE" || match.playingTeamBall === "SWE"
     );
 
     if (filteredMatches.length > 0) {
@@ -30,6 +31,7 @@ router.get("/", async (req, res) => {
 
       // await sendWhatsAppMessage(WAmessageBody, phoneNumbers);
       await sendEmail(filteredMatches);
+      await sendMessage(chatId, WAmessageBody); // Sending message via Telegram bot
       res
         .status(200)
         .json({ message: "Messages sent successfully", filteredMatches });
