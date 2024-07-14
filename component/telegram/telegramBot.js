@@ -9,7 +9,7 @@ const token = process.env.TELEGRAM_BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
 // Function to send a message to a specific chat
-const sendMessage = (chatId, message, parseMode) => {
+const sendMessage = (chatId, message, parseMode = "Markdown") => {
   return bot.sendMessage(chatId, message, { parse_mode: parseMode });
 };
 
@@ -56,17 +56,23 @@ bot.on("message", async (msg) => {
   if (text === "/score") {
     const data = await fetchScoreData();
     if (data) {
-      bot.sendMessage(
+      sendMessage(
         chatId,
-        `${userName}, here is the score data: ${JSON.stringify(data, null, 2)}`
+        `${userName}, here is the score data: ${JSON.stringify(data, null, 2)}`,
+        "Markdown"
       );
     } else {
-      bot.sendMessage(chatId, `${userName}, failed to fetch score data.`);
+      sendMessage(
+        chatId,
+        `${userName}, failed to fetch score data.`,
+        "Markdown"
+      );
     }
   } else {
-    bot.sendMessage(
+    sendMessage(
       chatId,
-      `Got your message, ${userName}! I'll get back to you soon.`
+      `Got your message, ${userName}! I'll get back to you soon.`,
+      "Markdown"
     ); // Send a response back to the same chat
   }
 });
