@@ -19,6 +19,7 @@ router.get("/", async (req, res) => {
 
     if (filteredMatches.length > 0) {
       const match = filteredMatches[0]; // Assuming you only want to send the first match
+
       const WAmessageBody = `
 *Title:* ${match.title}
 *Match Details:* ${match.matchDetails}
@@ -30,12 +31,13 @@ router.get("/", async (req, res) => {
 `;
 
       // await sendWhatsAppMessage(WAmessageBody, phoneNumbers);
-      await sendEmail(filteredMatches);
+      // await sendEmail(filteredMatches);
       await sendMessage(chatId, WAmessageBody); // Sending message via Telegram bot
       res
         .status(200)
         .json({ message: "Messages sent successfully", filteredMatches });
     } else {
+      await sendMessage(chatId, "Shanu, No Indian Match is Live");
       res
         .status(200)
         .json({ message: "No INDIAN MATCH is live", filteredMatches });
