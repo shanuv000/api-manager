@@ -38,7 +38,7 @@ router.get("/", async (req, res) => {
     } else {
       res
         .status(200)
-        .json({ message: "No Indian match is live", filteredMatches });
+        .json({ message: "No Swedish match is live", filteredMatches });
     }
   } catch (error) {
     console.error("Error in route handler:", error.message);

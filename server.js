@@ -1,7 +1,6 @@
 const express = require("express");
 const path = require("path");
 const setupMiddleware = require("./component/middleware");
-
 const liveScoresRoute = require("./routes/Cricket/liveScores");
 const t20WorldCupRoute = require("./routes/Cricket/t20Worldcup");
 const scheduleRoute = require("./routes/Cricket/schedule");
@@ -10,10 +9,12 @@ const sendLiveScore = require("./routes/sendLiveScore");
 const send3dContactInfo = require("./routes/hanldeFrontend/SendContactWA");
 const {
   createWebhookHandler,
-} = require("./component/telegram/telegramWebhook"); // Import webhook handler
+  setWebhook,
+} = require("./component/telegram/telegramBot"); // Import webhook handler
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const webhookUrl = "https://api-sync.vercel.app"; // Replace with your actual URL
 
 // Set trust proxy to 1 to trust the first proxy (like Vercel)
 app.set("trust proxy", 1);
@@ -35,6 +36,7 @@ app.use("/api/contact", send3dContactInfo);
 
 // Use the webhook handler
 app.use(createWebhookHandler());
+setWebhook(webhookUrl); // Set the webhook
 
 // Error handling middleware
 app.use((err, req, res, next) => {
