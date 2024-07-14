@@ -38,7 +38,7 @@ const createWebhookHandler = () => {
 // Event listener for incoming messages
 bot.on("message", (msg) => {
   const chatId = msg.chat.id; // Get the chat ID from the received message
-  bot.sendMessage(chatId, "Received your message"); // Send a response back to the same chat
+  bot.sendMessage(chatId, "Got your message! I'll get back to you soon."); // Send a response back to the same chat
 });
 
 // Export the functions for use in other parts of the application
