@@ -51,16 +51,23 @@ const fetchScoreData = async () => {
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id; // Get the chat ID from the received message
   const text = msg.text;
+  const userName = msg.from.first_name; // Get the user's first name
 
   if (text === "/score") {
     const data = await fetchScoreData();
     if (data) {
-      bot.sendMessage(chatId, `Score Data: ${JSON.stringify(data, null, 2)}`);
+      bot.sendMessage(
+        chatId,
+        `${userName}, here is the score data: ${JSON.stringify(data, null, 2)}`
+      );
     } else {
-      bot.sendMessage(chatId, "Failed to fetch score data.");
+      bot.sendMessage(chatId, `${userName}, failed to fetch score data.`);
     }
   } else {
-    bot.sendMessage(chatId, "Got your message! I'll get back to you soon."); // Send a response back to the same chat
+    bot.sendMessage(
+      chatId,
+      `Got your message, ${userName}! I'll get back to you soon.`
+    ); // Send a response back to the same chat
   }
 });
 
