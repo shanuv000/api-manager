@@ -1,11 +1,12 @@
 const TelegramBot = require("node-telegram-bot-api");
+const axios = require("axios");
 require("dotenv").config(); // Load environment variables from .env file
 
 // Get the bot token from environment variables
 const token = process.env.TELEGRAM_BOT_TOKEN;
 
 // Create a new instance of the Telegram bot with the provided token
-const bot = new TelegramBot(token);
+const bot = new TelegramBot(token, { polling: true });
 
 // Function to send a message to a specific chat
 const sendMessage = (chatId, message) => {
@@ -35,10 +36,32 @@ const createWebhookHandler = () => {
   return app; // Return the Express app
 };
 
+// Function to fetch data from the API
+const fetchScoreData = async () => {
+  try {
+    const response = await axios.get("https://api.example.com/score"); // Replace with your actual API URL
+    return response.data;
+  } catch (error) {
+    console.error("Error fetching data from API:", error);
+    return null;
+  }
+};
+
 // Event listener for incoming messages
-bot.on("message", (msg) => {
+bot.on("message", async (msg) => {
   const chatId = msg.chat.id; // Get the chat ID from the received message
-  bot.sendMessage(chatId, "Got your message! I'll get back to you soon."); // Send a response back to the same chat
+  const text = msg.text;
+
+  if (text === "/score") {
+    const data = await fetchScoreData();
+    if (data) {
+      bot.sendMessage(chatId, `Score Data: ${JSON.stringify(data, null, 2)}`);
+    } else {
+      bot.sendMessage(chatId, "Failed to fetch score data.");
+    }
+  } else {
+    bot.sendMessage(chatId, "Got your message! I'll get back to you soon."); // Send a response back to the same chat
+  }
 });
 
 // Export the functions for use in other parts of the application
