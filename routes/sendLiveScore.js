@@ -37,7 +37,6 @@ router.get("/", async (req, res) => {
         .status(200)
         .json({ message: "Messages sent successfully", filteredMatches });
     } else {
-      await sendMessage(chatId, "Shanu, No Indian Match is Live");
       res
         .status(200)
         .json({ message: "No INDIAN MATCH is live", filteredMatches });
