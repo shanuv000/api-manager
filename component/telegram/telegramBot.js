@@ -71,23 +71,6 @@ bot.on("message", async (msg) => {
   } else if (text === "/live") {
     try {
       const liveData = await axios.get("https://api-sync.vercel.app/api/test");
-      if (liveData) {
-        sendMessage(
-          chatId,
-          `${userName}, here is the live data: ${JSON.stringify(
-            liveData.data,
-            null,
-            2
-          )}`,
-          "Markdown"
-        );
-      } else {
-        sendMessage(
-          chatId,
-          `${userName}, failed to fetch live data.`,
-          "Markdown"
-        );
-      }
     } catch (error) {
       sendMessage(
         chatId,
