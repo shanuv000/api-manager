@@ -39,7 +39,7 @@ const createWebhookHandler = () => {
 // Function to fetch data from the API
 const fetchScoreData = async () => {
   try {
-    const response = await axios.get("https://api.example.com/score"); // Replace with your actual API URL
+    const response = await axios.get("https://api-sync.vercel.app/api/test"); // Replace with your actual API URL
     return response.data;
   } catch (error) {
     console.error("Error fetching data from API:", error);
