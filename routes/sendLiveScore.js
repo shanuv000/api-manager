@@ -14,7 +14,7 @@ router.get("/", async (req, res) => {
     const matches = await scrapeMatches(liveUrl);
     const filteredMatches = matches.filter(
       (match) =>
-        match.playingTeamBat === "SWE" || match.playingTeamBall === "SWE"
+        match.playingTeamBat === "IND" || match.playingTeamBall === "IND"
     );
 
     if (filteredMatches.length > 0) {
@@ -38,7 +38,7 @@ router.get("/", async (req, res) => {
     } else {
       res
         .status(200)
-        .json({ message: "No Swedish match is live", filteredMatches });
+        .json({ message: "No INDIAN MATCH is live", filteredMatches });
     }
   } catch (error) {
     console.error("Error in route handler:", error.message);
