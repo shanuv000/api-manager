@@ -32,12 +32,12 @@ router.get("/", async (req, res) => {
 
       // await sendWhatsAppMessage(WAmessageBody, phoneNumbers);
       // await sendEmail(filteredMatches);
-      await sendMessage(chatId, WAmessageBody); // Sending message via Telegram bot
+      await sendMessage(chatId, WAmessageBody, "Markdown"); // Sending message via Telegram bot with Markdown parse mode
       res
         .status(200)
         .json({ message: "Messages sent successfully", filteredMatches });
     } else {
-      await sendMessage(chatId, "No INDIAN MATCH is live "); // Sending message via Telegram bot
+      await sendMessage(chatId, "No INDIAN MATCH is live", "Markdown"); // Sending message via Telegram bot with Markdown parse mode
 
       res
         .status(200)

@@ -9,8 +9,8 @@ const token = process.env.TELEGRAM_BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
 // Function to send a message to a specific chat
-const sendMessage = (chatId, message) => {
-  return bot.sendMessage(chatId, message);
+const sendMessage = (chatId, message, parseMode) => {
+  return bot.sendMessage(chatId, message, { parse_mode: parseMode });
 };
 
 // Function to set the webhook URL for the bot
