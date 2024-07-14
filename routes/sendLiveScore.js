@@ -38,7 +38,7 @@ router.get("/", async (req, res) => {
         .status(200)
         .json({ message: "Messages sent successfully", filteredMatches });
     } else {
-      await sendMessage(chatId, "No INDIAN MATCH is live", "Markdown"); // Sending message via Telegram bot with Markdown parse mode
+      // await sendMessage(chatId, "No INDIAN MATCH is live", "Markdown");
 
       res
         .status(200)
