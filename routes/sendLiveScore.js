@@ -21,7 +21,7 @@ router.get("/", async (req, res) => {
       const match = filteredMatches[0]; // Assuming you only want to send the first match
 
       const WAmessageBody = `
-**Title:** ${match.title}
+*Title:* ${match.title}
 **Match Details:** ${match.matchDetails}
 **Heading:** ${match.heading}
 **Location:** ${match.location}
