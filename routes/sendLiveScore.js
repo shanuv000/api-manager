@@ -14,7 +14,8 @@ router.get("/", async (req, res) => {
     const matches = await scrapeMatches(liveUrl);
     const filteredMatches = matches.filter(
       (match) =>
-        match.playingTeamBat === "IND" || match.playingTeamBall === "IND"
+        match.playingTeamBat.includes("IND") ||
+        match.playingTeamBall.includes("IND")
     );
 
     if (filteredMatches.length > 0) {
@@ -29,6 +30,7 @@ router.get("/", async (req, res) => {
 *Location:* ${match.location}
 
 *Live Commentary:* ${match.liveCommentary}
+*Live Score:* ${match.liveScoreLink}
 `;
 
       // await sendWhatsAppMessage(WAmessageBody, phoneNumbers);
@@ -39,7 +41,7 @@ router.get("/", async (req, res) => {
         .json({ message: "Messages sent successfully", filteredMatches });
     } else {
       // await sendMessage(chatId, "No INDIAN MATCH is live", "Markdown");
-
+      await sendMessage(chatId, { statue: "No india Match" });
       res
         .status(200)
         .json({ message: "No INDIAN MATCH is live", filteredMatches });
