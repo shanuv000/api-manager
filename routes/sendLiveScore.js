@@ -19,9 +19,10 @@ router.get("/", async (req, res) => {
     );
 
     if (filteredMatches.length > 0) {
-      const match = filteredMatches[0]; // Assuming you only want to send the first match
-
-      const WAmessageBody = `
+      let WAmessageBody = filteredMatches
+        .map(
+          (match, index) => `
+*Match ${index + 1}*
 *Title:* ${match.title}
 *Playing Team Bat:* ${match.playingTeamBat} *${match.liveScorebat}*
 *Playing Team Ball:* ${match.playingTeamBall} *${match.liveScoreball}*
@@ -31,7 +32,9 @@ router.get("/", async (req, res) => {
 
 *Live Commentary:* ${match.liveCommentary}
 *Live Score:* ${match.liveScoreLink}
-`;
+`
+        )
+        .join("\n\n");
 
       // await sendWhatsAppMessage(WAmessageBody, phoneNumbers);
       // await sendEmail(filteredMatches);
