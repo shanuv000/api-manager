@@ -22,16 +22,16 @@ router.get("/", async (req, res) => {
       let WAmessageBody = filteredMatches
         .map(
           (match, index) => `
-*Match ${index + 1}*
-*Title:* ${match.title}
-*Playing Team Bat:* ${match.playingTeamBat} *${match.liveScorebat}*
-*Playing Team Ball:* ${match.playingTeamBall} *${match.liveScoreball}*
-*Match Details:* ${match.matchDetails}
-*Heading:* ${match.heading}
-*Location:* ${match.location}
+*Match ${index + 1}*\n
+*Title:* ${match.title}\n
+*Playing Team Bat:* ${match.playingTeamBat} *${match.liveScorebat}*\n
+*Playing Team Ball:* ${match.playingTeamBall} *${match.liveScoreball}*\n
+*Match Details:* ${match.matchDetails}\n
+*Heading:* ${match.heading}\n
+*Location:* ${match.location}\n
 
-*Live Commentary:* ${match.liveCommentary}
-*Live Score:* ${match.liveScoreLink}
+*${match.liveCommentary}\n* 
+*Live Score:* ${match.liveScoreLink}\n
 `
         )
         .join("\n\n");
