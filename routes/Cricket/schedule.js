@@ -3,9 +3,10 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 
 const router = express.Router();
-const url =
+const url2 =
   "https://www.espncricinfo.com/series/icc-men-s-t20-world-cup-2024-1411166/points-table-standings";
-
+const url =
+  "https://www.espncricinfo.com/series/women-s-asia-cup-2024-1426636/points-table-standings";
 async function fetchData() {
   try {
     const response = await axios.get(url);

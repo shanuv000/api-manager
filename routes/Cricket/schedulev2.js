@@ -7,7 +7,8 @@ const app = express();
 
 const url =
   "https://www.cricbuzz.com/cricket-series/7476/icc-mens-t20-world-cup-2024/points-table";
-
+const url2 =
+  "https://www.espncricinfo.com/series/women-s-asia-cup-2024-1426636/points-table-standings";
 router.get("/schedule2", async (req, res) => {
   try {
     // Fetch the HTML from the URL
