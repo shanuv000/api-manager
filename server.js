@@ -13,7 +13,7 @@ const {
 } = require("./component/telegram/telegramBot"); // Import webhook handler
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5002;
 const webhookUrl = "https://api-sync.vercel.app"; // Replace with your actual URL
 
 // Set trust proxy to 1 to trust the first proxy (like Vercel)

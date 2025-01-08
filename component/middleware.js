@@ -11,6 +11,8 @@ const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:4000",
   "http://localhost:5000",
+  "http://localhost:5001",
+  "http://localhost:5002",
   "https://vaibhav.vercel.app",
 ];
 
