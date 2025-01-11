@@ -14,8 +14,8 @@ router.get("/", async (req, res) => {
     const matches = await scrapeMatches(liveUrl);
     const filteredMatches = matches.filter(
       (match) =>
-        match.playingTeamBat.includes("IND") ||
-        match.playingTeamBall.includes("IND")
+        match.playingTeamBat.includes("WI") ||
+        match.playingTeamBall.includes("WI")
     );
 
     if (filteredMatches.length > 0) {
