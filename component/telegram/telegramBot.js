@@ -5,87 +5,76 @@ require("dotenv").config(); // Load environment variables from .env file
 // Get the bot token from environment variables
 const token = process.env.TELEGRAM_BOT_TOKEN;
 
-// Create a new instance of the Telegram bot with the provided token
+// Create a new instance of the Telegram bot with polling mode enabled
 const bot = new TelegramBot(token, { polling: true });
 
 // Function to send a message to a specific chat
-const sendMessage = (chatId, message, parseMode = "Markdown") => {
-  return bot.sendMessage(chatId, message, { parse_mode: parseMode });
+const sendMessage = async (chatId, message, parseMode = "Markdown") => {
+  try {
+    await bot.sendMessage(chatId, message, { parse_mode: parseMode });
+  } catch (error) {
+    console.error(`Error sending message to chat ${chatId}:`, error.message);
+  }
 };
 
-// Function to set the webhook URL for the bot
-const setWebhook = (url) => {
-  bot.setWebHook(`${url}/bot${token}`);
-};
-
-// Function to create an Express app to handle incoming updates from Telegram
-const createWebhookHandler = () => {
-  const express = require("express");
-  const bodyParser = require("body-parser");
-  const app = express();
-
-  // Middleware to parse JSON bodies
-  app.use(bodyParser.json());
-
-  // Route to handle webhook POST requests from Telegram
-  app.post(`/bot${token}`, (req, res) => {
-    bot.processUpdate(req.body); // Process the incoming update
-    res.sendStatus(200); // Respond with a 200 status code to indicate success
-  });
-
-  return app; // Return the Express app
-};
-
-// Function to fetch data from the API
+// Function to fetch match data from the API
 const fetchScoreData = async () => {
   try {
     const response = await axios.get("https://api-sync.vercel.app/api/test"); // Replace with your actual API URL
     return response.data;
   } catch (error) {
-    console.error("Error fetching data from API:", error);
+    console.error("Error fetching data from API:", error.message);
     return null;
   }
 };
 
+// Format match data into readable text for Telegram
+const formatMatchData = (matches) => {
+  if (!matches || matches.length === 0) {
+    return "*No live matches are available.*";
+  }
+
+  return matches
+    .map((match, index) => {
+      return `
+*Match ${index + 1}:*
+*Title:* ${match.title || "N/A"}
+*Details:* ${match.matchDetails || "N/A"}
+*Location:* ${match.location || "N/A"}
+*Team Bat:* ${match.playingTeamBat || "N/A"} (${match.liveScorebat || "N/A"})
+*Team Ball:* ${match.playingTeamBall || "N/A"} (${match.liveScoreball || "N/A"})
+*Commentary:* ${match.liveCommentary || "N/A"}
+[Live Score](${match.liveScoreLink || "#"})
+      `;
+    })
+    .join("\n\n");
+};
+
 // Event listener for incoming messages
 bot.on("message", async (msg) => {
-  const chatId = msg.chat.id; // Get the chat ID from the received message
+  const chatId = msg.chat.id;
   const text = msg.text;
-  const userName = msg.from.first_name; // Get the user's first name
+  const userName = msg.from.first_name;
 
-  if (text === "/score") {
-    const data = await fetchScoreData();
-    if (data) {
-      sendMessage(
-        chatId,
-        `${userName}, here is the score data: ${JSON.stringify(data, null, 2)}`,
-        "Markdown"
-      );
+  try {
+    if (text === "/score" || text === "/live") {
+      const data = await fetchScoreData();
+      if (data && data.filteredMatches && data.filteredMatches.length > 0) {
+        const formattedData = formatMatchData(data.filteredMatches);
+        sendMessage(
+          chatId,
+          `${userName}, here is the match data:\n\n${formattedData}`
+        );
+      } else {
+        sendMessage(chatId, `${userName}, no matches found.`);
+      }
     } else {
-      sendMessage(
-        chatId,
-        `${userName}, failed to fetch score data.`,
-        "Markdown"
-      );
+      sendMessage(chatId, `Hi ${userName}, I don't recognize that command.`);
     }
-  } else if (text === "/live") {
-    try {
-      const liveData = await axios.get("https://api-sync.vercel.app/api/test");
-    } catch (error) {
-      sendMessage(
-        chatId,
-        `${userName}, an error occurred while fetching live data.`,
-        "Markdown"
-      );
-    }
-  } else {
-    sendMessage(
-      chatId,
-      `Got your message, ${userName}! I'll get back to you soon.`,
-      "Markdown"
-    ); // Send a response back to the same chat
+  } catch (error) {
+    console.error("Error processing message:", error.message);
+    sendMessage(chatId, "An error occurred. Please try again later.");
   }
 });
 
-// Export the functions for use in other parts of the application
-module.exports = { createWebhookHandler, sendMessage, setWebhook };
+module.exports = { sendMessage };
