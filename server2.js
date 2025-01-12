@@ -2,17 +2,21 @@ const express = require("express");
 const path = require("path");
 const setupMiddleware = require("./component/middleware");
 const liveScoresRoute = require("./routes/Cricket/liveScores");
-
 const t20WorldCupRoute = require("./routes/Cricket/t20Worldcup");
 const scheduleRoute = require("./routes/Cricket/schedule");
 const espnRoute = require("./routes/Cricket/espn");
 const sendLiveScore = require("./routes/sendLiveScore");
 const send3dContactInfo = require("./routes/hanldeFrontend/SendContactWA");
+const {
+  createWebhookHandler,
+  setWebhook,
+} = require("./component/telegram/telegramBot"); // Import webhook handler
 
 const app = express();
 const PORT = process.env.PORT || 5002;
+const webhookUrl = "https://api-sync.vercel.app"; // Replace with your actual URL
 
-// Set trust proxy to trust the first proxy (like Vercel)
+// Set trust proxy to 1 to trust the first proxy (like Vercel)
 app.set("trust proxy", 1);
 
 // Apply middleware
@@ -30,16 +34,15 @@ app.use("/api/cricket", espnRoute);
 app.use("/api/test", sendLiveScore);
 app.use("/api/contact", send3dContactInfo);
 
-// Fallback route for undefined endpoints
-app.use((req, res) => {
-  res.status(404).json({ error: "Endpoint not found" });
-});
+// Use the webhook handler
+app.use(createWebhookHandler());
+setWebhook(webhookUrl); // Set the webhook
 
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error("Error stack:", err.stack);
   console.error("Request body:", req.body);
-  res.status(500).json({ error: "Internal server error" });
+  res.status(500).send("Something broke!");
 });
 
 // Start the server
