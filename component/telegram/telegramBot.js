@@ -23,15 +23,16 @@ const sendMessage = async (chatId, message, parseMode = "Markdown") => {
 };
 
 /**
- * Function to fetch match data from the API
+ * Function to fetch match data from the provided API URL
+ * @param {string} apiUrl - The API URL to fetch data from
  * @returns {Array|null} - Match data or null in case of an error
  */
-const fetchScoreData = async () => {
+const fetchMatchData = async (apiUrl) => {
   try {
-    const response = await axios.get("https://api-sync.vercel.app/api/test"); // Replace with your actual API URL
-    return response.data.filteredMatches || null; // Adjust based on your API structure
+    const response = await axios.get(apiUrl);
+    return response.data || null;
   } catch (error) {
-    console.error("Error fetching data from API:", error.message);
+    console.error(`Error fetching data from ${apiUrl}:`, error.message);
     return null;
   }
 };
@@ -77,6 +78,7 @@ bot.on("message", async (msg) => {
           `👋 Hi ${userName}!\n\nWelcome to the Telegram bot! Here’s what I can do for you:\n\n` +
             `/score - Fetch the latest score data\n` +
             `/live - Get live updates from the API\n` +
+            `/show_all_live_matches - Show all live cricket matches\n` +
             `/about - Learn more about the bot and its creator\n` +
             `/settings - Adjust your preferences or notifications\n` +
             `/help - Get a list of all available commands`
@@ -91,6 +93,7 @@ bot.on("message", async (msg) => {
             `/help - Get a list of all available commands\n` +
             `/score - Fetch the latest score data\n` +
             `/live - Get live updates from the API\n` +
+            `/show_all_live_matches - Show all live cricket matches\n` +
             `/about - Learn more about the bot and its creator\n` +
             `/settings - Adjust your preferences or notifications`,
           "Markdown"
@@ -99,9 +102,11 @@ bot.on("message", async (msg) => {
 
       case "/score":
       case "/live":
-        const matches = await fetchScoreData();
-        if (matches) {
-          const formattedData = formatMatchData(matches);
+        const scoreData = await fetchMatchData(
+          "https://api-sync.vercel.app/api/test"
+        );
+        if (scoreData) {
+          const formattedData = formatMatchData(scoreData.filteredMatches);
           sendMessage(
             chatId,
             `📊 *Match Data*\n\n${userName}, here is the match data:\n\n${formattedData}`,
@@ -111,6 +116,26 @@ bot.on("message", async (msg) => {
           sendMessage(
             chatId,
             `${userName}, I couldn't fetch match data. Please try again later.`,
+            "Markdown"
+          );
+        }
+        break;
+
+      case "/show_all_live_matches":
+        const liveMatchesData = await fetchMatchData(
+          "https://api-sync.vercel.app/api/cricket/live-scores"
+        );
+        if (liveMatchesData) {
+          const formattedMatches = formatMatchData(liveMatchesData.matches);
+          sendMessage(
+            chatId,
+            `🏏 *All Live Matches*\n\n${userName}, here are the live matches:\n\n${formattedMatches}`,
+            "Markdown"
+          );
+        } else {
+          sendMessage(
+            chatId,
+            `${userName}, I couldn't fetch live matches data. Please try again later.`,
             "Markdown"
           );
         }

@@ -1,25 +1,25 @@
 const express = require("express");
-const sendEmail = require("../component/sendEmail");
-const { scrapeMatches } = require("./Cricket/liveScores");
-const sendWhatsAppMessage = require("../component/sendWhatsAppMeassage");
-const { sendMessage } = require("../component/telegram/telegramBot"); // Correct import
+// const sendEmail = require("../../component/sendEmail");
+const { scrapeMatches } = require("../Cricket/liveScores");
+// const sendWhatsAppMessage = require("../../component/sendWhatsAppMeassage");
+const { sendMessage } = require("../../component/telegram/telegramBot"); // Correct import
 const router = express.Router();
 const phoneNumbers = ["whatsapp:+917903778038"];
 const liveUrl = "https://www.cricbuzz.com/cricket-match/live-scores";
 
 const chatId = "866021016"; // Define your chat ID globally or fetch dynamically if needed
 
-router.get("/", async (req, res) => {
+router.get("/all-matches", async (req, res) => {
   try {
     const matches = await scrapeMatches(liveUrl);
-    const filteredMatches = matches.filter(
-      (match) =>
-        match.playingTeamBat.includes("WI") ||
-        match.playingTeamBall.includes("WI")
-    );
+    // const filteredMatches = matches.filter(
+    //   (match) =>
+    //     match.playingTeamBat.includes("NK") ||
+    //     match.playingTeamBall.includes("NK")
+    // );
 
-    if (filteredMatches.length > 0) {
-      let WAmessageBody = filteredMatches
+    if (matches.length > 0) {
+      let WAmessageBody = matches
         .map(
           (match, index) => `
 *Match ${index + 1}*\n
@@ -39,15 +39,11 @@ router.get("/", async (req, res) => {
       // await sendWhatsAppMessage(WAmessageBody, phoneNumbers);
       // await sendEmail(filteredMatches);
       await sendMessage(chatId, WAmessageBody, "Markdown"); // Sending message via Telegram bot with Markdown parse mode
-      res
-        .status(200)
-        .json({ message: "Messages sent successfully", filteredMatches });
+      res.status(200).json({ message: "Messages sent successfully", matches });
     } else {
       // await sendMessage(chatId, "No INDIAN MATCH is live", "Markdown");
       await sendMessage(chatId, { statue: "No india Match" });
-      res
-        .status(200)
-        .json({ message: "No INDIAN MATCH is live", filteredMatches });
+      res.status(200).json({ message: "No INDIAN MATCH is live", matches });
     }
   } catch (error) {
     console.error("Error in route handler:", error.message);
