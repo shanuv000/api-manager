@@ -22,9 +22,7 @@ router.get("/recent", async (req, res) => {
 
       // Send each chunk as a separate message
       for (const [chunkIndex, chunk] of matchChunks.entries()) {
-        let WAmessageBody = `🏏 *Upcoming Matches - Group ${
-          chunkIndex + 1
-        }*\n\n`;
+        let WAmessageBody = `🏏 *Recent Matches - Group ${chunkIndex + 1}*\n\n`;
 
         WAmessageBody += chunk
           .map(
@@ -51,7 +49,7 @@ router.get("/recent", async (req, res) => {
 
       res.status(200).json({ message: "Messages sent successfully", matches });
     } else {
-      const fallbackMessage = "No upcoming matches are available.";
+      const fallbackMessage = "No recent matches are available.";
       await sendMessage(chatId, fallbackMessage, "Markdown");
       res.status(200).json({ message: fallbackMessage, matches });
     }
