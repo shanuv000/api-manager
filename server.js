@@ -30,10 +30,10 @@ app.use("/api/cricket", liveScoresRoute.router);
 app.use("/api/cricket", scheduleRoute);
 app.use("/api/cricket", t20WorldCupRoute);
 app.use("/api/cricket", espnRoute);
-app.use("/api/send", sendLiveScore);
-app.use("/api/send", sendAllScore);
-app.use("/api/send", sendUpcomingMatches);
-app.use("/api/send", sendRecentMatches);
+// app.use("/api/send", sendLiveScore);
+// app.use("/api/send", sendAllScore);
+// app.use("/api/send", sendUpcomingMatches);
+// app.use("/api/send", sendRecentMatches);
 app.use("/api/contact", send3dContactInfo);
 
 // Fallback route for undefined endpoints
