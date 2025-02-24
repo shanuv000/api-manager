@@ -6,10 +6,7 @@ const liveScoresRoute = require("./routes/Cricket/liveScores");
 const t20WorldCupRoute = require("./routes/Cricket/t20Worldcup");
 const scheduleRoute = require("./routes/Cricket/schedule");
 const espnRoute = require("./routes/Cricket/espn");
-// const sendLiveScore = require("./routes/sendingScores/sendLiveScore");
-// const sendAllScore = require("./routes/sendingScores/sendAllScore");
-// const sendUpcomingMatches = require("./routes/sendingScores/sendUpcomingMatches");
-// const sendRecentMatches = require("./routes/sendingScores/sendRecentMatches");
+
 const send3dContactInfo = require("./routes/hanldeFrontend/SendContactWA");
 
 const app = express();
