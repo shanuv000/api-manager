@@ -14,6 +14,8 @@ const allowedOrigins = [
   "http://localhost:5001",
   "http://localhost:5002",
   "https://vaibhav.vercel.app",
+  "https://urtechy.com",
+  "https://*.urtechy.com",
 ];
 
 // CORS configuration
