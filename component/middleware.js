@@ -16,7 +16,7 @@ const allowedOrigins = [
   "https://vaibhav.vercel.app",
   "https://urtechy.com",
   "https://*.urtechy.com",
-  "https://blog.urtechy.com/",
+  // "https://blog.urtechy.com/",
   "http://localhost:[3-5]\\d{3}",
 ];
 
