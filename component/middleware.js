@@ -17,14 +17,31 @@ const allowedOrigins = [
   "https://urtechy.com",
   "https://*.urtechy.com",
   "https://blog.urtechy.com/",
+  "http://localhost:[3-5]\\d{3}",
 ];
 
 // CORS configuration
 const corsOptions = {
   origin: function (origin, callback) {
-    if (!origin) return callback(null, true); // Allow requests with no origin (like mobile apps or curl requests)
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true); // Check if the request origin is in the allowed origins list
+    if (!origin) return callback(null, true); // Allow requests with no origin
+
+    // Allow all localhost URLs on common development ports
+    if (origin.match(/^http:\/\/localhost:(3000|4000|5000|5001|5002)$/)) {
+      return callback(null, true);
+    }
+
+    // Check other allowed origins
+    if (
+      allowedOrigins.some((allowedOrigin) => {
+        // Handle wildcard subdomains
+        if (allowedOrigin.includes("*")) {
+          const pattern = allowedOrigin.replace("*", ".*");
+          return new RegExp(pattern).test(origin);
+        }
+        return allowedOrigin === origin;
+      })
+    ) {
+      callback(null, true);
     } else {
       callback(new Error("Not allowed by CORS"));
     }
