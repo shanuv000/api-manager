@@ -16,6 +16,7 @@ const allowedOrigins = [
   "https://vaibhav.vercel.app",
   "https://urtechy.com",
   "https://*.urtechy.com",
+  "https://blog.urtechy.com/",
 ];
 
 // CORS configuration
