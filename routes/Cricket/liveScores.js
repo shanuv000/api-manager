@@ -130,32 +130,35 @@ const scrapeMatches = async (url) => {
 };
 
 // Define routes
-router.get("/recent-scores", async (req, res) => {
-  try {
-    const matches = await scrapeMatches(urls.recentMatches);
-    res.json(matches);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+// Route removed - using recentMatches.js instead
+// router.get("/recent-scores", async (req, res) => {
+//   try {
+//     const matches = await scrapeMatches(urls.recentMatches);
+//     res.json(matches);
+//   } catch (error) {
+//     res.status(500).json({ error: error.message });
+//   }
+// });
 
-router.get("/live-scores", async (req, res) => {
-  try {
-    const matches = await scrapeMatches(urls.liveScores);
-    res.json(matches);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+// Route removed - using liveScoresNew.js instead
+// router.get("/live-scores", async (req, res) => {
+//   try {
+//     const matches = await scrapeMatches(urls.liveScores);
+//     res.json(matches);
+//   } catch (error) {
+//     res.status(500).json({ error: error.message });
+//   }
+// });
 
-router.get("/upcoming-matches", async (req, res) => {
-  try {
-    const matches = await scrapeMatches(urls.upcomingMatches);
-    res.json(matches);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+// Route removed - using upcomingMatches.js instead
+// router.get("/upcoming-matches", async (req, res) => {
+//   try {
+//     const matches = await scrapeMatches(urls.upcomingMatches);
+//     res.json(matches);
+//   } catch (error) {
+//     res.status(500).json({ error: error.message });
+//   }
+// });
 
 // Export the router for use in the main app
 module.exports = {

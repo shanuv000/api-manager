@@ -5,11 +5,10 @@ const cheerio = require("cheerio");
 const router = express.Router();
 
 // URL of the website you want to scrape
-const url =
-  "https://www.cricbuzz.com/cricket-match/live-scores/upcoming-matches";
+const url = "https://www.cricbuzz.com/cricket-match/live-scores";
 
-// Define a GET route to scrape upcoming matches
-router.get("/upcoming-matches", async (req, res) => {
+// Define a GET route to scrape live scores
+router.get("/live-scores", async (req, res) => {
   try {
     // Fetch the webpage
     const response = await axios.get(url, {
@@ -176,7 +175,7 @@ router.get("/upcoming-matches", async (req, res) => {
     });
   } catch (error) {
     // Handle errors in fetching the webpage or processing the HTML
-    console.error("Error fetching upcoming matches:", error.message);
+    console.error("Error fetching live scores:", error.message);
     res.status(500).json({
       success: false,
       error: "Error fetching the webpage",

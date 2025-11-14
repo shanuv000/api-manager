@@ -1,14 +1,14 @@
 {
   "name": "manager-api",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "API Manager for Cricket Scores from Cricbuzz and other services",
+  "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server",
-    "dev": "nodemon server"
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
-  "keywords": [],
+  "keywords": ["cricket", "api", "cricbuzz", "scraper", "live-scores"],
   "author": "",
   "license": "ISC",
   "dependencies": {
