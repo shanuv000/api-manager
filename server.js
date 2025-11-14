@@ -1,14 +1,14 @@
 const express = require("express");
 const path = require("path");
 const setupMiddleware = require("./component/middleware");
-const liveScoresRoute = require("./routes/Cricket/liveScores");
-const recentMatchesRoute = require("./routes/Cricket/recentMatches");
-const liveScoresNewRoute = require("./routes/Cricket/liveScoresNew");
-const upcomingMatchesRoute = require("./routes/Cricket/upcomingMatches");
 
-const t20WorldCupRoute = require("./routes/Cricket/t20Worldcup");
-const scheduleRoute = require("./routes/Cricket/schedule");
-const espnRoute = require("./routes/Cricket/espn");
+// Consolidated Cricket Routes
+const cricketRoutes = require("./routes/Cricket/index");
+
+// Other routes (commented out to reduce function count for Vercel)
+// const t20WorldCupRoute = require("./routes/Cricket/t20Worldcup");
+// const scheduleRoute = require("./routes/Cricket/schedule");
+// const espnRoute = require("./routes/Cricket/espn");
 
 const send3dContactInfo = require("./routes/hanldeFrontend/SendContactWA");
 
@@ -26,17 +26,14 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-app.use("/api/cricket", liveScoresRoute.router);
-app.use("/api/cricket", recentMatchesRoute);
-app.use("/api/cricket", liveScoresNewRoute);
-app.use("/api/cricket", upcomingMatchesRoute);
-app.use("/api/cricket", scheduleRoute);
-app.use("/api/cricket", t20WorldCupRoute);
-app.use("/api/cricket", espnRoute);
-// app.use("/api/send", sendLiveScore);
-// app.use("/api/send", sendAllScore);
-// app.use("/api/send", sendUpcomingMatches);
-// app.use("/api/send", sendRecentMatches);
+// Consolidated Cricket API routes
+app.use("/api/cricket", cricketRoutes);
+
+// Other routes (commented out to reduce function count for Vercel)
+// app.use("/api/cricket", scheduleRoute);
+// app.use("/api/cricket", t20WorldCupRoute);
+// app.use("/api/cricket", espnRoute);
+
 app.use("/api/contact", send3dContactInfo);
 
 // Fallback route for undefined endpoints
