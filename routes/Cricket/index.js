@@ -2,6 +2,8 @@ const express = require("express");
 const axios = require("axios");
 const cheerio = require("cheerio");
 
+const getScorecardDetails = require("./scorecard");
+
 const router = express.Router();
 
 // URLs for scraping
@@ -142,14 +144,45 @@ const scrapeCricbuzzMatches = async (url) => {
   return matches;
 };
 
+// Helper function to enrich matches with scorecard details
+const enrichMatchesWithScorecard = async (matches) => {
+  return Promise.all(
+    matches.map(async (match) => {
+      if (match.links && match.links["Scorecard"]) {
+        try {
+          const details = await getScorecardDetails(match.links["Scorecard"]);
+          if (details) {
+            match.scorecard = details;
+          }
+        } catch (err) {
+          console.error(
+            `Failed to fetch details for ${match.title}: ${err.message}`
+          );
+        }
+      }
+      return match;
+    })
+  );
+};
+
+// Helper to set Vercel Cache-Control headers
+// s-maxage=60: Cache at the edge (Vercel CDN) for 60 seconds
+// stale-while-revalidate=30: Serve stale content for 30s while updating in background
+const setCacheHeaders = (res) => {
+  res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=30");
+};
+
 // Recent Scores endpoint
 router.get("/recent-scores", async (req, res) => {
   try {
+    setCacheHeaders(res);
     const matches = await scrapeCricbuzzMatches(urls.recentMatches);
+    const enrichedMatches = await enrichMatchesWithScorecard(matches);
+    
     res.json({
       success: true,
-      count: matches.length,
-      data: matches,
+      count: enrichedMatches.length,
+      data: enrichedMatches,
     });
   } catch (error) {
     console.error("Error fetching recent matches:", error.message);
@@ -164,14 +197,39 @@ router.get("/recent-scores", async (req, res) => {
 // Live Scores endpoint
 router.get("/live-scores", async (req, res) => {
   try {
+    setCacheHeaders(res);
     const matches = await scrapeCricbuzzMatches(urls.liveScores);
+    const enrichedMatches = await enrichMatchesWithScorecard(matches);
+
     res.json({
       success: true,
-      count: matches.length,
-      data: matches,
+      count: enrichedMatches.length,
+      data: enrichedMatches,
     });
   } catch (error) {
     console.error("Error fetching live scores:", error.message);
+    res.status(500).json({
+      success: false,
+      error: "Error fetching the webpage",
+      message: error.message,
+    });
+  }
+});
+
+// Upcoming Matches endpoint
+router.get("/upcoming-matches", async (req, res) => {
+  try {
+    setCacheHeaders(res);
+    const matches = await scrapeCricbuzzMatches(urls.upcomingMatches);
+    const enrichedMatches = await enrichMatchesWithScorecard(matches);
+
+    res.json({
+      success: true,
+      count: enrichedMatches.length,
+      data: enrichedMatches,
+    });
+  } catch (error) {
+    console.error("Error fetching upcoming matches:", error.message);
     res.status(500).json({
       success: false,
       error: "Error fetching the webpage",

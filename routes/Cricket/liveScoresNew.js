@@ -1,6 +1,7 @@
 const express = require("express");
 const axios = require("axios");
 const cheerio = require("cheerio");
+const getScorecardDetails = require("./scorecard");
 
 const router = express.Router();
 
@@ -167,11 +168,39 @@ router.get("/live-scores", async (req, res) => {
       matches.push(match);
     });
 
+    // Enrich matches with detailed scorecard data
+    // We use Promise.all to fetch details in parallel
+    console.log(`Fetching details for ${matches.length} matches...`);
+    const enrichedMatches = await Promise.all(
+      matches.map(async (match) => {
+        if (match.links && match.links["Scorecard"]) {
+          try {
+            console.log(`Fetching scorecard for ${match.title}...`);
+            const details = await getScorecardDetails(match.links["Scorecard"]);
+            if (details) {
+              console.log(`Successfully fetched scorecard for ${match.title}`);
+              match.scorecard = details;
+            } else {
+              console.log(`No details returned for ${match.title}`);
+            }
+          } catch (err) {
+            console.error(
+              `Failed to fetch details for ${match.title}: ${err.message}`
+            );
+          }
+        } else {
+            console.log(`No scorecard link for ${match.title}`);
+        }
+        return match;
+      })
+    );
+    console.log("Finished fetching details.");
+
     // Send the scraped data as a JSON response
     res.json({
       success: true,
-      count: matches.length,
-      data: matches,
+      count: enrichedMatches.length,
+      data: enrichedMatches,
     });
   } catch (error) {
     // Handle errors in fetching the webpage or processing the HTML
