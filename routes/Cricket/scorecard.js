@@ -19,7 +19,21 @@ async function getScorecardDetails(url) {
     // Find all innings blocks
     $('div[id^="scard-team-"]').each((index, element) => {
       const $innings = $(element);
+      // The header is usually the previous sibling div
+      const headerText = $innings.prev().text().trim();
+      
+      let teamName = "";
+      // Try to extract team name (e.g. "IND" from "IND 349-8")
+      // Usually it's the text before the first digit
+      const teamMatch = headerText.match(/^([A-Z0-9\s]+?)\s*\d/);
+      if (teamMatch) {
+        teamName = teamMatch[1].trim();
+      }
+
       const inningData = {
+        inningsId: index + 1,
+        inningsHeader: headerText, // e.g. "IND 349-8 (50 Ov)"
+        teamName: teamName,
         batting: [],
         bowling: [],
       };
@@ -35,9 +49,9 @@ async function getScorecardDetails(url) {
 
         const dismissal = $row.find(".text-cbTxtSec").text().trim();
         
-        // The grid structure might vary, so we rely on finding the text nodes or specific classes if possible
-        // But based on inspection, they are just divs.
-        // We can try to get all child divs
+        // Check if currently batting
+        const isBatting = dismissal === "batting" || dismissal === "not out";
+
         const cols = $row.children();
         // 0: Name/Dismissal container
         // 1: Runs
@@ -60,10 +74,12 @@ async function getScorecardDetails(url) {
           fours,
           sixes,
           sr,
+          isBatting,
         });
       });
 
       // Scrape Bowling
+      const bowlers = [];
       $innings.find(".scorecard-bowl-grid").each((i, row) => {
         const $row = $(row);
         if ($row.text().includes("Bowler") && $row.text().includes("O")) return;
@@ -80,7 +96,7 @@ async function getScorecardDetails(url) {
         const wd = cols.eq(6).text().trim();
         const eco = cols.eq(7).text().trim();
 
-        inningData.bowling.push({
+        bowlers.push({
           bowler: bowlerName,
           overs,
           maidens,
@@ -89,8 +105,27 @@ async function getScorecardDetails(url) {
           nb,
           wd,
           eco,
+          isBowling: false // Default to false
         });
       });
+
+      // Identify active bowler: The last bowler in the list with incomplete overs (decimal part)
+      // This is a heuristic: usually the current bowler has a partial over (e.g. 9.1)
+      // and appears later in the list than any previous bowler who might have been taken off mid-over.
+      let activeBowlerIndex = -1;
+      for (let i = bowlers.length - 1; i >= 0; i--) {
+        const overs = bowlers[i].overs;
+        if (overs.includes(".")) {
+           activeBowlerIndex = i;
+           break;
+        }
+      }
+
+      if (activeBowlerIndex !== -1) {
+        bowlers[activeBowlerIndex].isBowling = true;
+      }
+
+      inningData.bowling = bowlers;
       
       if (inningData.batting.length > 0 || inningData.bowling.length > 0) {
           innings.push(inningData);

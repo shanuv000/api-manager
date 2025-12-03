@@ -1,0 +1,5 @@
+--- Batting Grid HTML ---
+<div class="font-bold ">Batter</div><div class="font-bold flex justify-center">R</div><div class="font-bold flex justify-center">B</div><div class="font-bold flex justify-center">4s</div><div class="font-bold flex justify-center">6s</div><div class="font-bold flex justify-center">SR</div><div class="font-bold flex justify-center"> </div>
+--- Innings Header ---
+IND349-8 (50 Ov)
+
