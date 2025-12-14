@@ -250,41 +250,27 @@ class CricbuzzNewsScraper {
   }
 
   /**
-   * Fetch detailed information for a specific news article with retry logic
+   * Fetch detailed information for a specific news article
    * @param {string} articleUrl - The URL of the article
-   * @param {number} maxRetries - Maximum number of retry attempts
    * @returns {Promise<Object>} Detailed article information
    */
-  async fetchArticleDetails(articleUrl, maxRetries = 3) {
-    let lastError;
-    
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      let page;
-      try {
-        if (attempt > 1) {
-          console.log(`   Retry attempt ${attempt}/${maxRetries} for: ${articleUrl}`);
-          // Exponential backoff: 2s, 4s, 8s
-          await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
-        } else {
-          console.log(`📰 Fetching article details from: ${articleUrl}`);
-        }
-        
-        const browser = await this.initBrowser();
-        page = await browser.newPage();
-        
-        await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        await page.setViewport({ width: 1920, height: 1080 });
-        
-        await page.goto(articleUrl, { 
-          waitUntil: 'domcontentloaded', // Changed from networkidle0 for speed
-          timeout: 30000 // Reduced timeout
-        });
-        
-        // Wait for content to load
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        
-        // Extract article details
-        const articleDetails = await page.evaluate((baseUrl) => {
+  async fetchArticleDetails(articleUrl) {
+    let page;
+    try {
+      console.log(`📰 Fetching article details from: ${articleUrl}`);
+      const browser = await this.initBrowser();
+      page = await browser.newPage();
+      
+      await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      await page.setViewport({ width: 1920, height: 1080 });
+      
+      await page.goto(articleUrl, { waitUntil: 'networkidle0', timeout: 60000 });
+      
+      // Wait for content to load
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Extract article details
+      const articleDetails = await page.evaluate((baseUrl) => {
         // Find title
         const titleSelectors = [
           'h1',
@@ -442,31 +428,16 @@ class CricbuzzNewsScraper {
       }, this.baseUrl);
       
       await page.close();
-      
-      // Success! Return the details
       return {
         ...articleDetails,
         url: articleUrl
       };
-      
     } catch (error) {
       if (page) await page.close();
-      lastError = error;
-      
-      if (attempt < maxRetries) {
-        console.warn(`   ⚠️  Attempt ${attempt} failed: ${error.message}`);
-        // Continue to next retry
-      } else {
-        // All retries exhausted
-        console.error(`   ❌ All ${maxRetries} attempts failed for: ${articleUrl}`);
-      }
+      console.error(`❌ Error fetching article details: ${error.message}`);
+      throw error;
     }
   }
-  
-  // If we get here, all retries failed
-  console.error(`   ⚠️  Skipping article due to errors: ${articleUrl}`);
-  return null; // Return null instead of throwing to allow other articles to continue
-}
 
   /**
    * Fetch latest news with full details for each article
@@ -491,22 +462,13 @@ class CricbuzzNewsScraper {
         
         try {
           const details = await this.fetchArticleDetails(article.link);
+          detailedNews.push({
+            ...article,
+            details
+          });
           
-          if (details) {
-            // Successfully fetched details
-            detailedNews.push({
-              ...article,
-              details
-            });
-          } else {
-            // Details fetch failed after retries, use basic info
-            console.warn(`   ⚠️  Using basic info for: ${article.title}`);
-            detailedNews.push(article);
-          }
-          
-          // Add delay between requests to prevent connection overload
-          // Longer delay = more stable but slower
-          await this.delay(2000); // 2 seconds between articles
+          // Add a small delay to avoid rate limiting
+          await this.delay(1000);
         } catch (error) {
           console.error(`⚠️  Failed to fetch details for: ${article.title}`);
           // Still include the basic article info
