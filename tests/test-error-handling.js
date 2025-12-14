@@ -3,9 +3,11 @@
  * 
  * Tests all error scenarios for the Cricket API endpoints.
  * Run with: node tests/test-error-handling.js
+ * Or: API_URL=https://api.urtechy.com node tests/test-error-handling.js
  */
 
 const http = require('http');
+const https = require('https');
 
 const BASE_URL = process.env.API_URL || 'http://localhost:5003';
 
@@ -65,8 +67,9 @@ const testCases = [
 async function makeRequest(path) {
   return new Promise((resolve, reject) => {
     const url = new URL(path, BASE_URL);
+    const client = url.protocol === 'https:' ? https : http;
     
-    http.get(url.toString(), (res) => {
+    client.get(url.toString(), (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
