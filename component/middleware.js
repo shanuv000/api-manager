@@ -18,6 +18,7 @@ const allowedOrigins = [
   "https://urtechy.com",
   "https://*.urtechy.com",
   "https://blog.urtechy.com",
+  "https://play.urtechy.com",
   "http://localhost:[3-5]\\d{3}",
 ];
 
