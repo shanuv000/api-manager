@@ -200,7 +200,7 @@ router.get("/recent-scores", async (req, res) => {
     const cachedData = await getCache(cacheKey);
     
     if (cachedData) {
-      return res.json(JSON.parse(cachedData));
+      return res.json(cachedData); // Already an object from Upstash
     }
     
     // Cache miss - fetch from source

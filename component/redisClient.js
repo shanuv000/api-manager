@@ -17,6 +17,7 @@ async function getCache(key) {
     const data = await redis.get(key);
     if (data) {
       console.log(`✓ Cache HIT: ${key}`);
+      // Upstash Redis automatically deserializes JSON, so data is already an object
       return data;
     }
     console.log(`✗ Cache MISS: ${key}`);
@@ -35,7 +36,8 @@ async function getCache(key) {
  */
 async function setCache(key, value, ttl = 300) {
   try {
-    await redis.setex(key, ttl, JSON.stringify(value));
+    // Upstash Redis automatically serializes objects, use set with EX option
+    await redis.set(key, value, { ex: ttl });
     console.log(`✓ Cache SET: ${key} (TTL: ${ttl}s)`);
   } catch (error) {
     console.error(`Redis SET error for ${key}:`, error.message);
