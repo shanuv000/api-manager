@@ -106,7 +106,36 @@ The server uses the following middleware:
 
 ## Error Handling
 
-The server includes custom error handling middleware that catches and logs errors, returning a 500 status code with an error message to the client.
+The API uses structured error responses with specific error codes:
+
+| Error Code | Status | Description |
+|------------|--------|-------------|
+| `VALIDATION_ERROR` | 400 | Invalid input parameters |
+| `NOT_FOUND` | 404 | Resource not found |
+| `RATE_LIMITED` | 429 | Source rate limit exceeded |
+| `SCRAPING_FAILED` | 502 | Failed to scrape data |
+| `SERVICE_UNAVAILABLE` | 503 | Source temporarily unavailable |
+| `TIMEOUT` | 504 | Request timed out |
+
+**Error Response Format:**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Parameter \"limit\" must be a valid integer",
+    "details": { "field": "limit" },
+    "timestamp": "2025-12-15T00:30:00.000Z"
+  }
+}
+```
+
+### Testing Error Handling
+
+Run the error handling test suite:
+```bash
+API_URL=https://api-sync.vercel.app node tests/test-error-handling.js
+```
 
 ## Deployment
 
