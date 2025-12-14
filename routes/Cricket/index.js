@@ -1,9 +1,11 @@
+```javascript
 const express = require("express");
 const axios = require("axios");
 const cheerio = require("cheerio");
 
 const getScorecardDetails = require("./scorecard");
 const { getCache, setCache } = require("../../component/redisClient");
+const { parsePublishTime } = require("../../utils/timeParser");
 
 const router = express.Router();
 
@@ -363,7 +365,7 @@ router.get("/news", async (req, res) => {
                 content: article.details?.content || null,
                 imageUrl: article.imageUrl,
                 thumbnailUrl: article.details?.mainImage || article.imageUrl,
-                publishedTime: article.details?.publishedTime || article.publishedTime,
+                publishedTime: parsePublishTime(article.details?.publishedTime || article.publishedTime),
                 tags: article.details?.tags || [],
                 relatedArticles: article.details?.relatedArticles || null,
                 updatedAt: new Date()
