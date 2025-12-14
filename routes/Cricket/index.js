@@ -237,7 +237,7 @@ router.get("/live-scores", async (req, res) => {
     const cachedData = await getCache(cacheKey);
     
     if (cachedData) {
-      return res.json(JSON.parse(cachedData));
+      return res.json(cachedData); // Already an object from Upstash
     }
     
     // Cache miss - fetch from source
@@ -274,7 +274,7 @@ router.get("/upcoming-matches", async (req, res) => {
     const cachedData = await getCache(cacheKey);
     
     if (cachedData) {
-      return res.json(JSON.parse(cachedData));
+      return res.json(cachedData); // Already an object from Upstash
     }
     
     // Cache miss - fetch from source
