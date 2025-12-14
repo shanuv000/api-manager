@@ -1,10 +1,12 @@
-const puppeteer = require('puppeteer');
+// Use puppeteer-core for serverless compatibility
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
 const axios = require('axios');
 
 /**
  * Cricbuzz News Scraper
  * Fetches latest cricket news from Cricbuzz with detailed information
- * Uses a hybrid approach to handle dynamically loaded content
+ * Uses puppeteer-core with @sparticuz/chromium for serverless compatibility
  */
 class CricbuzzNewsScraper {
   constructor() {
@@ -14,14 +16,43 @@ class CricbuzzNewsScraper {
   }
 
   /**
-   * Initialize browser
+   * Initialize browser with serverless support
    */
   async initBrowser() {
     if (!this.browser) {
-      this.browser = await puppeteer.launch({
+      // Detect if running in serverless environment (Vercel/AWS Lambda)
+      const isServerless = !!process.env.AWS_LAMBDA_FUNCTION_NAME || !!process.env.VERCEL;
+      
+      const options = {
         headless: 'new',
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-      });
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--single-process',
+          '--no-zygote'
+        ]
+      };
+
+      if (isServerless) {
+        // Serverless: Use @sparticuz/chromium
+        console.log('🌐 Running in serverless environment, using @sparticuz/chromium');
+        options.executablePath = await chromium.executablePath();
+        options.args = [...options.args, ...chromium.args];
+      } else {
+        // Local: Try to find local Chromium from puppeteer package
+        console.log('💻 Running locally, using bundled Chromium');
+        try {
+          const puppeteerLocal = require('puppeteer');
+          options.executablePath = puppeteerLocal.executablePath();
+        } catch (e) {
+          console.log('⚠️  Puppeteer not found, will use system Chrome/Chromium');
+          // Let puppeteer-core try to find Chrome/Chromium automatically
+        }
+      }
+
+      this.browser = await puppeteer.launch(options);
     }
     return this.browser;
   }

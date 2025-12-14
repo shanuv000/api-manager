@@ -335,10 +335,13 @@ router.get("/news", async (req, res) => {
       });
     }
     
-    // STEP 2: Otherwise, scrape and save to database
-    console.log('🔄 Scraping fresh news from Cricbuzz...');
+    // STEP 2: If not enough fresh data, scrape from Cricbuzz (only on local/non-Vercel)
+    const isVercel = !!process.env.VERCEL;
+    
+    if (recentNews.length < limit && !isVercel) {
+      console.log('🔄 Scraping fresh news from Cricbuzz...');
     const CricbuzzNewsScraper = require("../../scrapers/cricbuzz-news-scraper");
-    const scraper = new CricbuzzNewsScraper();
+    scraper = new CricbuzzNewsScraper();
     
     try {
       const newsArticles = await scraper.fetchLatestNewsWithDetails(limit);
@@ -391,17 +394,30 @@ router.get("/news", async (req, res) => {
       }
       
       console.log(`✅ Saved ${savedArticles.length} articles to database`);
-      
-      res.json({
+      return res.json({
         success: true,
         count: savedArticles.length,
         data: savedArticles,
         source: 'scraped',
         timestamp: new Date().toISOString()
       });
+    } else if (recentNews.length < limit && isVercel) {
+      // On Vercel: Return what we have from database (scraping disabled due to 10s timeout)
+      console.log(`⚠️ Vercel environment detected - scraping disabled. Returning ${recentNews.length} articles from database.`);
+      
+      return res.json({
+        success: true,
+        count: recentNews.length,
+        data: recentNews,
+        source: 'database',
+        note: 'Scraping disabled on Vercel due to timeout limits. Database updated via GitHub Actions cron.',
+        timestamp: new Date().toISOString()
+      });
     } finally {
-      // Always close browser
-      await scraper.closeBrowser();
+      // Always close browser if it was initialized
+      if (scraper) {
+        await scraper.closeBrowser();
+      }
     }
   } catch (error) {
     console.error("Error fetching cricket news:", error.message);
