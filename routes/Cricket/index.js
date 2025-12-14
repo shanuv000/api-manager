@@ -3,6 +3,7 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 
 const getScorecardDetails = require("./scorecard");
+const { getCache, setCache } = require("../../component/redisClient");
 
 const router = express.Router();
 
@@ -165,25 +166,57 @@ const enrichMatchesWithScorecard = async (matches) => {
   );
 };
 
-// Helper to set Vercel Cache-Control headers
-// s-maxage=60: Cache at the edge (Vercel CDN) for 60 seconds
-// stale-while-revalidate=30: Serve stale content for 30s while updating in background
-const setCacheHeaders = (res) => {
-  res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=30");
+// Enhanced cache header helper with better strategies
+// Different caching strategies for different endpoints
+const setCacheHeaders = (res, options = {}) => {
+  const {
+    maxAge = 60,           // Edge cache time in seconds
+    staleWhileRevalidate = 30,  // Stale content serving time
+    mustRevalidate = false,     // Force revalidation
+  } = options;
+
+  const cacheControl = [
+    'public',
+    `s-maxage=${maxAge}`,
+    `stale-while-revalidate=${staleWhileRevalidate}`,
+  ];
+
+  if (mustRevalidate) {
+    cacheControl.push('must-revalidate');
+  }
+
+  res.setHeader('Cache-Control', cacheControl.join(', '));
+  res.setHeader('Vary', 'Accept-Encoding'); // Important for compressed responses
+  res.setHeader('X-Content-Type-Options', 'nosniff');
 };
 
 // Recent Scores endpoint
 router.get("/recent-scores", async (req, res) => {
   try {
-    setCacheHeaders(res);
+    setCacheHeaders(res, { maxAge: 60, staleWhileRevalidate: 30 });
+    
+    // Try to get from cache first
+    const cacheKey = "cricket:recent-scores";
+    const cachedData = await getCache(cacheKey);
+    
+    if (cachedData) {
+      return res.json(JSON.parse(cachedData));
+    }
+    
+    // Cache miss - fetch from source
     const matches = await scrapeCricbuzzMatches(urls.recentMatches);
     const enrichedMatches = await enrichMatchesWithScorecard(matches);
     
-    res.json({
+    const response = {
       success: true,
       count: enrichedMatches.length,
       data: enrichedMatches,
-    });
+    };
+    
+    // Cache for 1 hour (3600 seconds) - balance freshness and load
+    await setCache(cacheKey, response, 3600);
+    
+    res.json(response);
   } catch (error) {
     console.error("Error fetching recent matches:", error.message);
     res.status(500).json({
@@ -197,15 +230,30 @@ router.get("/recent-scores", async (req, res) => {
 // Live Scores endpoint
 router.get("/live-scores", async (req, res) => {
   try {
-    setCacheHeaders(res);
+    setCacheHeaders(res, { maxAge: 30, staleWhileRevalidate: 15 });
+    
+    // Try to get from cache first
+    const cacheKey = "cricket:live-scores";
+    const cachedData = await getCache(cacheKey);
+    
+    if (cachedData) {
+      return res.json(JSON.parse(cachedData));
+    }
+    
+    // Cache miss - fetch from source
     const matches = await scrapeCricbuzzMatches(urls.liveScores);
     const enrichedMatches = await enrichMatchesWithScorecard(matches);
 
-    res.json({
+    const response = {
       success: true,
       count: enrichedMatches.length,
       data: enrichedMatches,
-    });
+    };
+    
+    // Cache for 1 minute (60 seconds) - live scores change frequently
+    await setCache(cacheKey, response, 60);
+    
+    res.json(response);
   } catch (error) {
     console.error("Error fetching live scores:", error.message);
     res.status(500).json({
@@ -219,42 +267,39 @@ router.get("/live-scores", async (req, res) => {
 // Upcoming Matches endpoint
 router.get("/upcoming-matches", async (req, res) => {
   try {
-    setCacheHeaders(res);
+    setCacheHeaders(res, { maxAge: 120, staleWhileRevalidate: 60 });
+    
+    // Try to get from cache first
+    const cacheKey = "cricket:upcoming-matches";
+    const cachedData = await getCache(cacheKey);
+    
+    if (cachedData) {
+      return res.json(JSON.parse(cachedData));
+    }
+    
+    // Cache miss - fetch from source
     const matches = await scrapeCricbuzzMatches(urls.upcomingMatches);
     const enrichedMatches = await enrichMatchesWithScorecard(matches);
 
-    res.json({
+    const response = {
       success: true,
       count: enrichedMatches.length,
       data: enrichedMatches,
-    });
+    };
+    
+    // Cache for 3 hours (10800 seconds) - upcoming matches are very stable
+    await setCache(cacheKey, response, 10800);
+    
+    res.json(response);
   } catch (error) {
     console.error("Error fetching upcoming matches:", error.message);
     res.status(500).json({
       success: false,
       error: "Error fetching the webpage",
-      message: error.message,
+      message:error.message,
     });
   }
 });
 
-// Upcoming Matches endpoint
-router.get("/upcoming-matches", async (req, res) => {
-  try {
-    const matches = await scrapeCricbuzzMatches(urls.upcomingMatches);
-    res.json({
-      success: true,
-      count: matches.length,
-      data: matches,
-    });
-  } catch (error) {
-    console.error("Error fetching upcoming matches:", error.message);
-    res.status(500).json({
-      success: false,
-      error: "Error fetching the webpage",
-      message: error.message,
-    });
-  }
-});
 
 module.exports = router;

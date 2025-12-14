@@ -1,0 +1,50 @@
+name: Warm Cricket Cache
+
+on:
+  # Run every 30 minutes to keep cache fresh
+  schedule:
+    - cron: '*/30 * * * *'  # Every 30 minutes for recent scores
+    - cron: '0 */2 * * *'   # Every 2 hours for upcoming matches
+  
+  # Allow manual triggering
+  workflow_dispatch:
+
+jobs:
+  warm-cache:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Warm Recent Scores Cache
+        run: |
+          echo "🔥 Warming recent-scores cache..."
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.VERCEL_DOMAIN || 'your-api.vercel.app' }}/api/cricket/recent-scores)
+          if [ $response -eq 200 ]; then
+            echo "✅ Recent scores cache warmed successfully"
+          else
+            echo "⚠️ Warning: Recent scores returned status $response"
+          fi
+      
+      - name: Warm Live Scores Cache
+        run: |
+          echo "🔥 Warming live-scores cache..."
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.VERCEL_DOMAIN || 'your-api.vercel.app' }}/api/cricket/live-scores)
+          if [ $response -eq 200 ]; then
+            echo "✅ Live scores cache warmed successfully"
+          else
+            echo "⚠️ Warning: Live scores returned status $response"
+          fi
+      
+      - name: Warm Upcoming Matches Cache
+        run: |
+          echo "🔥 Warming upcoming-matches cache..."
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.VERCEL_DOMAIN || 'your-api.vercel.app' }}/api/cricket/upcoming-matches)
+          if [ $response -eq 200 ]; then
+            echo "✅ Upcoming matches cache warmed successfully"
+          else
+            echo "⚠️ Warning: Upcoming matches returned status $response"
+          fi
+      
+      - name: Summary
+        run: |
+          echo "🎉 Cache warming completed!"
+          echo "Users will now get instant responses from Redis cache"

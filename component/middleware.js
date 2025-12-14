@@ -4,6 +4,7 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const express = require("express");
 const path = require("path");
+const compression = require("compression");
 
 // List of allowed origins for CORS
 const allowedOrigins = [
@@ -60,6 +61,19 @@ const limiter = rateLimit({
 
 // Middleware setup function
 const setupMiddleware = (app) => {
+  // Compression should be first to compress all responses
+  app.use(compression({
+    filter: (req, res) => {
+      // Don't compress if client doesn't accept encoding
+      if (req.headers['x-no-compression']) {
+        return false;
+      }
+      // Use compression for all responses
+      return compression.filter(req, res);
+    },
+    level: 6, // Compression level (0-9, 6 is default and good balance)
+  }));
+  
   app.use(cors(corsOptions));
   app.use(express.json());
   app.use(helmet());

@@ -10,8 +10,6 @@ const cricketRoutes = require("./routes/Cricket/index");
 // const scheduleRoute = require("./routes/Cricket/schedule");
 // const espnRoute = require("./routes/Cricket/espn");
 
-const send3dContactInfo = require("./routes/hanldeFrontend/SendContactWA");
-
 const app = express();
 const PORT = process.env.PORT || 5003;
 
@@ -34,8 +32,6 @@ app.use("/api/cricket", cricketRoutes);
 // app.use("/api/cricket", t20WorldCupRoute);
 // app.use("/api/cricket", espnRoute);
 
-app.use("/api/contact", send3dContactInfo);
-
 // Fallback route for undefined endpoints
 app.use((req, res) => {
   res.status(404).json({ error: "Endpoint not found" });
@@ -49,8 +45,45 @@ app.use((err, req, res, next) => {
 });
 
 // Start the server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+});
+
+// Graceful shutdown handling
+const gracefulShutdown = (signal) => {
+  console.log(`\n${signal} received. Starting graceful shutdown...`);
+  
+  // Stop accepting new connections
+  server.close(() => {
+    console.log('HTTP server closed.');
+    
+    // Close database connections if any
+    // Add your cleanup code here (e.g., Redis, database connections)
+    
+    console.log('Graceful shutdown completed.');
+    process.exit(0);
+  });
+  
+  // Force shutdown after 10 seconds
+  setTimeout(() => {
+    console.error('Forced shutdown after timeout.');
+    process.exit(1);
+  }, 10000);
+};
+
+// Listen for termination signals
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Handle uncaught errors
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+  gracefulShutdown('UNCAUGHT_EXCEPTION');
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  gracefulShutdown('UNHANDLED_REJECTION');
 });
 
 module.exports = app;

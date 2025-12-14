@@ -1,32 +1,35 @@
 {
   "name": "manager-api",
   "version": "1.0.0",
-  "description": "API Manager for Cricket Scores from Cricbuzz and other services",
+  "description": "Cricket API - Live scores, match details, and statistics from Cricbuzz",
   "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js",
     "dev": "nodemon server.js"
   },
-  "keywords": ["cricket", "api", "cricbuzz", "scraper", "live-scores"],
+  "keywords": [
+    "cricket",
+    "api",
+    "cricbuzz",
+    "scraper",
+    "live-scores",
+    "sports"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@upstash/redis": "^1.35.8",
     "axios": "^1.7.2",
     "cheerio": "^1.0.0-rc.12",
+    "compression": "^1.8.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "emailjs-com": "^3.2.0",
     "express": "^4.19.2",
     "express-rate-limit": "^7.3.1",
     "helmet": "^7.1.0",
-    "node-cron": "^3.0.3",
-    "node-telegram-bot-api": "^0.66.0",
-    "nodemailer": "^6.9.13",
     "path": "^0.12.7",
     "puppeteer": "^22.15.0",
-    "twilio": "^5.2.0",
-    "twitter-api-v2": "^1.17.2",
     "ws": "^8.17.0"
   }
 }

@@ -1,27 +1,26 @@
-# API Sync - Express-Based API Server
+# Cricket API - Live Scores & Match Data
 
-API Sync is a robust and secure Express.js server designed to provide a variety of data, including:
+A robust and secure Express.js API server designed to provide real-time cricket data from Cricbuzz:
 
-- **Live Cricket Scores:** Up-to-the-minute updates for cricket enthusiasts.
-- **T20 World Cup 2024 Information:** Essential details about the tournament.
-- **Student Data:** Information related to students.
-- **Schedule Information:** Schedules for various events.
-- **Ecommerce Data (Flipkart):** Product details from Flipkart for shopping integrations.
-- **ESPN Cricinfo Data:** Cricket news, match details, and more from a trusted source.
+- **Live Cricket Scores:** Up-to-the-minute updates for cricket enthusiasts
+- **Recent Matches:** Detailed information about recently completed matches
+- **Upcoming Matches:** Schedules and details for upcoming cricket fixtures
+- **Scorecard Details:** Comprehensive batting and bowling statistics
 
 ## Features
 
-- **Security:** Employs Helmet middleware to enhance security by setting appropriate HTTP headers.
-- **Rate Limiting:** Protects against abuse by limiting the number of requests per IP address.
-- **CORS Handling:** Allows controlled access from specific origins, such as your frontend applications.
-- **Error Handling:** Robustly handles errors with a centralized middleware, ensuring a smooth user experience.
-- **Structured Routing:** Organizes routes into separate files for better maintainability and scalability.
+- **Security:** Employs Helmet middleware to enhance security by setting appropriate HTTP headers
+- **Rate Limiting:** Protects against abuse by limiting requests per IP address (30 requests/minute)
+- **CORS Handling:** Allows controlled access from specific origins
+- **Error Handling:** Robustly handles errors with centralized middleware
+- **Edge Caching:** Optimized for Vercel deployment with CDN caching
+- **Structured Routing:** Organized routes for better maintainability
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js (v12 or higher recommended)
+- Node.js (v14 or higher recommended)
 - npm or yarn package manager
 
 ### Installation
@@ -29,16 +28,13 @@ API Sync is a robust and secure Express.js server designed to provide a variety 
 1. **Clone the Repository:**
 
    ```bash
-   git clone https://github.com/your-username/api-sync.git
+   git clone https://github.com/your-username/cricket-api.git
+   cd cricket-api
    ```
 
 2. **Install Dependencies:**
    ```bash
    npm install
-   ```
-   or
-   ```bash
-   yarn install
    ```
 
 ### Running the Server
@@ -47,27 +43,22 @@ API Sync is a robust and secure Express.js server designed to provide a variety 
 npm start
 ```
 
-or
+or for development with auto-reload:
 
 ```bash
-yarn start
+npm run dev
 ```
 
-The server will be running at `http://localhost:5000` by default.
+The server will be running at `http://localhost:5003` by default.
 
 ## API Endpoints
 
-The server provides several endpoints for accessing different types of data:
+The server provides several endpoints for accessing cricket data:
 
 - **Cricket:**
-  - `/api/cricket/live-scores` - Get live cricket scores.
-  - `/api/cricket/schedule` - Get match schedules.
-  - `/api/cricket/t20-world-cup-2024` - Get information about the T20 World Cup 2024.
-  - `/api/cricket/espn` - Get cricket news and match details from ESPN Cricinfo.
-- **Ecommerce:**
-  - `/api/buy/flipkart` - Get product details from Flipkart.
-- **Students:**
-  - `/api/students` - Get information about students.
+  - `/api/cricket/recent-scores` - Get recently completed matches with full details
+  - `/api/cricket/live-scores` - Get currently live matches with real-time updates
+  - `/api/cricket/upcoming-matches` - Get scheduled upcoming matches
 
 **Example Usage (Live Scores)**
 
@@ -75,35 +66,66 @@ The server provides several endpoints for accessing different types of data:
 GET /api/cricket/live-scores
 ```
 
-This will return a JSON response containing live cricket scores.
+This will return a JSON response containing live cricket scores with detailed match information.
+
+## Response Format
+
+All endpoints return:
+
+```json
+{
+  "success": true,
+  "count": 6,
+  "data": [
+    {
+      "title": "India vs Australia, 1st Test",
+      "teams": ["India", "Australia"],
+      "teamAbbr": ["IND", "AUS"],
+      "scores": ["350/8", "280-10"],
+      "location": "Perth Stadium, Perth",
+      "liveCommentary": "India won by 70 runs",
+      "links": {
+        "Live Score": "https://...",
+        "Scorecard": "https://...",
+        "Full Commentary": "https://..."
+      },
+      "scorecard": [...]
+    }
+  ]
+}
+```
 
 ## Middleware
 
 The server uses the following middleware:
 
-- **cors:** Enables Cross-Origin Resource Sharing (CORS) to allow requests from specific origins.
-- **express.json():** Parses incoming JSON requests.
-- **helmet():** Sets security-related HTTP headers.
-- **express-rate-limit:** Limits the number of requests from a single IP address.
+- **cors:** Enables Cross-Origin Resource Sharing (CORS) for specific origins
+- **express.json():** Parses incoming JSON requests
+- **helmet():** Sets security-related HTTP headers
+- **express-rate-limit:** Limits requests from a single IP address
 
 ## Error Handling
 
-The server includes a custom error handling middleware that catches and logs errors, returning a 500 status code with an error message to the client.
+The server includes custom error handling middleware that catches and logs errors, returning a 500 status code with an error message to the client.
 
 ## Deployment
 
-This project is currently deployed on Vercel at [https://api-sync.vercel.app/](https://api-sync.vercel.app/).
+This project is optimized for deployment on Vercel with serverless functions.
 
 ## Project Structure
 
-- `index.js`: Main server file responsible for setup and routing.
-- `routes/`:
-  - `Cricket/`: Contains routes for cricket-related data.
-  - `ecommerce/`: Contains routes for Flipkart product data.
-  - `students/`: Contains routes for student data.
+- `server.js`: Main server file responsible for setup and routing
+- `routes/Cricket/`: Contains all cricket-related routes and scrapers
+  - `index.js`: Main cricket routes (recent, live, upcoming)
+  - `scorecard.js`: Scorecard scraping functionality
+- `component/`: Middleware and utility components
+  - `middleware.js`: Security, CORS, and rate limiting setup
+
+## Documentation
+
+See `CRICKET_API.md` for detailed API documentation.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the ISC License.
 
-Let me know if you have any other questions!

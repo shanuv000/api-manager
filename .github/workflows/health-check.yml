@@ -1,0 +1,51 @@
+name: API Health Check
+
+on:
+  # Run every 6 hours to monitor API health
+  schedule:
+    - cron: '0 */6 * * *'
+  
+  # Allow manual triggering
+  workflow_dispatch:
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Check Recent Scores Endpoint
+        run: |
+          echo "🔍 Checking /api/cricket/recent-scores..."
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.VERCEL_DOMAIN || 'your-api.vercel.app' }}/api/cricket/recent-scores)
+          if [ $response -eq 200 ]; then
+            echo "✅ Recent scores endpoint is healthy"
+          else
+            echo "❌ Recent scores endpoint returned $response"
+            exit 1
+          fi
+      
+      - name: Check Live Scores Endpoint
+        run: |
+          echo "🔍 Checking /api/cricket/live-scores..."
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.VERCEL_DOMAIN || 'your-api.vercel.app' }}/api/cricket/live-scores)
+          if [ $response -eq 200 ]; then
+            echo "✅ Live scores endpoint is healthy"
+          else
+            echo "❌ Live scores endpoint returned $response"
+            exit 1
+          fi
+      
+      - name: Check Upcoming Matches Endpoint
+        run: |
+          echo "🔍 Checking /api/cricket/upcoming-matches..."
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.VERCEL_DOMAIN || 'your-api.vercel.app' }}/api/cricket/upcoming-matches)
+          if [ $response -eq 200 ]; then
+            echo "✅ Upcoming matches endpoint is healthy"
+          else
+            echo "❌ Upcoming matches endpoint returned $response"
+            exit 1
+          fi
+      
+      - name: Health Check Summary
+        run: |
+          echo "🎉 All API endpoints are healthy!"
