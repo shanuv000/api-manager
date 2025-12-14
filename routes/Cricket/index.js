@@ -432,6 +432,22 @@ router.get('/news/:slug', async (req, res) => {
     if (!article) {
       return res.status(404).json({
         success: false,
-
+        error: 'Article not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: article
+    });
+  } catch (error) {
+    console.error('Error fetching article:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Error fetching article',
+      message: error.message
+    });
+  }
+});
 
 module.exports = router;
