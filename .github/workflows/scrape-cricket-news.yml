@@ -2,7 +2,9 @@ name: Scrape Cricket News
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # Every 6 hours
+    # Runs at 6 AM, 12 PM, 6 PM, 12 AM IST (every 6 hours)
+    # IST = UTC + 5:30, so 6 AM IST = 00:30 UTC
+    - cron: '30 0,6,12,18 * * *'
   workflow_dispatch:  # Manual trigger
 
 jobs:
