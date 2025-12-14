@@ -16,6 +16,23 @@ class CricbuzzNewsScraper {
   }
 
   /**
+   * Helper: Convert low-quality image URL to high-quality
+   * Cricbuzz uses URL parameters: ?d=low&p=det
+   * We remove parameters or change to ?d=high for better quality
+   */
+  getHighQualityImageUrl(imageUrl) {
+    if (!imageUrl) return null;
+    
+    try {
+      // Remove quality parameters to get original/best quality
+      // Or replace d=low with d=high
+      return imageUrl.split('?')[0]; // Gets base URL without parameters
+    } catch (e) {
+      return imageUrl; // Return original if parsing fails
+    }
+  }
+
+  /**
    * Initialize browser with serverless support
    */
   async initBrowser() {
@@ -199,18 +216,18 @@ class CricbuzzNewsScraper {
             }
 
             
-            const newsId = href.split('/').pop() || '';
-            
-            articles.push({
-              id: newsId,
-              title,
-              description,
-              link: href,
-              imageUrl: imageUrl || null,
-              publishedTime,
-              source: 'Cricbuzz',
-              scrapedAt: new Date().toISOString()
-            });
+           const article = {
+            id: link.href.split('/').pop(),
+            title,
+            description,
+            link: link.href,
+            imageUrl: imageUrl || null,
+            thumbnailUrl: this.getHighQualityImageUrl(imageUrl), // High-quality version
+            publishedTime,
+            source: 'Cricbuzz',
+            scrapedAt: new Date().toISOString()
+          };
+          articles.push(article);
           });
         });
         
