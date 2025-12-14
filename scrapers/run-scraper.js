@@ -8,9 +8,11 @@ const {Pool} = require('pg');
 const {parsePublishTime} = require('../utils/timeParser');
 const {generateTags} = require('../utils/perplexityTagger');
 
-// Use DIRECT_URL for direct PostgreSQL connection (bypasses PgBouncer for stability)
-// Falls back to DATABASE_URL if DIRECT_URL is not set
-const connectionString = process.env.DIRECT_URL || process.env.DATABASE_URL;
+// In CI environments (GitHub Actions, Vercel), use DATABASE_URL with PgBouncer
+// DIRECT_URL uses IPv6 which is unreachable from GitHub Actions runners
+// For local dev, DIRECT_URL is preferred for long-running operations
+const isCI = !!process.env.CI || !!process.env.GITHUB_ACTIONS || !!process.env.VERCEL;
+const connectionString = isCI ? process.env.DATABASE_URL : (process.env.DIRECT_URL || process.env.DATABASE_URL);
 
 /**
  * Generate a unique SEO meta description
