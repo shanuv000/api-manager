@@ -5,6 +5,21 @@ const cheerio = require("cheerio");
 const getScorecardDetails = require("./scorecard");
 const { getCache, setCache } = require("../../component/redisClient");
 const { parsePublishTime } = require("../../utils/timeParser");
+const {
+  ApiError,
+  ValidationError,
+  NotFoundError,
+  RateLimitError,
+  ScrapingError,
+  TimeoutError,
+  ServiceUnavailableError,
+  handleAxiosError,
+  retryWithBackoff,
+  validatePaginationParams,
+  validateSlug,
+  sendError,
+  isRateLimited
+} = require("../../utils/apiErrors");
 
 const router = express.Router();
 
@@ -170,15 +185,33 @@ router.get("/", (req, res) => {
 
 // Common scraping function with optional maxResults limit
 const scrapeCricbuzzMatches = async (url, maxResults = null) => {
-  const response = await axios.get(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    },
-    timeout: 10000,
-  });
+  let response;
+  try {
+    response = await axios.get(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+      },
+      timeout: 10000,
+    });
+  } catch (error) {
+    throw handleAxiosError(error, 'Cricbuzz scraping');
+  }
 
   const html = response.data;
+  
+  // Check for rate limiting in response
+  if (isRateLimited(response, html)) {
+    throw new RateLimitError('Cricbuzz', 60);
+  }
+  
+  // Check if we got valid HTML
+  if (!html || typeof html !== 'string' || html.length < 1000) {
+    throw new ScrapingError('Received empty or invalid response from Cricbuzz', 'Cricbuzz');
+  }
+
   const $ = cheerio.load(html);
   const matches = [];
   const processedLinks = new Set();
@@ -607,9 +640,15 @@ router.get("/recent-scores", async (req, res) => {
   try {
     setCacheHeaders(res, { maxAge: 60, staleWhileRevalidate: 30 });
     
-    // Parse query parameters - default to 20 for better performance
-    const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 20), 50);
-    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    // Validate query parameters
+    let limit, offset;
+    try {
+      const validated = validatePaginationParams(req.query, { defaultLimit: 20, maxLimit: 50, allowNoLimit: false });
+      limit = validated.limit;
+      offset = validated.offset;
+    } catch (validationError) {
+      return sendError(res, validationError);
+    }
     
     // Try to get from cache first
     const cacheKey = "cricket:recent-scores";
@@ -658,11 +697,18 @@ router.get("/recent-scores", async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching recent matches:", error.message);
-    res.status(500).json({
-      success: false,
-      error: "Error fetching the webpage",
-      message: error.message,
-    });
+    // Try to return cached data as fallback
+    try {
+      const cacheKey = "cricket:recent-scores";
+      const staleCache = await getCache(cacheKey);
+      if (staleCache) {
+        console.log('Returning stale cache due to error');
+        return res.json({ ...staleCache, stale: true, error_note: 'Serving cached data due to source error' });
+      }
+    } catch (cacheError) {
+      console.error('Cache fallback failed:', cacheError.message);
+    }
+    return sendError(res, error);
   }
 });
 
@@ -671,9 +717,15 @@ router.get("/live-scores", async (req, res) => {
   try {
     setCacheHeaders(res, { maxAge: 30, staleWhileRevalidate: 15 });
     
-    // Parse query parameters
-    const limit = req.query.limit ? Math.min(Math.max(1, parseInt(req.query.limit) || 50), 50) : null;
-    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    // Validate query parameters
+    let limit, offset;
+    try {
+      const validated = validatePaginationParams(req.query, { defaultLimit: null, maxLimit: 50, allowNoLimit: true });
+      limit = validated.limit;
+      offset = validated.offset;
+    } catch (validationError) {
+      return sendError(res, validationError);
+    }
     
     // Try to get from cache first
     const cacheKey = "cricket:live-scores";
@@ -723,11 +775,18 @@ router.get("/live-scores", async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching live scores:", error.message);
-    res.status(500).json({
-      success: false,
-      error: "Error fetching the webpage",
-      message: error.message,
-    });
+    // Try to return cached data as fallback
+    try {
+      const cacheKey = "cricket:live-scores";
+      const staleCache = await getCache(cacheKey);
+      if (staleCache) {
+        console.log('Returning stale cache due to error');
+        return res.json({ ...staleCache, stale: true, error_note: 'Serving cached data due to source error' });
+      }
+    } catch (cacheError) {
+      console.error('Cache fallback failed:', cacheError.message);
+    }
+    return sendError(res, error);
   }
 });
 
@@ -736,9 +795,15 @@ router.get("/upcoming-matches", async (req, res) => {
   try {
     setCacheHeaders(res, { maxAge: 120, staleWhileRevalidate: 60 });
     
-    // Parse query parameters
-    const limit = req.query.limit ? Math.min(Math.max(1, parseInt(req.query.limit) || 50), 50) : null;
-    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    // Validate query parameters
+    let limit, offset;
+    try {
+      const validated = validatePaginationParams(req.query, { defaultLimit: null, maxLimit: 50, allowNoLimit: true });
+      limit = validated.limit;
+      offset = validated.offset;
+    } catch (validationError) {
+      return sendError(res, validationError);
+    }
     
     // Try to get from cache first
     const cacheKey = "cricket:upcoming-matches";
@@ -788,11 +853,18 @@ router.get("/upcoming-matches", async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching upcoming matches:", error.message);
-    res.status(500).json({
-      success: false,
-      error: "Error fetching the webpage",
-      message: error.message,
-    });
+    // Try to return cached data as fallback
+    try {
+      const cacheKey = "cricket:upcoming-matches";
+      const staleCache = await getCache(cacheKey);
+      if (staleCache) {
+        console.log('Returning stale cache due to error');
+        return res.json({ ...staleCache, stale: true, error_note: 'Serving cached data due to source error' });
+      }
+    } catch (cacheError) {
+      console.error('Cache fallback failed:', cacheError.message);
+    }
+    return sendError(res, error);
   }
 });
 
@@ -932,18 +1004,21 @@ router.get("/news", async (req, res) => {
     }
   } catch (error) {
     console.error("Error fetching cricket news:", error.message);
-    res.status(500).json({
-      success: false,
-      error: "Error fetching cricket news",
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 });
 
 // Get single article by slug (SEO endpoint)
 router.get('/news/:slug', async (req, res) => {
-  // Get single news article by slug (cricket only)
   try {
+    // Validate slug parameter
+    let slug;
+    try {
+      slug = validateSlug(req.params.slug);
+    } catch (validationError) {
+      return sendError(res, validationError);
+    }
+    
     // Set cache headers (1 hour)
     res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400');
     
@@ -951,16 +1026,13 @@ router.get('/news/:slug', async (req, res) => {
     
     const article = await prisma.newsArticle.findFirst({
       where: { 
-        slug: req.params.slug,
+        slug: slug,
         sport: 'cricket'
       }
     });
     
     if (!article) {
-      return res.status(404).json({
-        success: false,
-        error: 'Article not found'
-      });
+      return sendError(res, new NotFoundError('Article'));
     }
     
     res.json({
@@ -969,11 +1041,7 @@ router.get('/news/:slug', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching article:', error.message);
-    res.status(500).json({
-      success: false,
-      error: 'Error fetching article',
-      message: error.message
-    });
+    return sendError(res, error);
   }
 });
 
