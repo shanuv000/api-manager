@@ -18,8 +18,156 @@ const urls = {
     "https://www.cricbuzz.com/cricket-match/live-scores/upcoming-matches",
 };
 
-// Common scraping function
-const scrapeCricbuzzMatches = async (url) => {
+// API Documentation - Self-documenting endpoint
+router.get("/", (req, res) => {
+  const baseUrl = `${req.protocol}://${req.get("host")}/api/cricket`;
+  
+  res.json({
+    name: "Cricket API",
+    version: "1.0.0",
+    description: "Real-time cricket scores, matches, and news scraped from Cricbuzz",
+    baseUrl,
+    documentation: {
+      note: "All endpoints return JSON responses with consistent structure",
+      authentication: "No authentication required",
+      rateLimit: "No rate limit (cached responses)",
+      caching: "Responses are cached in Redis for optimal performance"
+    },
+    endpoints: [
+      {
+        path: "/live-scores",
+        method: "GET",
+        description: "Get currently live cricket matches with real-time scores",
+        cacheTTL: "60 seconds",
+        parameters: {
+          limit: { type: "integer", required: false, default: "all", max: 50, description: "Maximum matches to return" },
+          offset: { type: "integer", required: false, default: 0, description: "Skip first N matches (for pagination)" }
+        },
+        response: {
+          success: "boolean",
+          count: "number (returned items)",
+          total: "number (total available)",
+          offset: "number",
+          limit: "number",
+          data: "array of match objects"
+        },
+        example: `${baseUrl}/live-scores?limit=5`
+      },
+      {
+        path: "/recent-scores",
+        method: "GET",
+        description: "Get recently completed cricket matches with final scores (optimized: max 30 scraped)",
+        cacheTTL: "1 hour",
+        parameters: {
+          limit: { type: "integer", required: false, default: 20, max: 50, description: "Maximum matches to return (default: 20)" },
+          offset: { type: "integer", required: false, default: 0, description: "Skip first N matches (for pagination)" }
+        },
+        response: {
+          success: "boolean",
+          count: "number",
+          total: "number (max 30 due to scrape limit)",
+          offset: "number",
+          limit: "number",
+          data: "array of match objects"
+        },
+        example: `${baseUrl}/recent-scores?limit=10`
+      },
+      {
+        path: "/upcoming-matches",
+        method: "GET",
+        description: "Get scheduled upcoming cricket matches with start times",
+        cacheTTL: "3 hours",
+        parameters: {
+          limit: { type: "integer", required: false, default: "all", max: 50, description: "Maximum matches to return" },
+          offset: { type: "integer", required: false, default: 0, description: "Skip first N matches (for pagination)" }
+        },
+        response: {
+          success: "boolean",
+          count: "number",
+          total: "number",
+          offset: "number",
+          limit: "number",
+          data: "array of match objects"
+        },
+        example: `${baseUrl}/upcoming-matches?limit=5&offset=0`
+      },
+      {
+        path: "/news",
+        method: "GET",
+        description: "Get latest cricket news articles from Cricbuzz",
+        cacheTTL: "30 minutes",
+        parameters: {
+          limit: { type: "integer", required: false, default: 10, max: 20, description: "Maximum articles to return" }
+        },
+        response: {
+          success: "boolean",
+          count: "number",
+          data: "array of news article objects",
+          source: "string (database|scraped)"
+        },
+        example: `${baseUrl}/news?limit=5`
+      },
+      {
+        path: "/news/:slug",
+        method: "GET",
+        description: "Get single news article by slug (ID)",
+        cacheTTL: "1 hour",
+        parameters: {
+          slug: { type: "string", required: true, location: "path", description: "Article unique identifier" }
+        },
+        response: {
+          success: "boolean",
+          data: "news article object with full content"
+        },
+        example: `${baseUrl}/news/136890`
+      }
+    ],
+    matchObject: {
+      description: "Structure of match objects returned by score endpoints",
+      fields: {
+        title: "string - Full match title (e.g., 'India vs Australia, 2nd Test')",
+        matchLink: "string - URL to match page on Cricbuzz",
+        matchDetails: "string - Match description",
+        status: "string - Current match status",
+        time: "string - Match start time (for upcoming) or result (for completed)",
+        matchStartTime: "object - Detailed time info with ISO date",
+        location: "string - Venue location",
+        teams: "array - Full team names",
+        teamAbbr: "array - Team abbreviations",
+        team1Icon: "string - URL to team 1 logo image",
+        team2Icon: "string - URL to team 2 logo image",
+        playingTeamBat: "string - Team currently batting",
+        playingTeamBall: "string - Team currently bowling",
+        liveScorebat: "string - Current batting team score",
+        liveScoreball: "string - Current bowling team score",
+        liveCommentary: "string - Latest match commentary",
+        links: "object - URLs to scorecard, full commentary, news",
+        scorecard: "object - Detailed scorecard (when available)"
+      }
+    },
+    newsObject: {
+      description: "Structure of news article objects",
+      fields: {
+        id: "string - Unique article identifier",
+        title: "string - Article headline",
+        description: "string - Article summary",
+        imageUrl: "string - Featured image URL",
+        publishedAt: "string - ISO date of publication",
+        content: "string - Full article content (in single article endpoint)",
+        tags: "array - Article tags/categories",
+        sourceName: "string - Source website name"
+      }
+    },
+    examples: {
+      pagination: `${baseUrl}/live-scores?limit=5&offset=10`,
+      allMatches: `${baseUrl}/live-scores`,
+      firstFiveUpcoming: `${baseUrl}/upcoming-matches?limit=5`
+    }
+  });
+});
+
+// Common scraping function with optional maxResults limit
+const scrapeCricbuzzMatches = async (url, maxResults = null) => {
   const response = await axios.get(url, {
     headers: {
       "User-Agent":
@@ -32,6 +180,77 @@ const scrapeCricbuzzMatches = async (url) => {
   const $ = cheerio.load(html);
   const matches = [];
   const processedLinks = new Set();
+
+  // Extract match times from JSON-LD SportsEvent data
+  // The page contains script tags with structured data including startDate and eventStatus
+  const matchTimeMap = new Map();
+  try {
+    // Parse JSON-LD script tags
+    const scriptTags = $('script[type="application/ld+json"]');
+    scriptTags.each((i, script) => {
+      try {
+        const content = $(script).html();
+        if (content && content.includes('SportsEvent')) {
+          const jsonData = JSON.parse(content);
+          
+          // Helper function to extract SportsEvent data
+          const extractSportsEvents = (items) => {
+            if (!Array.isArray(items)) return;
+            for (const item of items) {
+              if (item['@type'] === 'SportsEvent') {
+                const name = item.name;
+                const startDate = item.startDate;
+                const status = item.eventStatus;
+                if (name && (startDate || status)) {
+                  matchTimeMap.set(name, { startDate, status });
+                }
+              }
+            }
+          };
+          
+          // Handle WebPage with mainEntity.itemListElement (actual Cricbuzz format)
+          if (jsonData['@type'] === 'WebPage' && jsonData.mainEntity?.itemListElement) {
+            extractSportsEvents(jsonData.mainEntity.itemListElement);
+          }
+          // Handle ItemList containing SportsEvents
+          if (jsonData['@type'] === 'ItemList' && jsonData.itemListElement) {
+            extractSportsEvents(jsonData.itemListElement);
+          }
+          // Handle direct SportsEvent
+          if (jsonData['@type'] === 'SportsEvent') {
+            const name = jsonData.name;
+            const startDate = jsonData.startDate;
+            const status = jsonData.eventStatus;
+            if (name && (startDate || status)) {
+              matchTimeMap.set(name, { startDate, status });
+            }
+          }
+        }
+      } catch (e) {
+        // JSON parse error, skip
+      }
+    });
+    
+    // Also extract from embedded RSC payload - look for SportsEvent pattern
+    const sportsEvents = html.match(/"@type":"SportsEvent","name":"([^"]+)"[^}]*?"startDate":"([^"]+)"[^}]*?"eventStatus":"([^"]+)"/g);
+    if (sportsEvents) {
+      for (const eventStr of sportsEvents) {
+        const nameMatch = eventStr.match(/"name":"([^"]+)"/);
+        const dateMatch = eventStr.match(/"startDate":"([^"]+)"/);
+        const statusMatch = eventStr.match(/"eventStatus":"([^"]+)"/);
+        if (nameMatch && (dateMatch || statusMatch)) {
+          matchTimeMap.set(nameMatch[1], {
+            startDate: dateMatch ? dateMatch[1] : null,
+            status: statusMatch ? statusMatch[1] : null
+          });
+        }
+      }
+    }
+    
+    console.log(`Found ${matchTimeMap.size} match times from page data`);
+  } catch (e) {
+    console.log('Time extraction error (non-critical):', e.message);
+  }
 
   const matchElements = $("a.w-full.bg-cbWhite.flex.flex-col");
 
@@ -49,6 +268,10 @@ const scrapeCricbuzzMatches = async (url) => {
     const match = {};
     match.title = title.trim();
     match.matchLink = href ? `https://www.cricbuzz.com${href}` : null;
+    
+    // Extract match ID from href for lookup
+    const matchIdMatch = href.match(/\/(\d+)\//);
+    const matchId = matchIdMatch ? matchIdMatch[1] : null;
 
     const titleParts = title.split(" - ");
     if (titleParts.length >= 2) {
@@ -65,6 +288,7 @@ const scrapeCricbuzzMatches = async (url) => {
     const teams = [];
     const teamAbbr = [];
     const scores = [];
+    const teamIcons = [];
 
     $matchCard
       .find("div.flex.items-center.gap-4.justify-between")
@@ -88,6 +312,17 @@ const scrapeCricbuzzMatches = async (url) => {
           .text()
           .trim();
         if (score) scores.push(score);
+        
+        // Extract team icon
+        const iconImg = $row.find("img").first();
+        const iconSrc = iconImg.attr("src");
+        if (iconSrc) {
+          // Ensure full URL
+          const fullIconUrl = iconSrc.startsWith("http") 
+            ? iconSrc 
+            : `https://static.cricbuzz.com${iconSrc}`;
+          teamIcons.push(fullIconUrl);
+        }
       });
 
     if (teams.length >= 2) {
@@ -115,6 +350,19 @@ const scrapeCricbuzzMatches = async (url) => {
       match.liveScoreball = "N/A";
     }
     match.scores = scores;
+    
+    // Add team icons
+    match.teamIcons = teamIcons;
+    if (teamIcons.length >= 2) {
+      match.team1Icon = teamIcons[0];
+      match.team2Icon = teamIcons[1];
+    } else if (teamIcons.length === 1) {
+      match.team1Icon = teamIcons[0];
+      match.team2Icon = null;
+    } else {
+      match.team1Icon = null;
+      match.team2Icon = null;
+    }
 
     const resultSpan = $matchCard
       .find(
@@ -140,8 +388,79 @@ const scrapeCricbuzzMatches = async (url) => {
       ] = `https://www.cricbuzz.com/cricket-match-news/${basePath}`;
     }
 
-    match.time = "N/A";
+    // Try to get time from JSON-LD data
+    // JSON-LD names are like "2nd Match, Big Bash League 2025-26"
+    // Scraped titles are like "Melbourne Renegades vs Brisbane Heat, 2nd Match"
+    // We need to find the common match description (e.g., "2nd Match", "7th Match")
+    let timeInfo = null;
+    
+    // Extract match number/description from scraped data
+    const matchDescParts = match.matchDetails?.split(',') || [];
+    const matchNumber = matchDescParts.find(part => 
+      /\d+(st|nd|rd|th)\s+(match|test|odi|t20)/i.test(part.trim())
+    )?.trim();
+    
+    // Try to match by match description
+    for (const [eventName, value] of matchTimeMap) {
+      // Check if the event name starts with similar match description
+      if (matchNumber && eventName.toLowerCase().includes(matchNumber.toLowerCase())) {
+        timeInfo = value;
+        break;
+      }
+      // Also check if scraped matchDetails contains the key parts of event name
+      const eventParts = eventName.split(',');
+      if (eventParts.length > 0 && match.matchDetails?.includes(eventParts[0].trim())) {
+        timeInfo = value;
+        break;
+      }
+    }
+
+    if (timeInfo && timeInfo.status) {
+      // Parse "Match starts at Dec 15, 08:15 GMT" format
+      const matchStartsMatch = timeInfo.status.match(/Match starts at\s+(?:([A-Za-z]+\s+\d{1,2}),?\s+)?(\d{1,2}:\d{2})\s*(GMT|IST|Local)?/i);
+      if (matchStartsMatch) {
+        const datePart = matchStartsMatch[1] || '';
+        const timePart = matchStartsMatch[2];
+        const tzPart = matchStartsMatch[3] || 'GMT';
+        match.time = datePart ? `${datePart}, ${timePart} ${tzPart}` : `${timePart} ${tzPart}`;
+        match.matchStartTime = {
+          date: datePart || null,
+          time: timePart,
+          timezone: tzPart,
+          startDateISO: timeInfo.startDate,
+          raw: timeInfo.status
+        };
+      } else {
+        match.time = timeInfo.status;
+        match.matchStartTime = { startDateISO: timeInfo.startDate, raw: timeInfo.status };
+      }
+    } else if (match.liveCommentary) {
+      // Fallback: try to extract from liveCommentary
+      const matchStartsMatch = match.liveCommentary.match(/Match starts at\s+(?:([A-Za-z]+\s+\d{1,2}),?\s+)?(\d{1,2}:\d{2})\s*(GMT|IST|Local)?/i);
+      if (matchStartsMatch) {
+        const datePart = matchStartsMatch[1] || '';
+        const timePart = matchStartsMatch[2];
+        const tzPart = matchStartsMatch[3] || 'GMT';
+        match.time = datePart ? `${datePart}, ${timePart} ${tzPart}` : `${timePart} ${tzPart}`;
+        match.matchStartTime = {
+          date: datePart || null,
+          time: timePart,
+          timezone: tzPart,
+          raw: match.liveCommentary
+        };
+      } else {
+        match.time = "N/A";
+      }
+    } else {
+      match.time = "N/A";
+    }
+    
     matches.push(match);
+    
+    // Early exit if maxResults is reached
+    if (maxResults && matches.length >= maxResults) {
+      return false; // Stop .each() loop
+    }
   });
 
   return matches;
@@ -192,33 +511,60 @@ const setCacheHeaders = (res, options = {}) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
 };
 
-// Recent Scores endpoint
+// Recent Scores endpoint (optimized: default 20, max scrape 30)
 router.get("/recent-scores", async (req, res) => {
   try {
     setCacheHeaders(res, { maxAge: 60, staleWhileRevalidate: 30 });
+    
+    // Parse query parameters - default to 20 for better performance
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 20), 50);
+    const offset = Math.max(0, parseInt(req.query.offset) || 0);
     
     // Try to get from cache first
     const cacheKey = "cricket:recent-scores";
     const cachedData = await getCache(cacheKey);
     
     if (cachedData) {
-      return res.json(cachedData); // Already an object from Upstash
+      // Apply limit/offset to cached data
+      const allMatches = cachedData.data || [];
+      const slicedMatches = allMatches.slice(offset, offset + limit);
+      
+      return res.json({
+        ...cachedData,
+        count: slicedMatches.length,
+        total: allMatches.length,
+        offset,
+        limit,
+        data: slicedMatches
+      });
     }
     
-    // Cache miss - fetch from source
-    const matches = await scrapeCricbuzzMatches(urls.recentMatches);
+    // Cache miss - fetch from source (limit to 30 matches for performance)
+    const MAX_SCRAPE_LIMIT = 30;
+    const matches = await scrapeCricbuzzMatches(urls.recentMatches, MAX_SCRAPE_LIMIT);
     const enrichedMatches = await enrichMatchesWithScorecard(matches);
     
-    const response = {
+    // Cache full response
+    const fullResponse = {
       success: true,
       count: enrichedMatches.length,
       data: enrichedMatches,
     };
+    await setCache(cacheKey, fullResponse, 3600);
     
-    // Cache for 1 hour (3600 seconds) - balance freshness and load
-    await setCache(cacheKey, response, 3600);
+    // Apply limit/offset for this request
+    const slicedMatches = limit 
+      ? enrichedMatches.slice(offset, offset + limit)
+      : enrichedMatches.slice(offset);
     
-    res.json(response);
+    res.json({
+      success: true,
+      count: slicedMatches.length,
+      total: enrichedMatches.length,
+      offset,
+      limit: limit || enrichedMatches.length,
+      data: slicedMatches,
+    });
   } catch (error) {
     console.error("Error fetching recent matches:", error.message);
     res.status(500).json({
@@ -234,28 +580,56 @@ router.get("/live-scores", async (req, res) => {
   try {
     setCacheHeaders(res, { maxAge: 30, staleWhileRevalidate: 15 });
     
+    // Parse query parameters
+    const limit = req.query.limit ? Math.min(Math.max(1, parseInt(req.query.limit) || 50), 50) : null;
+    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    
     // Try to get from cache first
     const cacheKey = "cricket:live-scores";
     const cachedData = await getCache(cacheKey);
     
     if (cachedData) {
-      return res.json(cachedData); // Already an object from Upstash
+      // Apply limit/offset to cached data
+      const allMatches = cachedData.data || [];
+      const slicedMatches = limit 
+        ? allMatches.slice(offset, offset + limit)
+        : allMatches.slice(offset);
+      
+      return res.json({
+        ...cachedData,
+        count: slicedMatches.length,
+        total: allMatches.length,
+        offset,
+        limit: limit || allMatches.length,
+        data: slicedMatches
+      });
     }
     
     // Cache miss - fetch from source
     const matches = await scrapeCricbuzzMatches(urls.liveScores);
     const enrichedMatches = await enrichMatchesWithScorecard(matches);
 
-    const response = {
+    // Cache full response
+    const fullResponse = {
       success: true,
       count: enrichedMatches.length,
       data: enrichedMatches,
     };
+    await setCache(cacheKey, fullResponse, 60);
     
-    // Cache for 1 minute (60 seconds) - live scores change frequently
-    await setCache(cacheKey, response, 60);
+    // Apply limit/offset for this request
+    const slicedMatches = limit 
+      ? enrichedMatches.slice(offset, offset + limit)
+      : enrichedMatches.slice(offset);
     
-    res.json(response);
+    res.json({
+      success: true,
+      count: slicedMatches.length,
+      total: enrichedMatches.length,
+      offset,
+      limit: limit || enrichedMatches.length,
+      data: slicedMatches,
+    });
   } catch (error) {
     console.error("Error fetching live scores:", error.message);
     res.status(500).json({
@@ -271,34 +645,62 @@ router.get("/upcoming-matches", async (req, res) => {
   try {
     setCacheHeaders(res, { maxAge: 120, staleWhileRevalidate: 60 });
     
+    // Parse query parameters
+    const limit = req.query.limit ? Math.min(Math.max(1, parseInt(req.query.limit) || 50), 50) : null;
+    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    
     // Try to get from cache first
     const cacheKey = "cricket:upcoming-matches";
     const cachedData = await getCache(cacheKey);
     
     if (cachedData) {
-      return res.json(cachedData); // Already an object from Upstash
+      // Apply limit/offset to cached data
+      const allMatches = cachedData.data || [];
+      const slicedMatches = limit 
+        ? allMatches.slice(offset, offset + limit)
+        : allMatches.slice(offset);
+      
+      return res.json({
+        ...cachedData,
+        count: slicedMatches.length,
+        total: allMatches.length,
+        offset,
+        limit: limit || allMatches.length,
+        data: slicedMatches
+      });
     }
     
     // Cache miss - fetch from source
     const matches = await scrapeCricbuzzMatches(urls.upcomingMatches);
     const enrichedMatches = await enrichMatchesWithScorecard(matches);
 
-    const response = {
+    // Cache full response
+    const fullResponse = {
       success: true,
       count: enrichedMatches.length,
       data: enrichedMatches,
     };
+    await setCache(cacheKey, fullResponse, 10800);
     
-    // Cache for 3 hours (10800 seconds) - upcoming matches are very stable
-    await setCache(cacheKey, response, 10800);
+    // Apply limit/offset for this request
+    const slicedMatches = limit 
+      ? enrichedMatches.slice(offset, offset + limit)
+      : enrichedMatches.slice(offset);
     
-    res.json(response);
+    res.json({
+      success: true,
+      count: slicedMatches.length,
+      total: enrichedMatches.length,
+      offset,
+      limit: limit || enrichedMatches.length,
+      data: slicedMatches,
+    });
   } catch (error) {
     console.error("Error fetching upcoming matches:", error.message);
     res.status(500).json({
       success: false,
       error: "Error fetching the webpage",
-      message:error.message,
+      message: error.message,
     });
   }
 });
