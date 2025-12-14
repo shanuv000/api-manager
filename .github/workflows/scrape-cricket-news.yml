@@ -40,6 +40,14 @@ jobs:
         run: |
           echo "🏏 Starting Cricbuzz news scraper..."
           node scrapers/run-scraper.js
+
+      - name: Prune old articles
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+        run: |
+          echo "🧹 Pruning articles older than 90 days..."
+          node scripts/prune-news.js
       
       - name: Summary
         run: |

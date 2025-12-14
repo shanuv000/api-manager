@@ -52,15 +52,27 @@ async function runScraper() {
   const useAutoTagging = !!process.env.PERPLEXITY_API_KEY;
 
   try {
-    // STEP 1: Pre-fetch existing articles from DB (sourceId + title)
+    // STEP 1: Fetch article list from Cricbuzz (just metadata, no details yet)
+    console.log('🏏 Fetching cricket news list from Cricbuzz...');
+    const articleList = await scraper.fetchLatestNews();
+    const limit = 20;
+    const limitedList = articleList.slice(0, limit);
+    console.log(`   Fetched ${limitedList.length} articles from listing page\n`);
+
+    // STEP 2: Pre-fetch existing articles from DB (sourceId + title)
     // This enables early skip detection before expensive detail scraping
-    console.log('📂 Loading existing articles from database...');
+    // 2. Fetch existing articles from DB that match these IDs (Batch Query)
+    // This optimization prevents loading the entire database into memory
+    const sourceIds = limitedList.map(n => n.id);
     const existingArticles = await prisma.newsArticle.findMany({
-      select: { sourceId: true, title: true, tags: true }
+      where: {
+        sourceId: { in: sourceIds }
+      },
+      select: { sourceId: true, title: true, tags: true },
     });
     
-    // Create a Map for O(1) lookup: sourceId -> { title, tags }
-    const existingMap = new Map();
+    // Create a map for O(1) lookup
+    const existingMap = new Map(existingArticles.map(a => [a.sourceId, a]));
     for (const article of existingArticles) {
       existingMap.set(article.sourceId, { 
         title: article.title, 
@@ -69,12 +81,8 @@ async function runScraper() {
     }
     console.log(`   Found ${existingMap.size} existing articles in DB\n`);
     
-    // STEP 2: Fetch article list from Cricbuzz (just metadata, no details yet)
-    console.log('🏏 Fetching cricket news list from Cricbuzz...');
-    const articleList = await scraper.fetchLatestNews();
-    const limit = 20;
-    const limitedList = articleList.slice(0, limit);
-    console.log(`   Fetched ${limitedList.length} articles from listing page\n`);
+    // List already fetched in Step 1
+
     
     // STEP 3: Filter - only fetch details for NEW or CHANGED articles
     const articlesToProcess = [];
