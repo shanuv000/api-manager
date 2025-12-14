@@ -6,6 +6,7 @@ const {PrismaClient} = require('@prisma/client');
 const {PrismaPg} = require('@prisma/adapter-pg');
 const {Pool} = require('pg');
 const {parsePublishTime} = require('../utils/timeParser');
+const {generateTags} = require('../utils/perplexityTagger');
 
 async function runScraper() {
   const pool = new Pool({
@@ -17,18 +18,33 @@ async function runScraper() {
   });
 
   const scraper = new CricbuzzNewsScraper();
+  const useAutoTagging = !!process.env.PERPLEXITY_API_KEY;
 
   try {
     console.log('🏏 Fetching cricket news from Cricbuzz...');
     const newsArticles = await scraper.fetchLatestNewsWithDetails(20);
     
     console.log(`\n💾 Saving ${newsArticles.length} articles to database...`);
+    if (useAutoTagging) {
+      console.log('🏷️  Auto-tagging enabled (Perplexity AI)\n');
+    } else {
+      console.log('⚠️  Auto-tagging disabled (no PERPLEXITY_API_KEY)\n');
+    }
     
     let savedCount = 0;
     for (const article of newsArticles) {
       try {
         const firstParagraph = article.details?.contentParagraphs?.[0] || article.description || '';
         const uniqueDescription = firstParagraph.substring(0, 300);
+        
+        // Generate tags with Perplexity if enabled
+        let tags = article.details?.tags || [];
+        if (useAutoTagging && tags.length === 0) {
+          tags = await generateTags(article.title, article.details?.content || uniqueDescription);
+          if (tags.length > 0) {
+            console.log(`  🏷️  Tags: ${tags.join(', ')}`);
+          }
+        }
         
         await prisma.newsArticle.upsert({
           where: { sourceId: article.id },
@@ -39,7 +55,7 @@ async function runScraper() {
             imageUrl: article.imageUrl,
             thumbnailUrl: article.thumbnailUrl || article.imageUrl,
             publishedTime: parsePublishTime(article.details?.publishedTime || article.publishedTime),
-            tags: article.details?.tags || [],
+            tags: tags,
             relatedArticles: article.details?.relatedArticles || null,
             updatedAt: new Date()
           },
@@ -58,7 +74,7 @@ async function runScraper() {
             publishedTime: parsePublishTime(article.details?.publishedTime || article.publishedTime),
             metaTitle: article.title,
             metaDesc: uniqueDescription.substring(0, 160),
-            tags: article.details?.tags || [],
+            tags: tags,
             relatedArticles: article.details?.relatedArticles || null,
             scrapedAt: new Date(article.scrapedAt)
           }
