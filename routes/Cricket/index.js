@@ -337,82 +337,84 @@ router.get("/news", async (req, res) => {
     
     // STEP 2: If not enough fresh data, scrape from Cricbuzz (only on local/non-Vercel)
     const isVercel = !!process.env.VERCEL;
-    
-    if (recentNews.length < limit && !isVercel) {
-      console.log('🔄 Scraping fresh news from Cricbuzz...');
-    const CricbuzzNewsScraper = require("../../scrapers/cricbuzz-news-scraper");
-    scraper = new CricbuzzNewsScraper();
+    let scraper = null;
     
     try {
-      const newsArticles = await scraper.fetchLatestNewsWithDetails(limit);
-      
-      // STEP 3: Save to database (upsert to prevent duplicates)
-      const savedArticles = [];
-      for (const article of newsArticles) {
-        try {
-          // Use first paragraph of content as description (more accurate than listing page)
-          const firstParagraph = article.details?.contentParagraphs?.[0] || article.description || '';
-         const uniqueDescription = firstParagraph.substring(0, 300);
-          
-          const saved = await prisma.newsArticle.upsert({
-            where: { sourceId: article.id },
-            update: {
-              title: article.title,
-              description: uniqueDescription,
-              content: article.details?.content || null,
-              imageUrl: article.imageUrl,
-              thumbnailUrl: article.details?.mainImage || article.imageUrl,
-              publishedTime: article.details?.publishedTime || article.publishedTime,
-              tags: article.details?.tags || [],
-              relatedArticles: article.details?.relatedArticles || null,
-              updatedAt: new Date()
-            },
-            create: {
-              sourceId: article.id,
-              slug: article.id,
-              sport: 'cricket',
-              category: 'news',
-              sourceName: 'Cricbuzz',
-              title: article.title,
-              description: uniqueDescription,
-              content: article.details?.content || null,
-              imageUrl: article.imageUrl,
-              thumbnailUrl: article.details?.mainImage || article.imageUrl,
-              sourceUrl: article.link,
-              publishedTime: article.details?.publishedTime || article.publishedTime,
-              metaTitle: article.title,
-              metaDesc: uniqueDescription.substring(0, 160),
-              tags: article.details?.tags || [],
-              relatedArticles: article.details?.relatedArticles || null,
-              scrapedAt: new Date(article.scrapedAt)
-            }
-          });
-          savedArticles.push(saved);
-        } catch (error) {
-          console.error(`Error saving article ${article.id}:`, error.message);
+      if (recentNews.length < limit && !isVercel) {
+        console.log('🔄 Scraping fresh news from Cricbuzz...');
+        const CricbuzzNewsScraper = require("../../scrapers/cricbuzz-news-scraper");
+        scraper = new CricbuzzNewsScraper();
+        
+        const newsArticles = await scraper.fetchLatestNewsWithDetails(limit);
+        
+        // STEP 3: Save to database (upsert to prevent duplicates)
+        const savedArticles = [];
+        for (const article of newsArticles) {
+          try {
+            // Use first paragraph of content as description (more accurate than listing page)
+            const firstParagraph = article.details?.contentParagraphs?.[0] || article.description || '';
+            const uniqueDescription = firstParagraph.substring(0, 300);
+            
+            const saved = await prisma.newsArticle.upsert({
+              where: { sourceId: article.id },
+              update: {
+                title: article.title,
+                description: uniqueDescription,
+                content: article.details?.content || null,
+                imageUrl: article.imageUrl,
+                thumbnailUrl: article.details?.mainImage || article.imageUrl,
+                publishedTime: article.details?.publishedTime || article.publishedTime,
+                tags: article.details?.tags || [],
+                relatedArticles: article.details?.relatedArticles || null,
+                updatedAt: new Date()
+              },
+              create: {
+                sourceId: article.id,
+                slug: article.id,
+                sport: 'cricket',
+                category: 'news',
+                sourceName: 'Cricbuzz',
+                title: article.title,
+                description: uniqueDescription,
+                content: article.details?.content || null,
+                imageUrl: article.imageUrl,
+                thumbnailUrl: article.details?.mainImage || article.imageUrl,
+                sourceUrl: article.link,
+                publishedTime: article.details?.publishedTime || article.publishedTime,
+                metaTitle: article.title,
+                metaDesc: uniqueDescription.substring(0, 160),
+                tags: article.details?.tags || [],
+                relatedArticles: article.details?.relatedArticles || null,
+                scrapedAt: new Date(article.scrapedAt)
+              }
+            });
+            savedArticles.push(saved);
+          } catch (error) {
+            console.error(`Error saving article ${article.id}:`, error.message);
+          }
         }
+        
+        console.log(`✅ Saved ${savedArticles.length} articles to database`);
+        return res.json({
+          success: true,
+          count: savedArticles.length,
+          data: savedArticles,
+          source: 'scraped',
+          timestamp: new Date().toISOString()
+        });
+      } else if (recentNews.length < limit && isVercel) {
+        // On Vercel: Return what we have from database (scraping disabled due to 10s timeout)
+        console.log(`⚠️ Vercel environment detected - scraping disabled. Returning ${recentNews.length} articles from database.`);
+        
+        return res.json({
+          success: true,
+          count: recentNews.length,
+          data: recentNews,
+          source: 'database',
+          note: 'Scraping disabled on Vercel due to timeout limits. Database updated via GitHub Actions cron.',
+          timestamp: new Date().toISOString()
+        });
       }
-      
-      console.log(`✅ Saved ${savedArticles.length} articles to database`);
-      return res.json({
-        success: true,
-        count: savedArticles.length,
-        data: savedArticles,
-        source: 'scraped',
-        timestamp: new Date().toISOString()
-      });
-    } else if (recentNews.length < limit && isVercel) {
-      // On Vercel: Return what we have from database (scraping disabled due to 10s timeout)
-      console.log(`⚠️ Vercel environment detected - scraping disabled. Returning ${recentNews.length} articles from database.`);
-      
-      return res.json({
-        success: true,
-        count: recentNews.length,
-        data: recentNews,
-        source: 'database',
-        note: 'Scraping disabled on Vercel due to timeout limits. Database updated via GitHub Actions cron.',
-        timestamp: new Date().toISOString()
-      });
     } finally {
       // Always close browser if it was initialized
       if (scraper) {
