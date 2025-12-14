@@ -128,8 +128,10 @@ router.get("/", (req, res) => {
         title: "string - Full match title (e.g., 'India vs Australia, 2nd Test')",
         matchLink: "string - URL to match page on Cricbuzz",
         matchDetails: "string - Match description",
-        status: "string - Current match status",
-        time: "string - Match start time (for upcoming) or result (for completed)",
+        status: "string - Current match status from page",
+        matchStatus: "string - Match state: 'completed', 'live', or 'upcoming'",
+        result: "string - Match result (only for completed matches, e.g., 'India won by 7 wkts')",
+        time: "string - Start time for upcoming, 'LIVE' for live, or formatted date for completed",
         matchStartTime: "object - Detailed time info with ISO date",
         location: "string - Venue location",
         teams: "array - Full team names",
@@ -415,41 +417,130 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
       }
     }
 
+    // Helper to detect if a string is a match result (not a start time)
+    const isMatchResult = (str) => {
+      if (!str) return false;
+      const resultPatterns = [
+        /won by/i,                    // "India won by 7 wkts"
+        /\bdrawn?\b/i,                // "Match drawn"
+        /\btied?\b/i,                 // "Match tied"
+        /no result/i,                 // "No result"
+        /abandoned/i,                 // "Match abandoned"
+        /cancelled/i,                 // "Match cancelled"
+        /innings (and|&)/i,           // "won by an innings and 35 runs"
+        /\d+\s*(wkts?|wickets?|runs?)/i  // "7 wkts", "35 runs"
+      ];
+      return resultPatterns.some(pattern => pattern.test(str));
+    };
+    
+    // Helper to detect if a string is a live match status
+    const isLiveStatus = (str) => {
+      if (!str) return false;
+      const livePatterns = [
+        /\blive\b/i,
+        /day \d+/i,                   // "Day 1", "Day 2"  
+        /session/i,                   // "1st Session"
+        /innings break/i,
+        /tea\b|lunch\b|stumps/i,
+        /at (bat|crease)/i
+      ];
+      return livePatterns.some(pattern => pattern.test(str));
+    };
+
     if (timeInfo && timeInfo.status) {
-      // Parse "Match starts at Dec 15, 08:15 GMT" format
-      const matchStartsMatch = timeInfo.status.match(/Match starts at\s+(?:([A-Za-z]+\s+\d{1,2}),?\s+)?(\d{1,2}:\d{2})\s*(GMT|IST|Local)?/i);
-      if (matchStartsMatch) {
-        const datePart = matchStartsMatch[1] || '';
-        const timePart = matchStartsMatch[2];
-        const tzPart = matchStartsMatch[3] || 'GMT';
-        match.time = datePart ? `${datePart}, ${timePart} ${tzPart}` : `${timePart} ${tzPart}`;
+      const statusStr = timeInfo.status;
+      
+      // Check if this is a completed match result
+      if (isMatchResult(statusStr)) {
+        match.result = statusStr;
+        match.matchStatus = 'completed';
+        // For completed matches, use the ISO date if available, otherwise mark time as N/A
+        if (timeInfo.startDate) {
+          match.matchStartTime = {
+            startDateISO: timeInfo.startDate,
+            note: 'Match completed'
+          };
+          // Try to format a readable time from ISO date
+          try {
+            const startDate = new Date(timeInfo.startDate);
+            match.time = startDate.toLocaleString('en-US', { 
+              month: 'short', 
+              day: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit',
+              hour12: true
+            });
+          } catch (e) {
+            match.time = "Completed";
+          }
+        } else {
+          match.time = "Completed";
+          match.matchStartTime = { note: 'Match completed' };
+        }
+      }
+      // Check if this is a live match
+      else if (isLiveStatus(statusStr)) {
+        match.matchStatus = 'live';
+        match.time = 'LIVE';
         match.matchStartTime = {
-          date: datePart || null,
-          time: timePart,
-          timezone: tzPart,
-          startDateISO: timeInfo.startDate,
-          raw: timeInfo.status
+          startDateISO: timeInfo.startDate || null,
+          status: statusStr
         };
-      } else {
-        match.time = timeInfo.status;
-        match.matchStartTime = { startDateISO: timeInfo.startDate, raw: timeInfo.status };
+      }
+      // Parse "Match starts at Dec 15, 08:15 GMT" format for upcoming matches
+      else {
+        const matchStartsMatch = statusStr.match(/Match starts at\s+(?:([A-Za-z]+\s+\d{1,2}),?\s+)?(\d{1,2}:\d{2})\s*(GMT|IST|Local)?/i);
+        if (matchStartsMatch) {
+          const datePart = matchStartsMatch[1] || '';
+          const timePart = matchStartsMatch[2];
+          const tzPart = matchStartsMatch[3] || 'GMT';
+          match.time = datePart ? `${datePart}, ${timePart} ${tzPart}` : `${timePart} ${tzPart}`;
+          match.matchStatus = 'upcoming';
+          match.matchStartTime = {
+            date: datePart || null,
+            time: timePart,
+            timezone: tzPart,
+            startDateISO: timeInfo.startDate,
+            raw: statusStr
+          };
+        } else {
+          // Unknown status format - store as-is but in appropriate field
+          match.time = statusStr;
+          match.matchStartTime = { startDateISO: timeInfo.startDate, raw: statusStr };
+        }
       }
     } else if (match.liveCommentary) {
       // Fallback: try to extract from liveCommentary
-      const matchStartsMatch = match.liveCommentary.match(/Match starts at\s+(?:([A-Za-z]+\s+\d{1,2}),?\s+)?(\d{1,2}:\d{2})\s*(GMT|IST|Local)?/i);
-      if (matchStartsMatch) {
-        const datePart = matchStartsMatch[1] || '';
-        const timePart = matchStartsMatch[2];
-        const tzPart = matchStartsMatch[3] || 'GMT';
-        match.time = datePart ? `${datePart}, ${timePart} ${tzPart}` : `${timePart} ${tzPart}`;
-        match.matchStartTime = {
-          date: datePart || null,
-          time: timePart,
-          timezone: tzPart,
-          raw: match.liveCommentary
-        };
-      } else {
-        match.time = "N/A";
+      
+      // Check if it's a result
+      if (isMatchResult(match.liveCommentary)) {
+        match.result = match.liveCommentary;
+        match.matchStatus = 'completed';
+        match.time = "Completed";
+      }
+      // Check if it's live
+      else if (isLiveStatus(match.liveCommentary)) {
+        match.matchStatus = 'live';
+        match.time = 'LIVE';
+      }
+      // Try to parse start time
+      else {
+        const matchStartsMatch = match.liveCommentary.match(/Match starts at\s+(?:([A-Za-z]+\s+\d{1,2}),?\s+)?(\d{1,2}:\d{2})\s*(GMT|IST|Local)?/i);
+        if (matchStartsMatch) {
+          const datePart = matchStartsMatch[1] || '';
+          const timePart = matchStartsMatch[2];
+          const tzPart = matchStartsMatch[3] || 'GMT';
+          match.time = datePart ? `${datePart}, ${timePart} ${tzPart}` : `${timePart} ${tzPart}`;
+          match.matchStatus = 'upcoming';
+          match.matchStartTime = {
+            date: datePart || null,
+            time: timePart,
+            timezone: tzPart,
+            raw: match.liveCommentary
+          };
+        } else {
+          match.time = "N/A";
+        }
       }
     } else {
       match.time = "N/A";
