@@ -1,4 +1,3 @@
-```javascript
 const express = require("express");
 const axios = require("axios");
 const cheerio = require("cheerio");
@@ -8,6 +7,7 @@ const { getCache, setCache } = require("../../component/redisClient");
 const { parsePublishTime } = require("../../utils/timeParser");
 
 const router = express.Router();
+
 
 // URLs for scraping
 const urls = {
