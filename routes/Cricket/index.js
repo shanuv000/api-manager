@@ -352,28 +352,33 @@ router.get("/news", async (req, res) => {
          const uniqueDescription = firstParagraph.substring(0, 300);
           
           const saved = await prisma.newsArticle.upsert({
-            where: { cricbuzzId: article.id },
+            where: { sourceId: article.id },
             update: {
               title: article.title,
               description: uniqueDescription,
               content: article.details?.content || null,
               imageUrl: article.imageUrl,
-              publishedTime: article.publishedTime,
+              thumbnailUrl: article.details?.mainImage || article.imageUrl,
+              publishedTime: article.details?.publishedTime || article.publishedTime,
               tags: article.details?.tags || [],
               relatedArticles: article.details?.relatedArticles || null,
               updatedAt: new Date()
             },
             create: {
-              cricbuzzId: article.id,
-              slug: article.id, // Use cricbuzz ID as slug
+              sourceId: article.id,
+              slug: article.id,
+              sport: 'cricket',
+              category: 'news',
+              sourceName: 'Cricbuzz',
               title: article.title,
               description: uniqueDescription,
               content: article.details?.content || null,
               imageUrl: article.imageUrl,
-              cricbuzzUrl: article.link,
-              publishedTime: article.publishedTime,
+              thumbnailUrl: article.details?.mainImage || article.imageUrl,
+              sourceUrl: article.link,
+              publishedTime: article.details?.publishedTime || article.publishedTime,
               metaTitle: article.title,
-              metaDesc: article.description?.substring(0, 160),
+              metaDesc: uniqueDescription.substring(0, 160),
               tags: article.details?.tags || [],
               relatedArticles: article.details?.relatedArticles || null,
               scrapedAt: new Date(article.scrapedAt)
@@ -409,36 +414,24 @@ router.get("/news", async (req, res) => {
 });
 
 // Get single article by slug (SEO endpoint)
-router.get("/news/:slug", async (req, res) => {
+router.get('/news/:slug', async (req, res) => {
+  // Get single news article by slug (cricket only)
   try {
+    // Set cache headers (1 hour)
+    res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400');
+    
     const prisma = require("../../component/prismaClient");
     
-    const article = await prisma.newsArticle.findUnique({
-      where: { slug: req.params.slug }
+    const article = await prisma.newsArticle.findFirst({
+      where: { 
+        slug: req.params.slug,
+        sport: 'cricket'
+      }
     });
     
     if (!article) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        error: 'Article not found' 
-      });
-    }
-    
-    // Set cache headers for individual articles (longer cache)
-    setCacheHeaders(res, { maxAge: 3600, staleWhileRevalidate: 1800 });
-    
-    res.json({ 
-      success: true, 
-      data: article 
-    });
-  } catch (error) {
-    console.error("Error fetching article:", error.message);
-    res.status(500).json({ 
-      success: false,
-      error: error.message 
-    });
-  }
-});
 
 
 module.exports = router;

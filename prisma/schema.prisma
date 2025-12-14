@@ -11,34 +11,43 @@ datasource db {
 
 // Cricket News Article model for SEO-optimized storage
 model NewsArticle {
-  id            String   @id @default(cuid())
-  slug          String   @unique
-  title         String
-  description   String?  @db.Text
-  content       String?  @db.Text
-  imageUrl      String?
-  publishedTime String?
+  id              String   @id @default(cuid())
+  slug            String   @unique
   
-  // Cricbuzz source information
-  cricbuzzUrl   String   @unique
-  cricbuzzId    String   @unique
+  // Categorization for multi-sport support
+  sport           String   // "cricket", "football", "tennis", etc.
+  category        String?  // "news", "match-report", "analysis", etc.
   
-  // SEO metadata fields
-  metaTitle     String?
-  metaDesc      String?
-  tags          String[]
+  // Content
+  title           String
+  description     String?  @db.Text
+  content         String?  @db.Text
+  imageUrl        String?
+  thumbnailUrl    String?  // High-quality image from article page
+  publishedTime   String?
   
-  // Related articles (stored as JSON array of objects)
+  // Source tracking (generic for all sports)
+  sourceUrl       String   @unique
+  sourceId        String   @unique
+  sourceName      String   // "Cricbuzz", "ESPN", "Goal.com", etc.
+  
+  // SEO
+  metaTitle       String?
+  metaDesc        String?
+  
+  // Tags & Relations
+  tags            String[]
   relatedArticles Json?
   
   // Timestamps
-  scrapedAt     DateTime @default(now())
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  scrapedAt       DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
   
+  // Indexes for efficient querying
+  @@index([sport, createdAt(sort: Desc)])
+  @@index([sport, category])
   @@index([slug])
-  @@index([cricbuzzId])
-  @@index([createdAt(sort: Desc)])
+  @@index([sourceId])
   @@map("news_articles")
 }
-
