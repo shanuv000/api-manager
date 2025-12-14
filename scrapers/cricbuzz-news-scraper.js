@@ -235,8 +235,10 @@ class CricbuzzNewsScraper {
           }
         }
         
-        // Find time
+        // Find time - Cricbuzz uses specific format: "Sun, Dec 14, 2025 • 9:09 AM"
         const timeSelectors = [
+          'span.text-gray-500', // Specific Cricbuzz time class
+          'span[class*="gray"]', // Backup for gray text
           'time',
           '[class*="time"]',
           '[class*="date"]',
@@ -245,12 +247,18 @@ class CricbuzzNewsScraper {
         
         let publishedTime = '';
         for (const selector of timeSelectors) {
-          const element = document.querySelector(selector);
-          if (element) {
-            publishedTime = element.textContent.trim();
-            break;
+          const elements = document.querySelectorAll(selector);
+          for (const element of elements) {
+            const text = element.textContent.trim();
+            // Look for pattern: "Day, Month Date, Year • Time AM/PM" or date-like patterns
+            if (text.match(/\w{3},\s+\w{3}\s+\d{1,2},\s+\d{4}|•|\d{1,2}:\d{2}\s*(AM|PM)/i)) {
+              publishedTime = text;
+              break;
+            }
           }
+          if (publishedTime) break;
         }
+
         
         // Find main image
         const imageSelectors = [
