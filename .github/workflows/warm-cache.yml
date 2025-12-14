@@ -17,7 +17,7 @@ jobs:
       - name: Warm Recent Scores Cache
         run: |
           echo "🔥 Warming recent-scores cache..."
-          response=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.VERCEL_DOMAIN || 'your-api.vercel.app' }}/api/cricket/recent-scores)
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://api-sync.vercel.app/api/cricket/recent-scores)
           if [ $response -eq 200 ]; then
             echo "✅ Recent scores cache warmed successfully"
           else
@@ -27,7 +27,7 @@ jobs:
       - name: Warm Live Scores Cache
         run: |
           echo "🔥 Warming live-scores cache..."
-          response=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.VERCEL_DOMAIN || 'your-api.vercel.app' }}/api/cricket/live-scores)
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://api-sync.vercel.app/api/cricket/live-scores)
           if [ $response -eq 200 ]; then
             echo "✅ Live scores cache warmed successfully"
           else
@@ -37,7 +37,7 @@ jobs:
       - name: Warm Upcoming Matches Cache
         run: |
           echo "🔥 Warming upcoming-matches cache..."
-          response=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.VERCEL_DOMAIN || 'your-api.vercel.app' }}/api/cricket/upcoming-matches)
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://api-sync.vercel.app/api/cricket/upcoming-matches)
           if [ $response -eq 200 ]; then
             echo "✅ Upcoming matches cache warmed successfully"
           else
