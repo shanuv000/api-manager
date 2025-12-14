@@ -311,10 +311,18 @@ router.get("/news", async (req, res) => {
     // Get limit from query params (default: 10, max: 20)
     const limit = Math.min(parseInt(req.query.limit) || 10, 20);
     
-    // Import Prisma client
+    // STEP 1: Try Redis cache first (fastest)
+    const cacheKey = `cricket:news:${limit}`;
+    const cachedData = await getCache(cacheKey);
+    
+    if (cachedData) {
+      console.log(`✅ Returning ${cachedData.count} articles from Redis cache`);
+      return res.json({ ...cachedData, source: 'redis' });
+    }
+    
+    // STEP 2: Try to get from database (last 24 hours)
     const prisma = require("../../component/prismaClient");
     
-    // STEP 1: Try to get from database first (last 24 hours)
     const recentNews = await prisma.newsArticle.findMany({
       take: limit,
       orderBy: { createdAt: 'desc' },
@@ -325,16 +333,21 @@ router.get("/news", async (req, res) => {
       }
     });
     
-    // If we have enough fresh articles in database, return them
+    // If we have enough fresh articles in database, cache and return them
     if (recentNews.length >= limit) {
       console.log(`✅ Returning ${recentNews.length} articles from database`);
-      return res.json({
+      const response = {
         success: true,
         count: recentNews.length,
         data: recentNews,
         source: 'database',
         timestamp: new Date().toISOString()
-      });
+      };
+      
+      // Cache in Redis for 5 minutes (300 seconds)
+      await setCache(cacheKey, response, 300);
+      
+      return res.json(response);
     }
     
     // STEP 2: If not enough fresh data, scrape from Cricbuzz (only on local/non-Vercel)
