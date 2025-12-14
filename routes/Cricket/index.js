@@ -301,5 +301,144 @@ router.get("/upcoming-matches", async (req, res) => {
   }
 });
 
+// Cricket News endpoint with database storage for SEO
+router.get("/news", async (req, res) => {
+  try {
+    setCacheHeaders(res, { maxAge: 180, staleWhileRevalidate: 90 });
+    
+    // Get limit from query params (default: 10, max: 20)
+    const limit = Math.min(parseInt(req.query.limit) || 10, 20);
+    
+    // Import Prisma client
+    const prisma = require("../../component/prismaClient");
+    
+    // STEP 1: Try to get from database first (last 24 hours)
+    const recentNews = await prisma.newsArticle.findMany({
+      take: limit,
+      orderBy: { createdAt: 'desc' },
+      where: {
+        createdAt: {
+          gte: new Date(Date.now() - 24 * 60 * 60 * 1000) // Last 24 hours
+        }
+      }
+    });
+    
+    // If we have enough fresh articles in database, return them
+    if (recentNews.length >= limit) {
+      console.log(`✅ Returning ${recentNews.length} articles from database`);
+      return res.json({
+        success: true,
+        count: recentNews.length,
+        data: recentNews,
+        source: 'database',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // STEP 2: Otherwise, scrape and save to database
+    console.log('🔄 Scraping fresh news from Cricbuzz...');
+    const CricbuzzNewsScraper = require("../../scrapers/cricbuzz-news-scraper");
+    const scraper = new CricbuzzNewsScraper();
+    
+    try {
+      const newsArticles = await scraper.fetchLatestNewsWithDetails(limit);
+      
+      // STEP 3: Save to database (upsert to prevent duplicates)
+      const savedArticles = [];
+      for (const article of newsArticles) {
+        try {
+          // Use first paragraph of content as description (more accurate than listing page)
+          const firstParagraph = article.details?.contentParagraphs?.[0] || article.description || '';
+         const uniqueDescription = firstParagraph.substring(0, 300);
+          
+          const saved = await prisma.newsArticle.upsert({
+            where: { cricbuzzId: article.id },
+            update: {
+              title: article.title,
+              description: uniqueDescription,
+              content: article.details?.content || null,
+              imageUrl: article.imageUrl,
+              publishedTime: article.publishedTime,
+              tags: article.details?.tags || [],
+              relatedArticles: article.details?.relatedArticles || null,
+              updatedAt: new Date()
+            },
+            create: {
+              cricbuzzId: article.id,
+              slug: article.id, // Use cricbuzz ID as slug
+              title: article.title,
+              description: uniqueDescription,
+              content: article.details?.content || null,
+              imageUrl: article.imageUrl,
+              cricbuzzUrl: article.link,
+              publishedTime: article.publishedTime,
+              metaTitle: article.title,
+              metaDesc: article.description?.substring(0, 160),
+              tags: article.details?.tags || [],
+              relatedArticles: article.details?.relatedArticles || null,
+              scrapedAt: new Date(article.scrapedAt)
+            }
+          });
+          savedArticles.push(saved);
+        } catch (error) {
+          console.error(`Error saving article ${article.id}:`, error.message);
+        }
+      }
+      
+      console.log(`✅ Saved ${savedArticles.length} articles to database`);
+      
+      res.json({
+        success: true,
+        count: savedArticles.length,
+        data: savedArticles,
+        source: 'scraped',
+        timestamp: new Date().toISOString()
+      });
+    } finally {
+      // Always close browser
+      await scraper.closeBrowser();
+    }
+  } catch (error) {
+    console.error("Error fetching cricket news:", error.message);
+    res.status(500).json({
+      success: false,
+      error: "Error fetching cricket news",
+      message: error.message,
+    });
+  }
+});
+
+// Get single article by slug (SEO endpoint)
+router.get("/news/:slug", async (req, res) => {
+  try {
+    const prisma = require("../../component/prismaClient");
+    
+    const article = await prisma.newsArticle.findUnique({
+      where: { slug: req.params.slug }
+    });
+    
+    if (!article) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Article not found' 
+      });
+    }
+    
+    // Set cache headers for individual articles (longer cache)
+    setCacheHeaders(res, { maxAge: 3600, staleWhileRevalidate: 1800 });
+    
+    res.json({ 
+      success: true, 
+      data: article 
+    });
+  } catch (error) {
+    console.error("Error fetching article:", error.message);
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
+  }
+});
+
 
 module.exports = router;

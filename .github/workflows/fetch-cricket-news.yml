@@ -1,0 +1,44 @@
+name: Fetch Cricket News
+
+on:
+  schedule:
+    # Run every 6 hours to fetch fresh cricket news
+    - cron: '0 */6 * * *'  # Every 6 hours at :00 minutes
+  
+  # Allow manual triggering
+  workflow_dispatch:
+
+jobs:
+  fetch-news:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Fetch Latest Cricket News
+        run: |
+          echo "🏏 Fetching latest cricket news from Cricbuzz..."
+          
+          # Call the API endpoint to scrape and store news
+          response=$(curl -s -w "\n%{http_code}" "https://api-sync.vercel.app/api/cricket/news?limit=20")
+          
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          
+          if [ "$http_code" -eq 200 ]; then
+            count=$(echo "$body" | jq -r '.count // 0')
+            source=$(echo "$body" | jq -r '.source // "unknown"')
+            echo "✅ Success! Fetched $count articles (source: $source)"
+            
+            # Show first 5 article titles
+            echo ""
+            echo "Latest articles:"
+            echo "$body" | jq -r '.data[]? | "- \(.title)"' | head -5
+          else
+            echo "⚠️ Warning: Request returned HTTP $http_code"
+            echo "$body" | head -20
+          fi
+      
+      - name: Summary
+        run: |
+          echo "🎉 Cricket news fetch completed!"
+          echo "Articles are automatically stored in database with duplicate prevention"
+

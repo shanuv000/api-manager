@@ -1,0 +1,44 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+}
+
+// Cricket News Article model for SEO-optimized storage
+model NewsArticle {
+  id            String   @id @default(cuid())
+  slug          String   @unique
+  title         String
+  description   String?  @db.Text
+  content       String?  @db.Text
+  imageUrl      String?
+  publishedTime String?
+  
+  // Cricbuzz source information
+  cricbuzzUrl   String   @unique
+  cricbuzzId    String   @unique
+  
+  // SEO metadata fields
+  metaTitle     String?
+  metaDesc      String?
+  tags          String[]
+  
+  // Related articles (stored as JSON array of objects)
+  relatedArticles Json?
+  
+  // Timestamps
+  scrapedAt     DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([slug])
+  @@index([cricbuzzId])
+  @@index([createdAt(sort: Desc)])
+  @@map("news_articles")
+}
+
