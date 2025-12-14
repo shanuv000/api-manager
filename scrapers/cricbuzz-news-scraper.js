@@ -222,7 +222,7 @@ class CricbuzzNewsScraper {
             description,
             link: link.href,
             imageUrl: imageUrl || null,
-            thumbnailUrl: this.getHighQualityImageUrl(imageUrl), // High-quality version
+            thumbnailUrl: imageUrl || null, // Will be converted to high-quality after extraction
             publishedTime,
             source: 'Cricbuzz',
             scrapedAt: new Date().toISOString()
@@ -233,6 +233,11 @@ class CricbuzzNewsScraper {
         
         return articles;
       }, this.baseUrl);
+      
+      // Convert thumbnailUrls to high-quality versions (remove quality parameters)
+      newsArticles.forEach(article => {
+        article.thumbnailUrl = this.getHighQualityImageUrl(article.imageUrl);
+      });
       
       await page.close();
       console.log(`✅ Successfully fetched ${newsArticles.length} news articles`);
