@@ -306,7 +306,8 @@ router.get("/upcoming-matches", async (req, res) => {
 // Cricket News endpoint with database storage for SEO
 router.get("/news", async (req, res) => {
   try {
-    setCacheHeaders(res, { maxAge: 180, staleWhileRevalidate: 90 });
+    // Cache for 30 min (data refreshes every 6 hours via GitHub Actions)
+    setCacheHeaders(res, { maxAge: 1800, staleWhileRevalidate: 1800 });
     
     // Get limit from query params (default: 10, max: 20)
     const limit = Math.min(parseInt(req.query.limit) || 10, 20);
@@ -344,8 +345,8 @@ router.get("/news", async (req, res) => {
         timestamp: new Date().toISOString()
       };
       
-      // Cache in Redis for 5 minutes (300 seconds)
-      await setCache(cacheKey, response, 300);
+      // Cache in Redis for 2 hours (7200 seconds) - data refreshes every 6 hours
+      await setCache(cacheKey, response, 7200);
       
       return res.json(response);
     }
