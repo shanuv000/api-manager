@@ -32,14 +32,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y chromium-browser || sudo snap install chromium
       
-      - name: Clear corrupted content (one-time fix)
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DIRECT_URL: ${{ secrets.DIRECT_URL }}
-        run: |
-          echo "🔄 Clearing articles with corrupted content..."
-          node scripts/force-rescrape.js
-
       - name: Run scraper and populate database
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
