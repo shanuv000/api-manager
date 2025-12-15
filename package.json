@@ -8,6 +8,8 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "scrape:cricbuzz": "node scrapers/cricbuzz-news-scraper.js",
+    "scrape:espncricinfo": "node scrapers/espncricinfo-news-scraper.js",
+    "scrape:espncricinfo:db": "node scrapers/run-espncricinfo-scraper.js",
     "postinstall": "prisma generate"
   },
   "keywords": [
