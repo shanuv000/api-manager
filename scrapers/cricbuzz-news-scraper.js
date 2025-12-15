@@ -355,14 +355,22 @@ class CricbuzzNewsScraper {
         
         allParagraphs.forEach(p => {
           const text = p.textContent.trim();
-          // Filter out navigation, footer, and other non-content paragraphs
+          // Filter out navigation, footer, cookie consent, and other non-content paragraphs
           if (text && 
               text.length > 50 && 
               !text.toLowerCase().includes('follow us') &&
               !text.toLowerCase().includes('download app') &&
               !text.toLowerCase().includes('subscribe') &&
               !text.toLowerCase().startsWith('more ') &&
-              !text.includes('©')) {
+              !text.includes('©') &&
+              // Filter out cookie consent and privacy notice text
+              !text.toLowerCase().includes('we won\'t sell or share your personal information') &&
+              !text.toLowerCase().includes('personal information to inform the ads') &&
+              !text.toLowerCase().includes('you may still see interest-based ads') &&
+              !text.toLowerCase().includes('cookie') &&
+              !text.toLowerCase().includes('privacy policy') &&
+              !text.toLowerCase().includes('gdpr') &&
+              !text.toLowerCase().includes('consent')) {
             contentParagraphs.push(text);
           }
         });
