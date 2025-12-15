@@ -5,6 +5,7 @@ const cheerio = require("cheerio");
 const getScorecardDetails = require("./scorecard");
 const { getCache, setCache } = require("../../component/redisClient");
 const { parsePublishTime } = require("../../utils/timeParser");
+const { fetchRankings, fetchStandings, fetchRecordFilters, fetchRecords } = require("./stats");
 const {
   ApiError,
   ValidationError,
@@ -141,6 +142,65 @@ router.get("/", (req, res) => {
           data: "news article object with full content"
         },
         example: `${baseUrl}/news/136890`
+      },
+      {
+        path: "/stats/rankings",
+        method: "GET",
+        description: "Get ICC player/team rankings (via RapidAPI)",
+        cacheTTL: "24 hours",
+        parameters: {
+          category: { type: "string", required: true, enum: ["batsmen", "bowlers", "allrounders", "teams"], description: "Ranking category" },
+          formatType: { type: "string", required: true, enum: ["test", "odi", "t20"], description: "Match format" }
+        },
+        response: {
+          success: "boolean",
+          data: "object - Rankings data from Cricbuzz",
+          cached: "boolean"
+        },
+        example: `${baseUrl}/stats/rankings?category=batsmen&formatType=test`
+      },
+      {
+        path: "/stats/standings",
+        method: "GET",
+        description: "Get ICC championship standings (via RapidAPI)",
+        cacheTTL: "24 hours",
+        parameters: {
+          matchType: { type: "string", required: true, enum: ["1", "2"], description: "1=World Test Championship, 2=World Cup Super League" }
+        },
+        response: {
+          success: "boolean",
+          data: "object - Standings data",
+          cached: "boolean"
+        },
+        example: `${baseUrl}/stats/standings?matchType=1`
+      },
+      {
+        path: "/stats/record-filters",
+        method: "GET",
+        description: "Get available filter options for cricket records (via RapidAPI)",
+        cacheTTL: "24 hours",
+        response: {
+          success: "boolean",
+          data: "object - Filter options",
+          cached: "boolean"
+        },
+        example: `${baseUrl}/stats/record-filters`
+      },
+      {
+        path: "/stats/records",
+        method: "GET",
+        description: "Get cricket records/stats (via RapidAPI)",
+        cacheTTL: "24 hours",
+        parameters: {
+          statsType: { type: "string", required: true, description: "Stats type: mostRuns, mostWickets, highestScore, etc." },
+          id: { type: "integer", required: false, default: 0, description: "Stats ID (pagination)" }
+        },
+        response: {
+          success: "boolean",
+          data: "object - Records data with filters and values",
+          cached: "boolean"
+        },
+        example: `${baseUrl}/stats/records?statsType=mostRuns`
       }
     ],
     matchObject: {
@@ -989,6 +1049,166 @@ router.get('/news/:slug', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching article:', error.message);
+    return sendError(res, error);
+  }
+});
+
+// =============================================
+// STATS ENDPOINTS (RapidAPI Cricbuzz)
+// =============================================
+
+// ICC Rankings endpoint
+router.get("/stats/rankings", async (req, res) => {
+  try {
+    setCacheHeaders(res, { maxAge: 86400, staleWhileRevalidate: 3600 }); // 24 hours
+    
+    const { category, formatType } = req.query;
+    
+    // Validate required parameters
+    if (!category || !formatType) {
+      return sendError(res, new ValidationError("Both 'category' and 'formatType' parameters are required"));
+    }
+    
+    // Check cache first
+    const cacheKey = `cricket:stats:rankings:${category}:${formatType}`;
+    const cachedData = await getCache(cacheKey);
+    
+    if (cachedData) {
+      return res.json({ ...cachedData, cached: true });
+    }
+    
+    // Fetch from RapidAPI
+    const data = await fetchRankings(category, formatType);
+    
+    const response = {
+      success: true,
+      data,
+      source: "rapidapi",
+      cached: false,
+      timestamp: new Date().toISOString()
+    };
+    
+    // Cache for 6 hours
+    await setCache(cacheKey, response, 86400);
+    
+    res.json(response);
+  } catch (error) {
+    console.error("Error fetching rankings:", error.message);
+    return sendError(res, error);
+  }
+});
+
+// ICC Standings endpoint
+router.get("/stats/standings", async (req, res) => {
+  try {
+    setCacheHeaders(res, { maxAge: 86400, staleWhileRevalidate: 3600 }); // 24 hours
+    
+    const { matchType } = req.query;
+    
+    if (!matchType) {
+      return sendError(res, new ValidationError("'matchType' parameter is required (1=World Test Championship, 2=World Cup Super League)"));
+    }
+    
+    // Check cache first
+    const cacheKey = `cricket:stats:standings:${matchType}`;
+    const cachedData = await getCache(cacheKey);
+    
+    if (cachedData) {
+      return res.json({ ...cachedData, cached: true });
+    }
+    
+    // Fetch from RapidAPI
+    const data = await fetchStandings(matchType);
+    
+    const response = {
+      success: true,
+      data,
+      source: "rapidapi",
+      cached: false,
+      timestamp: new Date().toISOString()
+    };
+    
+    // Cache for 6 hours
+    await setCache(cacheKey, response, 86400);
+    
+    res.json(response);
+  } catch (error) {
+    console.error("Error fetching standings:", error.message);
+    return sendError(res, error);
+  }
+});
+
+// Record Filters endpoint
+router.get("/stats/record-filters", async (req, res) => {
+  try {
+    setCacheHeaders(res, { maxAge: 86400, staleWhileRevalidate: 3600 }); // 24 hours
+    
+    // Check cache first
+    const cacheKey = "cricket:stats:record-filters";
+    const cachedData = await getCache(cacheKey);
+    
+    if (cachedData) {
+      return res.json({ ...cachedData, cached: true });
+    }
+    
+    // Fetch from RapidAPI
+    const data = await fetchRecordFilters();
+    
+    const response = {
+      success: true,
+      data,
+      source: "rapidapi",
+      cached: false,
+      timestamp: new Date().toISOString()
+    };
+    
+    // Cache for 24 hours
+    await setCache(cacheKey, response, 86400);
+    
+    res.json(response);
+  } catch (error) {
+    console.error("Error fetching record filters:", error.message);
+    return sendError(res, error);
+  }
+});
+
+// Records endpoint
+router.get("/stats/records", async (req, res) => {
+  try {
+    setCacheHeaders(res, { maxAge: 86400, staleWhileRevalidate: 3600 }); // 24 hours
+    
+    const { statsType, id = 0, ...otherFilters } = req.query;
+    
+    if (!statsType) {
+      return sendError(res, new ValidationError("'statsType' parameter is required. Use /stats/record-filters to get available types."));
+    }
+    
+    // Build cache key from all params
+    const filterStr = Object.entries(otherFilters).sort().map(([k, v]) => `${k}=${v}`).join("&");
+    const cacheKey = `cricket:stats:records:${statsType}:${id}:${filterStr}`;
+    const cachedData = await getCache(cacheKey);
+    
+    if (cachedData) {
+      return res.json({ ...cachedData, cached: true });
+    }
+    
+    // Fetch from RapidAPI
+    const data = await fetchRecords(statsType, id);
+    
+    const response = {
+      success: true,
+      data,
+      source: "rapidapi",
+      cached: false,
+      timestamp: new Date().toISOString()
+    };
+    
+    // Cache for 6 hours
+    await setCache(cacheKey, response, 86400);
+    
+    res.json(response);
+  } catch (error) {
+    console.error("Error fetching records:", error.message);
     return sendError(res, error);
   }
 });
