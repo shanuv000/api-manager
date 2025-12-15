@@ -36,3 +36,8 @@ Thumbs.db
 .vercel
 
 /generated/prisma
+
+# Scraper output files (generated data)
+*-latest-news.json
+*_enriched*.json
+temp_*.json
