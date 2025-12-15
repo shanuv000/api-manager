@@ -148,7 +148,8 @@ async function runESPNCricinfoScraper() {
     const sourceIds = articlesWithDetails.map(a => generateSourceId(a));
     const existingArticles = await prisma.newsArticle.findMany({
       where: {
-        sourceId: { in: sourceIds }
+        sourceId: { in: sourceIds },
+        sourceName: 'ESPN Cricinfo' // Optimize: only scan ESPN articles
       },
       select: { sourceId: true, title: true, tags: true }
     });

@@ -66,7 +66,8 @@ async function runScraper() {
     const sourceIds = limitedList.map(n => n.id);
     const existingArticles = await prisma.newsArticle.findMany({
       where: {
-        sourceId: { in: sourceIds }
+        sourceId: { in: sourceIds },
+        sourceName: 'Cricbuzz' // Optimize: only scan Cricbuzz articles
       },
       select: { sourceId: true, title: true, tags: true },
     });
