@@ -55,7 +55,7 @@ jobs:
           echo "Articles are now in Supabase database"
           echo "API endpoint: https://api-sync.vercel.app/api/cricket/news"
 
-      - name: Debug - Check for duplicate content
+      - name: Health Check
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
