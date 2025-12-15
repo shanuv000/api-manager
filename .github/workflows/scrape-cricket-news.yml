@@ -32,6 +32,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y chromium-browser || sudo snap install chromium
       
+      - name: Cleanup stale articles
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+        run: node scripts/cleanup-stale.js
+
       - name: Run Cricbuzz scraper
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
