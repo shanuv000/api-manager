@@ -109,18 +109,24 @@ router.get("/", (req, res) => {
       {
         path: "/news",
         method: "GET",
-        description: "Get latest cricket news articles from Cricbuzz",
+        description: "Get latest cricket news articles from database (Cricbuzz + ESPN Cricinfo)",
         cacheTTL: "30 minutes",
         parameters: {
-          limit: { type: "integer", required: false, default: 10, max: 20, description: "Maximum articles to return" }
+          limit: { type: "integer", required: false, default: 10, max: 50, description: "Maximum articles to return" },
+          offset: { type: "integer", required: false, default: 0, description: "Skip first N articles (for pagination)" },
+          source: { type: "string", required: false, default: "all", enum: ["cricbuzz", "espncricinfo", "all"], description: "Filter by news source" }
         },
         response: {
           success: "boolean",
-          count: "number",
+          count: "number (returned items)",
+          total: "number (total available)",
+          offset: "number",
+          limit: "number",
+          hasMore: "boolean (more articles available)",
           data: "array of news article objects",
-          source: "string (database|scraped)"
+          source: "string (database|redis)"
         },
-        example: `${baseUrl}/news?limit=5`
+        example: `${baseUrl}/news?limit=10&offset=0&source=all`
       },
       {
         path: "/news/:slug",
@@ -874,134 +880,76 @@ router.get("/news", async (req, res) => {
     // Cache for 30 min (data refreshes every 6 hours via GitHub Actions)
     setCacheHeaders(res, { maxAge: 1800, staleWhileRevalidate: 1800 });
     
-    // Get limit from query params (default: 10, max: 20)
-    const limit = Math.min(parseInt(req.query.limit) || 10, 20);
+    // Validate query parameters with consistent pagination
+    let limit, offset;
+    try {
+      const validated = validatePaginationParams(req.query, { 
+        defaultLimit: 10, 
+        maxLimit: 50, 
+        allowNoLimit: false 
+      });
+      limit = validated.limit;
+      offset = validated.offset;
+    } catch (validationError) {
+      return sendError(res, validationError);
+    }
+    
+    // Optional source filter (cricbuzz, espncricinfo, or all)
+    const sourceFilter = req.query.source?.toLowerCase();
+    const validSources = ['cricbuzz', 'espncricinfo', 'all'];
+    if (sourceFilter && !validSources.includes(sourceFilter)) {
+      return sendError(res, new ValidationError(`Invalid source. Must be one of: ${validSources.join(', ')}`));
+    }
+    
+    const prisma = require("../../component/prismaClient");
+    
+    // Build where clause for source filtering
+    const whereClause = {};
+    if (sourceFilter && sourceFilter !== 'all') {
+      whereClause.sourceName = sourceFilter === 'cricbuzz' ? 'Cricbuzz' : 'ESPN Cricinfo';
+    }
+    
+    // Cache key includes limit, offset, and source for proper caching
+    const cacheKey = `cricket:news:${limit}:${offset}:${sourceFilter || 'all'}`;
     
     // STEP 1: Try Redis cache first (fastest)
-    const cacheKey = `cricket:news:${limit}`;
     const cachedData = await getCache(cacheKey);
     
     if (cachedData) {
-      console.log(`✅ Returning ${cachedData.count} articles from Redis cache`);
+      console.log(`✅ Returning news from Redis cache (limit=${limit}, offset=${offset})`);
       return res.json({ ...cachedData, source: 'redis' });
     }
     
-    // STEP 2: Try to get from database (last 24 hours)
-    const prisma = require("../../component/prismaClient");
-    
-    const recentNews = await prisma.newsArticle.findMany({
-      take: limit,
-      orderBy: { createdAt: 'desc' },
-      where: {
-        createdAt: {
-          gte: new Date(Date.now() - 24 * 60 * 60 * 1000) // Last 24 hours
-        }
-      }
+    // STEP 2: Get total count for pagination metadata
+    const totalCount = await prisma.newsArticle.count({
+      where: whereClause
     });
     
-    // If we have enough fresh articles in database, cache and return them
-    if (recentNews.length >= limit) {
-      console.log(`✅ Returning ${recentNews.length} articles from database`);
-      const response = {
-        success: true,
-        count: recentNews.length,
-        data: recentNews,
-        source: 'database',
-        timestamp: new Date().toISOString()
-      };
-      
-      // Cache in Redis for 2 hours (7200 seconds) - data refreshes every 6 hours
-      await setCache(cacheKey, response, 7200);
-      
-      return res.json(response);
-    }
+    // STEP 3: Get paginated articles from database
+    const articles = await prisma.newsArticle.findMany({
+      where: whereClause,
+      take: limit,
+      skip: offset,
+      orderBy: { createdAt: 'desc' }
+    });
     
-    // STEP 2: If not enough fresh data, scrape from Cricbuzz (only on local/non-Vercel)
-    const isVercel = !!process.env.VERCEL;
-    let scraper = null;
+    // Build response with full pagination metadata
+    const response = {
+      success: true,
+      count: articles.length,
+      total: totalCount,
+      offset,
+      limit,
+      hasMore: offset + articles.length < totalCount,
+      data: articles,
+      source: 'database',
+      timestamp: new Date().toISOString()
+    };
     
-    try {
-      if (recentNews.length < limit && !isVercel) {
-        console.log('🔄 Scraping fresh news from Cricbuzz...');
-        const CricbuzzNewsScraper = require("../../scrapers/cricbuzz-news-scraper");
-        scraper = new CricbuzzNewsScraper();
-        
-        const newsArticles = await scraper.fetchLatestNewsWithDetails(limit);
-        
-        // STEP 3: Save to database (upsert to prevent duplicates)
-        const savedArticles = [];
-        for (const article of newsArticles) {
-          try {
-            // Use first paragraph of content as description (more accurate than listing page)
-            const firstParagraph = article.details?.contentParagraphs?.[0] || article.description || '';
-            const uniqueDescription = firstParagraph.substring(0, 300);
-            
-            const saved = await prisma.newsArticle.upsert({
-              where: { sourceId: article.id },
-              update: {
-                title: article.title,
-                description: uniqueDescription,
-                content: article.details?.content || null,
-                imageUrl: article.imageUrl,
-                thumbnailUrl: article.thumbnailUrl || article.imageUrl,
-                publishedTime: parsePublishTime(article.details?.publishedTime || article.publishedTime),
-                tags: article.details?.tags || [],
-                relatedArticles: article.details?.relatedArticles || null,
-                updatedAt: new Date()
-              },
-              create: {
-                sourceId: article.id,
-                slug: article.id,
-                sport: 'cricket',
-                category: 'news',
-                sourceName: 'Cricbuzz',
-                title: article.title,
-                description: uniqueDescription,
-                content: article.details?.content || null,
-                imageUrl: article.imageUrl,
-                thumbnailUrl: article.thumbnailUrl || article.imageUrl,
-                sourceUrl: article.link,
-                publishedTime: article.details?.publishedTime || article.publishedTime,
-                metaTitle: article.title,
-                metaDesc: uniqueDescription.substring(0, 160),
-                tags: article.details?.tags || [],
-                relatedArticles: article.details?.relatedArticles || null,
-                scrapedAt: new Date(article.scrapedAt)
-              }
-            });
-            savedArticles.push(saved);
-          } catch (error) {
-            console.error(`Error saving article ${article.id}:`, error.message);
-          }
-        }
-        
-        console.log(`✅ Saved ${savedArticles.length} articles to database`);
-        return res.json({
-          success: true,
-          count: savedArticles.length,
-          data: savedArticles,
-          source: 'scraped',
-          timestamp: new Date().toISOString()
-        });
-      } else if (recentNews.length < limit && isVercel) {
-        // On Vercel: Return what we have from database (scraping disabled due to 10s timeout)
-        console.log(`⚠️ Vercel environment detected - scraping disabled. Returning ${recentNews.length} articles from database.`);
-        
-        return res.json({
-          success: true,
-          count: recentNews.length,
-          data: recentNews,
-          source: 'database',
-          note: 'Scraping disabled on Vercel due to timeout limits. Database updated via GitHub Actions cron.',
-          timestamp: new Date().toISOString()
-        });
-      }
-    } finally {
-      // Always close browser if it was initialized
-      if (scraper) {
-        await scraper.closeBrowser();
-      }
-    }
+    // Cache in Redis for 30 minutes (1800 seconds)
+    await setCache(cacheKey, response, 1800);
+    
+    return res.json(response);
   } catch (error) {
     console.error("Error fetching cricket news:", error.message);
     return sendError(res, error);
