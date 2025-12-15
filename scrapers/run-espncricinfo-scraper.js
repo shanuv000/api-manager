@@ -83,6 +83,43 @@ function generateMetaDescription(title, content, description) {
 }
 
 /**
+ * Extract publishedTime from ESPN's concatenated title format
+ * Example: "TitleDescription14-Dec-2025 • 22 mins ago•Author"
+ * Returns ISO date string or null
+ */
+function extractPublishedTimeFromTitle(rawTitle) {
+  if (!rawTitle) return null;
+  
+  // Try to extract "14-Dec-2025" format
+  const dateMatch = rawTitle.match(/(\d{1,2}-\w{3}-\d{4})/);
+  if (dateMatch) {
+    try {
+      const dateObj = new Date(dateMatch[1]);
+      if (!isNaN(dateObj.getTime())) {
+        return dateObj.toISOString();
+      }
+    } catch (e) {}
+  }
+  
+  // Try to extract relative time like "22 mins ago" or "5 hrs ago"
+  const relativeTimeMatch = rawTitle.match(/(\d+)\s*(mins?|hrs?|hours?|minutes?)\s*ago/i);
+  if (relativeTimeMatch) {
+    const value = parseInt(relativeTimeMatch[1], 10);
+    const unit = relativeTimeMatch[2].toLowerCase();
+    const now = new Date();
+    
+    if (unit.startsWith('hr') || unit.startsWith('hour')) {
+      now.setHours(now.getHours() - value);
+    } else {
+      now.setMinutes(now.getMinutes() - value);
+    }
+    return now.toISOString();
+  }
+  
+  return null;
+}
+
+/**
  * Clean and normalize title (remove extra metadata from ESPN format)
  */
 function cleanTitle(rawTitle) {
@@ -228,7 +265,7 @@ async function runESPNCricinfoScraper() {
               content: content,
               imageUrl: details.mainImage || article.imageUrl,
               thumbnailUrl: article.thumbnailUrl || details.mainImage,
-              publishedTime: parsePublishTime(details.publishedTime || article.publishedTime),
+              publishedTime: parsePublishTime(details.publishedTime || article.publishedTime) || extractPublishedTimeFromTitle(article.title),
               ...(tags.length > 0 && (!existing.tags || existing.tags.length === 0) ? { tags } : {}),
               relatedArticles: details.relatedArticles || null,
               updatedAt: new Date()
@@ -251,7 +288,7 @@ async function runESPNCricinfoScraper() {
               imageUrl: details.mainImage || article.imageUrl,
               thumbnailUrl: article.thumbnailUrl || details.mainImage,
               sourceUrl: article.url,
-              publishedTime: parsePublishTime(details.publishedTime || article.publishedTime),
+              publishedTime: parsePublishTime(details.publishedTime || article.publishedTime) || extractPublishedTimeFromTitle(article.title),
               metaTitle: cleanedTitle,
               metaDesc: metaDescription,
               tags: tags,
