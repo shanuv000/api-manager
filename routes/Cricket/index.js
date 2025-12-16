@@ -5,7 +5,12 @@ const cheerio = require("cheerio");
 const getScorecardDetails = require("./scorecard");
 const { getCache, setCache } = require("../../component/redisClient");
 const { parsePublishTime } = require("../../utils/timeParser");
-const { fetchRankings, fetchStandings, fetchRecordFilters, fetchRecords } = require("./stats");
+const {
+  fetchRankings,
+  fetchStandings,
+  fetchRecordFilters,
+  fetchRecords,
+} = require("./stats");
 const {
   ApiError,
   ValidationError,
@@ -19,11 +24,10 @@ const {
   validatePaginationParams,
   validateSlug,
   sendError,
-  isRateLimited
+  isRateLimited,
 } = require("../../utils/apiErrors");
 
 const router = express.Router();
-
 
 // URLs for scraping
 const urls = {
@@ -37,17 +41,18 @@ const urls = {
 // API Documentation - Self-documenting endpoint
 router.get("/", (req, res) => {
   const baseUrl = `${req.protocol}://${req.get("host")}/api/cricket`;
-  
+
   res.json({
     name: "Cricket API",
     version: "1.0.0",
-    description: "Real-time cricket scores, matches, and news scraped from Cricbuzz",
+    description:
+      "Real-time cricket scores, matches, and news scraped from Cricbuzz",
     baseUrl,
     documentation: {
       note: "All endpoints return JSON responses with consistent structure",
       authentication: "No authentication required",
       rateLimit: "No rate limit (cached responses)",
-      caching: "Responses are cached in Redis for optimal performance"
+      caching: "Responses are cached in Redis for optimal performance",
     },
     endpoints: [
       {
@@ -56,8 +61,19 @@ router.get("/", (req, res) => {
         description: "Get currently live cricket matches with real-time scores",
         cacheTTL: "60 seconds",
         parameters: {
-          limit: { type: "integer", required: false, default: "all", max: 50, description: "Maximum matches to return" },
-          offset: { type: "integer", required: false, default: 0, description: "Skip first N matches (for pagination)" }
+          limit: {
+            type: "integer",
+            required: false,
+            default: "all",
+            max: 50,
+            description: "Maximum matches to return",
+          },
+          offset: {
+            type: "integer",
+            required: false,
+            default: 0,
+            description: "Skip first N matches (for pagination)",
+          },
         },
         response: {
           success: "boolean",
@@ -65,18 +81,30 @@ router.get("/", (req, res) => {
           total: "number (total available)",
           offset: "number",
           limit: "number",
-          data: "array of match objects"
+          data: "array of match objects",
         },
-        example: `${baseUrl}/live-scores?limit=5`
+        example: `${baseUrl}/live-scores?limit=5`,
       },
       {
         path: "/recent-scores",
         method: "GET",
-        description: "Get recently completed cricket matches with final scores (optimized: max 30 scraped)",
+        description:
+          "Get recently completed cricket matches with final scores (optimized: max 30 scraped)",
         cacheTTL: "1 hour",
         parameters: {
-          limit: { type: "integer", required: false, default: 20, max: 50, description: "Maximum matches to return (default: 20)" },
-          offset: { type: "integer", required: false, default: 0, description: "Skip first N matches (for pagination)" }
+          limit: {
+            type: "integer",
+            required: false,
+            default: 20,
+            max: 50,
+            description: "Maximum matches to return (default: 20)",
+          },
+          offset: {
+            type: "integer",
+            required: false,
+            default: 0,
+            description: "Skip first N matches (for pagination)",
+          },
         },
         response: {
           success: "boolean",
@@ -84,9 +112,9 @@ router.get("/", (req, res) => {
           total: "number (max 30 due to scrape limit)",
           offset: "number",
           limit: "number",
-          data: "array of match objects"
+          data: "array of match objects",
         },
-        example: `${baseUrl}/recent-scores?limit=10`
+        example: `${baseUrl}/recent-scores?limit=10`,
       },
       {
         path: "/upcoming-matches",
@@ -94,8 +122,19 @@ router.get("/", (req, res) => {
         description: "Get scheduled upcoming cricket matches with start times",
         cacheTTL: "3 hours",
         parameters: {
-          limit: { type: "integer", required: false, default: "all", max: 50, description: "Maximum matches to return" },
-          offset: { type: "integer", required: false, default: 0, description: "Skip first N matches (for pagination)" }
+          limit: {
+            type: "integer",
+            required: false,
+            default: "all",
+            max: 50,
+            description: "Maximum matches to return",
+          },
+          offset: {
+            type: "integer",
+            required: false,
+            default: 0,
+            description: "Skip first N matches (for pagination)",
+          },
         },
         response: {
           success: "boolean",
@@ -103,19 +142,37 @@ router.get("/", (req, res) => {
           total: "number",
           offset: "number",
           limit: "number",
-          data: "array of match objects"
+          data: "array of match objects",
         },
-        example: `${baseUrl}/upcoming-matches?limit=5&offset=0`
+        example: `${baseUrl}/upcoming-matches?limit=5&offset=0`,
       },
       {
         path: "/news",
         method: "GET",
-        description: "Get latest cricket news articles from database (Cricbuzz + ESPN Cricinfo)",
+        description:
+          "Get latest cricket news articles from database (Cricbuzz + ESPN Cricinfo)",
         cacheTTL: "30 minutes",
         parameters: {
-          limit: { type: "integer", required: false, default: 10, max: 50, description: "Maximum articles to return" },
-          offset: { type: "integer", required: false, default: 0, description: "Skip first N articles (for pagination)" },
-          source: { type: "string", required: false, default: "all", enum: ["cricbuzz", "espncricinfo", "all"], description: "Filter by news source" }
+          limit: {
+            type: "integer",
+            required: false,
+            default: 10,
+            max: 50,
+            description: "Maximum articles to return",
+          },
+          offset: {
+            type: "integer",
+            required: false,
+            default: 0,
+            description: "Skip first N articles (for pagination)",
+          },
+          source: {
+            type: "string",
+            required: false,
+            default: "all",
+            enum: ["cricbuzz", "espncricinfo", "all"],
+            description: "Filter by news source",
+          },
         },
         response: {
           success: "boolean",
@@ -125,9 +182,9 @@ router.get("/", (req, res) => {
           limit: "number",
           hasMore: "boolean (more articles available)",
           data: "array of news article objects",
-          source: "string (database|redis)"
+          source: "string (database|redis)",
         },
-        example: `${baseUrl}/news?limit=10&offset=0&source=all`
+        example: `${baseUrl}/news?limit=10&offset=0&source=all`,
       },
       {
         path: "/news/:slug",
@@ -135,13 +192,18 @@ router.get("/", (req, res) => {
         description: "Get single news article by slug (ID)",
         cacheTTL: "1 hour",
         parameters: {
-          slug: { type: "string", required: true, location: "path", description: "Article unique identifier" }
+          slug: {
+            type: "string",
+            required: true,
+            location: "path",
+            description: "Article unique identifier",
+          },
         },
         response: {
           success: "boolean",
-          data: "news article object with full content"
+          data: "news article object with full content",
         },
-        example: `${baseUrl}/news/136890`
+        example: `${baseUrl}/news/136890`,
       },
       {
         path: "/stats/rankings",
@@ -149,15 +211,25 @@ router.get("/", (req, res) => {
         description: "Get ICC player/team rankings (via RapidAPI)",
         cacheTTL: "24 hours",
         parameters: {
-          category: { type: "string", required: true, enum: ["batsmen", "bowlers", "allrounders", "teams"], description: "Ranking category" },
-          formatType: { type: "string", required: true, enum: ["test", "odi", "t20"], description: "Match format" }
+          category: {
+            type: "string",
+            required: true,
+            enum: ["batsmen", "bowlers", "allrounders", "teams"],
+            description: "Ranking category",
+          },
+          formatType: {
+            type: "string",
+            required: true,
+            enum: ["test", "odi", "t20"],
+            description: "Match format",
+          },
         },
         response: {
           success: "boolean",
           data: "object - Rankings data from Cricbuzz",
-          cached: "boolean"
+          cached: "boolean",
         },
-        example: `${baseUrl}/stats/rankings?category=batsmen&formatType=test`
+        example: `${baseUrl}/stats/rankings?category=batsmen&formatType=test`,
       },
       {
         path: "/stats/standings",
@@ -165,26 +237,32 @@ router.get("/", (req, res) => {
         description: "Get ICC championship standings (via RapidAPI)",
         cacheTTL: "24 hours",
         parameters: {
-          matchType: { type: "string", required: true, enum: ["1", "2"], description: "1=World Test Championship, 2=World Cup Super League" }
+          matchType: {
+            type: "string",
+            required: true,
+            enum: ["1", "2"],
+            description: "1=World Test Championship, 2=World Cup Super League",
+          },
         },
         response: {
           success: "boolean",
           data: "object - Standings data",
-          cached: "boolean"
+          cached: "boolean",
         },
-        example: `${baseUrl}/stats/standings?matchType=1`
+        example: `${baseUrl}/stats/standings?matchType=1`,
       },
       {
         path: "/stats/record-filters",
         method: "GET",
-        description: "Get available filter options for cricket records (via RapidAPI)",
+        description:
+          "Get available filter options for cricket records (via RapidAPI)",
         cacheTTL: "24 hours",
         response: {
           success: "boolean",
           data: "object - Filter options",
-          cached: "boolean"
+          cached: "boolean",
         },
-        example: `${baseUrl}/stats/record-filters`
+        example: `${baseUrl}/stats/record-filters`,
       },
       {
         path: "/stats/records",
@@ -192,26 +270,38 @@ router.get("/", (req, res) => {
         description: "Get cricket records/stats (via RapidAPI)",
         cacheTTL: "24 hours",
         parameters: {
-          statsType: { type: "string", required: true, description: "Stats type: mostRuns, mostWickets, highestScore, etc." },
-          id: { type: "integer", required: false, default: 0, description: "Stats ID (pagination)" }
+          statsType: {
+            type: "string",
+            required: true,
+            description:
+              "Stats type: mostRuns, mostWickets, highestScore, etc.",
+          },
+          id: {
+            type: "integer",
+            required: false,
+            default: 0,
+            description: "Stats ID (pagination)",
+          },
         },
         response: {
           success: "boolean",
           data: "object - Records data with filters and values",
-          cached: "boolean"
+          cached: "boolean",
         },
-        example: `${baseUrl}/stats/records?statsType=mostRuns`
-      }
+        example: `${baseUrl}/stats/records?statsType=mostRuns`,
+      },
     ],
     matchObject: {
       description: "Structure of match objects returned by score endpoints",
       fields: {
-        title: "string - Full match title (e.g., 'India vs Australia, 2nd Test')",
+        title:
+          "string - Full match title (e.g., 'India vs Australia, 2nd Test')",
         matchLink: "string - URL to match page on Cricbuzz",
         matchDetails: "string - Match description",
         status: "string - Current match status from page",
         matchStatus: "string - Match state: 'completed', 'live', or 'upcoming'",
-        result: "string - Match result (only for completed matches, e.g., 'India won by 7 wkts')",
+        result:
+          "string - Match result (only for completed matches, e.g., 'India won by 7 wkts')",
         time: "string - Start time for upcoming, 'LIVE' for live, or formatted date for completed",
         matchStartTime: "object - Detailed time info with ISO date",
         location: "string - Venue location",
@@ -225,8 +315,8 @@ router.get("/", (req, res) => {
         liveScoreball: "string - Current bowling team score",
         liveCommentary: "string - Latest match commentary",
         links: "object - URLs to scorecard, full commentary, news",
-        scorecard: "object - Detailed scorecard (when available)"
-      }
+        scorecard: "object - Detailed scorecard (when available)",
+      },
     },
     newsObject: {
       description: "Structure of news article objects",
@@ -238,14 +328,14 @@ router.get("/", (req, res) => {
         publishedAt: "string - ISO date of publication",
         content: "string - Full article content (in single article endpoint)",
         tags: "array - Article tags/categories",
-        sourceName: "string - Source website name"
-      }
+        sourceName: "string - Source website name",
+      },
     },
     examples: {
       pagination: `${baseUrl}/live-scores?limit=5&offset=10`,
       allMatches: `${baseUrl}/live-scores`,
-      firstFiveUpcoming: `${baseUrl}/upcoming-matches?limit=5`
-    }
+      firstFiveUpcoming: `${baseUrl}/upcoming-matches?limit=5`,
+    },
   });
 });
 
@@ -257,25 +347,29 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
       },
       timeout: 10000,
     });
   } catch (error) {
-    throw handleAxiosError(error, 'Cricbuzz scraping');
+    throw handleAxiosError(error, "Cricbuzz scraping");
   }
 
   const html = response.data;
-  
+
   // Check for rate limiting in response
   if (isRateLimited(response, html)) {
-    throw new RateLimitError('Cricbuzz', 60);
+    throw new RateLimitError("Cricbuzz", 60);
   }
-  
+
   // Check if we got valid HTML
-  if (!html || typeof html !== 'string' || html.length < 1000) {
-    throw new ScrapingError('Received empty or invalid response from Cricbuzz', 'Cricbuzz');
+  if (!html || typeof html !== "string" || html.length < 1000) {
+    throw new ScrapingError(
+      "Received empty or invalid response from Cricbuzz",
+      "Cricbuzz"
+    );
   }
 
   const $ = cheerio.load(html);
@@ -291,14 +385,14 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
     scriptTags.each((i, script) => {
       try {
         const content = $(script).html();
-        if (content && content.includes('SportsEvent')) {
+        if (content && content.includes("SportsEvent")) {
           const jsonData = JSON.parse(content);
-          
+
           // Helper function to extract SportsEvent data
           const extractSportsEvents = (items) => {
             if (!Array.isArray(items)) return;
             for (const item of items) {
-              if (item['@type'] === 'SportsEvent') {
+              if (item["@type"] === "SportsEvent") {
                 const name = item.name;
                 const startDate = item.startDate;
                 const status = item.eventStatus;
@@ -308,17 +402,20 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
               }
             }
           };
-          
+
           // Handle WebPage with mainEntity.itemListElement (actual Cricbuzz format)
-          if (jsonData['@type'] === 'WebPage' && jsonData.mainEntity?.itemListElement) {
+          if (
+            jsonData["@type"] === "WebPage" &&
+            jsonData.mainEntity?.itemListElement
+          ) {
             extractSportsEvents(jsonData.mainEntity.itemListElement);
           }
           // Handle ItemList containing SportsEvents
-          if (jsonData['@type'] === 'ItemList' && jsonData.itemListElement) {
+          if (jsonData["@type"] === "ItemList" && jsonData.itemListElement) {
             extractSportsEvents(jsonData.itemListElement);
           }
           // Handle direct SportsEvent
-          if (jsonData['@type'] === 'SportsEvent') {
+          if (jsonData["@type"] === "SportsEvent") {
             const name = jsonData.name;
             const startDate = jsonData.startDate;
             const status = jsonData.eventStatus;
@@ -331,9 +428,11 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
         // JSON parse error, skip
       }
     });
-    
+
     // Also extract from embedded RSC payload - look for SportsEvent pattern
-    const sportsEvents = html.match(/"@type":"SportsEvent","name":"([^"]+)"[^}]*?"startDate":"([^"]+)"[^}]*?"eventStatus":"([^"]+)"/g);
+    const sportsEvents = html.match(
+      /"@type":"SportsEvent","name":"([^"]+)"[^}]*?"startDate":"([^"]+)"[^}]*?"eventStatus":"([^"]+)"/g
+    );
     if (sportsEvents) {
       for (const eventStr of sportsEvents) {
         const nameMatch = eventStr.match(/"name":"([^"]+)"/);
@@ -342,15 +441,15 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
         if (nameMatch && (dateMatch || statusMatch)) {
           matchTimeMap.set(nameMatch[1], {
             startDate: dateMatch ? dateMatch[1] : null,
-            status: statusMatch ? statusMatch[1] : null
+            status: statusMatch ? statusMatch[1] : null,
           });
         }
       }
     }
-    
+
     console.log(`Found ${matchTimeMap.size} match times from page data`);
   } catch (e) {
-    console.log('Time extraction error (non-critical):', e.message);
+    console.log("Time extraction error (non-critical):", e.message);
   }
 
   const matchElements = $("a.w-full.bg-cbWhite.flex.flex-col");
@@ -369,7 +468,7 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
     const match = {};
     match.title = title.trim();
     match.matchLink = href ? `https://www.cricbuzz.com${href}` : null;
-    
+
     // Extract match ID from href for lookup
     const matchIdMatch = href.match(/\/(\d+)\//);
     const matchId = matchIdMatch ? matchIdMatch[1] : null;
@@ -413,14 +512,14 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
           .text()
           .trim();
         if (score) scores.push(score);
-        
+
         // Extract team icon
         const iconImg = $row.find("img").first();
         const iconSrc = iconImg.attr("src");
         if (iconSrc) {
           // Ensure full URL
-          const fullIconUrl = iconSrc.startsWith("http") 
-            ? iconSrc 
+          const fullIconUrl = iconSrc.startsWith("http")
+            ? iconSrc
             : `https://static.cricbuzz.com${iconSrc}`;
           teamIcons.push(fullIconUrl);
         }
@@ -451,7 +550,7 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
       match.liveScoreball = "N/A";
     }
     match.scores = scores;
-    
+
     // Add team icons
     match.teamIcons = teamIcons;
     if (teamIcons.length >= 2) {
@@ -494,23 +593,31 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
     // Scraped titles are like "Melbourne Renegades vs Brisbane Heat, 2nd Match"
     // We need to find the common match description (e.g., "2nd Match", "7th Match")
     let timeInfo = null;
-    
+
     // Extract match number/description from scraped data
-    const matchDescParts = match.matchDetails?.split(',') || [];
-    const matchNumber = matchDescParts.find(part => 
-      /\d+(st|nd|rd|th)\s+(match|test|odi|t20)/i.test(part.trim())
-    )?.trim();
-    
+    const matchDescParts = match.matchDetails?.split(",") || [];
+    const matchNumber = matchDescParts
+      .find((part) =>
+        /\d+(st|nd|rd|th)\s+(match|test|odi|t20)/i.test(part.trim())
+      )
+      ?.trim();
+
     // Try to match by match description
     for (const [eventName, value] of matchTimeMap) {
       // Check if the event name starts with similar match description
-      if (matchNumber && eventName.toLowerCase().includes(matchNumber.toLowerCase())) {
+      if (
+        matchNumber &&
+        eventName.toLowerCase().includes(matchNumber.toLowerCase())
+      ) {
         timeInfo = value;
         break;
       }
       // Also check if scraped matchDetails contains the key parts of event name
-      const eventParts = eventName.split(',');
-      if (eventParts.length > 0 && match.matchDetails?.includes(eventParts[0].trim())) {
+      const eventParts = eventName.split(",");
+      if (
+        eventParts.length > 0 &&
+        match.matchDetails?.includes(eventParts[0].trim())
+      ) {
         timeInfo = value;
         break;
       }
@@ -520,122 +627,133 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
     const isMatchResult = (str) => {
       if (!str) return false;
       const resultPatterns = [
-        /won by/i,                    // "India won by 7 wkts"
-        /\bdrawn?\b/i,                // "Match drawn"
-        /\btied?\b/i,                 // "Match tied"
-        /no result/i,                 // "No result"
-        /abandoned/i,                 // "Match abandoned"
-        /cancelled/i,                 // "Match cancelled"
-        /innings (and|&)/i,           // "won by an innings and 35 runs"
-        /\d+\s*(wkts?|wickets?|runs?)/i  // "7 wkts", "35 runs"
+        /won by/i, // "India won by 7 wkts"
+        /\bdrawn?\b/i, // "Match drawn"
+        /\btied?\b/i, // "Match tied"
+        /no result/i, // "No result"
+        /abandoned/i, // "Match abandoned"
+        /cancelled/i, // "Match cancelled"
+        /innings (and|&)/i, // "won by an innings and 35 runs"
+        /\d+\s*(wkts?|wickets?|runs?)/i, // "7 wkts", "35 runs"
       ];
-      return resultPatterns.some(pattern => pattern.test(str));
+      return resultPatterns.some((pattern) => pattern.test(str));
     };
-    
+
     // Helper to detect if a string is a live match status
     const isLiveStatus = (str) => {
       if (!str) return false;
       const livePatterns = [
         /\blive\b/i,
-        /day \d+/i,                   // "Day 1", "Day 2"  
-        /session/i,                   // "1st Session"
+        /day \d+/i, // "Day 1", "Day 2"
+        /session/i, // "1st Session"
         /innings break/i,
         /tea\b|lunch\b|stumps/i,
-        /at (bat|crease)/i
+        /at (bat|crease)/i,
       ];
-      return livePatterns.some(pattern => pattern.test(str));
+      return livePatterns.some((pattern) => pattern.test(str));
     };
 
     if (timeInfo && timeInfo.status) {
       const statusStr = timeInfo.status;
-      
+
       // Check if this is a completed match result
       if (isMatchResult(statusStr)) {
         match.result = statusStr;
-        match.matchStatus = 'completed';
+        match.matchStatus = "completed";
         // For completed matches, use the ISO date if available, otherwise mark time as N/A
         if (timeInfo.startDate) {
           match.matchStartTime = {
             startDateISO: timeInfo.startDate,
-            note: 'Match completed'
+            note: "Match completed",
           };
           // Try to format a readable time from ISO date
           try {
             const startDate = new Date(timeInfo.startDate);
-            match.time = startDate.toLocaleString('en-US', { 
-              month: 'short', 
-              day: 'numeric',
-              hour: 'numeric',
-              minute: '2-digit',
-              hour12: true
+            match.time = startDate.toLocaleString("en-US", {
+              month: "short",
+              day: "numeric",
+              hour: "numeric",
+              minute: "2-digit",
+              hour12: true,
             });
           } catch (e) {
             match.time = "Completed";
           }
         } else {
           match.time = "Completed";
-          match.matchStartTime = { note: 'Match completed' };
+          match.matchStartTime = { note: "Match completed" };
         }
       }
       // Check if this is a live match
       else if (isLiveStatus(statusStr)) {
-        match.matchStatus = 'live';
-        match.time = 'LIVE';
+        match.matchStatus = "live";
+        match.time = "LIVE";
         match.matchStartTime = {
           startDateISO: timeInfo.startDate || null,
-          status: statusStr
+          status: statusStr,
         };
       }
       // Parse "Match starts at Dec 15, 08:15 GMT" format for upcoming matches
       else {
-        const matchStartsMatch = statusStr.match(/Match starts at\s+(?:([A-Za-z]+\s+\d{1,2}),?\s+)?(\d{1,2}:\d{2})\s*(GMT|IST|Local)?/i);
+        const matchStartsMatch = statusStr.match(
+          /Match starts at\s+(?:([A-Za-z]+\s+\d{1,2}),?\s+)?(\d{1,2}:\d{2})\s*(GMT|IST|Local)?/i
+        );
         if (matchStartsMatch) {
-          const datePart = matchStartsMatch[1] || '';
+          const datePart = matchStartsMatch[1] || "";
           const timePart = matchStartsMatch[2];
-          const tzPart = matchStartsMatch[3] || 'GMT';
-          match.time = datePart ? `${datePart}, ${timePart} ${tzPart}` : `${timePart} ${tzPart}`;
-          match.matchStatus = 'upcoming';
+          const tzPart = matchStartsMatch[3] || "GMT";
+          match.time = datePart
+            ? `${datePart}, ${timePart} ${tzPart}`
+            : `${timePart} ${tzPart}`;
+          match.matchStatus = "upcoming";
           match.matchStartTime = {
             date: datePart || null,
             time: timePart,
             timezone: tzPart,
             startDateISO: timeInfo.startDate,
-            raw: statusStr
+            raw: statusStr,
           };
         } else {
           // Unknown status format - store as-is but in appropriate field
           match.time = statusStr;
-          match.matchStartTime = { startDateISO: timeInfo.startDate, raw: statusStr };
+          match.matchStartTime = {
+            startDateISO: timeInfo.startDate,
+            raw: statusStr,
+          };
         }
       }
     } else if (match.liveCommentary) {
       // Fallback: try to extract from liveCommentary
-      
+
       // Check if it's a result
       if (isMatchResult(match.liveCommentary)) {
         match.result = match.liveCommentary;
-        match.matchStatus = 'completed';
+        match.matchStatus = "completed";
         match.time = "Completed";
       }
       // Check if it's live
       else if (isLiveStatus(match.liveCommentary)) {
-        match.matchStatus = 'live';
-        match.time = 'LIVE';
+        match.matchStatus = "live";
+        match.time = "LIVE";
       }
       // Try to parse start time
       else {
-        const matchStartsMatch = match.liveCommentary.match(/Match starts at\s+(?:([A-Za-z]+\s+\d{1,2}),?\s+)?(\d{1,2}:\d{2})\s*(GMT|IST|Local)?/i);
+        const matchStartsMatch = match.liveCommentary.match(
+          /Match starts at\s+(?:([A-Za-z]+\s+\d{1,2}),?\s+)?(\d{1,2}:\d{2})\s*(GMT|IST|Local)?/i
+        );
         if (matchStartsMatch) {
-          const datePart = matchStartsMatch[1] || '';
+          const datePart = matchStartsMatch[1] || "";
           const timePart = matchStartsMatch[2];
-          const tzPart = matchStartsMatch[3] || 'GMT';
-          match.time = datePart ? `${datePart}, ${timePart} ${tzPart}` : `${timePart} ${tzPart}`;
-          match.matchStatus = 'upcoming';
+          const tzPart = matchStartsMatch[3] || "GMT";
+          match.time = datePart
+            ? `${datePart}, ${timePart} ${tzPart}`
+            : `${timePart} ${tzPart}`;
+          match.matchStatus = "upcoming";
           match.matchStartTime = {
             date: datePart || null,
             time: timePart,
             timezone: tzPart,
-            raw: match.liveCommentary
+            raw: match.liveCommentary,
           };
         } else {
           match.time = "N/A";
@@ -644,9 +762,9 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
     } else {
       match.time = "N/A";
     }
-    
+
     matches.push(match);
-    
+
     // Early exit if maxResults is reached
     if (maxResults && matches.length >= maxResults) {
       return false; // Stop .each() loop
@@ -681,65 +799,72 @@ const enrichMatchesWithScorecard = async (matches) => {
 // Different caching strategies for different endpoints
 const setCacheHeaders = (res, options = {}) => {
   const {
-    maxAge = 60,           // Edge cache time in seconds
-    staleWhileRevalidate = 30,  // Stale content serving time
-    mustRevalidate = false,     // Force revalidation
+    maxAge = 60, // Edge cache time in seconds
+    staleWhileRevalidate = 30, // Stale content serving time
+    mustRevalidate = false, // Force revalidation
   } = options;
 
   const cacheControl = [
-    'public',
+    "public",
     `s-maxage=${maxAge}`,
     `stale-while-revalidate=${staleWhileRevalidate}`,
   ];
 
   if (mustRevalidate) {
-    cacheControl.push('must-revalidate');
+    cacheControl.push("must-revalidate");
   }
 
-  res.setHeader('Cache-Control', cacheControl.join(', '));
-  res.setHeader('Vary', 'Accept-Encoding'); // Important for compressed responses
-  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader("Cache-Control", cacheControl.join(", "));
+  res.setHeader("Vary", "Accept-Encoding"); // Important for compressed responses
+  res.setHeader("X-Content-Type-Options", "nosniff");
 };
 
 // Recent Scores endpoint (optimized: default 20, max scrape 30)
 router.get("/recent-scores", async (req, res) => {
   try {
     setCacheHeaders(res, { maxAge: 60, staleWhileRevalidate: 30 });
-    
+
     // Validate query parameters
     let limit, offset;
     try {
-      const validated = validatePaginationParams(req.query, { defaultLimit: 20, maxLimit: 50, allowNoLimit: false });
+      const validated = validatePaginationParams(req.query, {
+        defaultLimit: 20,
+        maxLimit: 50,
+        allowNoLimit: false,
+      });
       limit = validated.limit;
       offset = validated.offset;
     } catch (validationError) {
       return sendError(res, validationError);
     }
-    
+
     // Try to get from cache first
     const cacheKey = "cricket:recent-scores";
     const cachedData = await getCache(cacheKey);
-    
+
     if (cachedData) {
       // Apply limit/offset to cached data
       const allMatches = cachedData.data || [];
       const slicedMatches = allMatches.slice(offset, offset + limit);
-      
+
       return res.json({
         ...cachedData,
         count: slicedMatches.length,
         total: allMatches.length,
         offset,
         limit,
-        data: slicedMatches
+        data: slicedMatches,
       });
     }
-    
+
     // Cache miss - fetch from source (limit to 30 matches for performance)
     const MAX_SCRAPE_LIMIT = 30;
-    const matches = await scrapeCricbuzzMatches(urls.recentMatches, MAX_SCRAPE_LIMIT);
+    const matches = await scrapeCricbuzzMatches(
+      urls.recentMatches,
+      MAX_SCRAPE_LIMIT
+    );
     const enrichedMatches = await enrichMatchesWithScorecard(matches);
-    
+
     // Cache full response
     const fullResponse = {
       success: true,
@@ -747,12 +872,12 @@ router.get("/recent-scores", async (req, res) => {
       data: enrichedMatches,
     };
     await setCache(cacheKey, fullResponse, 3600);
-    
+
     // Apply limit/offset for this request
-    const slicedMatches = limit 
+    const slicedMatches = limit
       ? enrichedMatches.slice(offset, offset + limit)
       : enrichedMatches.slice(offset);
-    
+
     res.json({
       success: true,
       count: slicedMatches.length,
@@ -768,11 +893,15 @@ router.get("/recent-scores", async (req, res) => {
       const cacheKey = "cricket:recent-scores";
       const staleCache = await getCache(cacheKey);
       if (staleCache) {
-        console.log('Returning stale cache due to error');
-        return res.json({ ...staleCache, stale: true, error_note: 'Serving cached data due to source error' });
+        console.log("Returning stale cache due to error");
+        return res.json({
+          ...staleCache,
+          stale: true,
+          error_note: "Serving cached data due to source error",
+        });
       }
     } catch (cacheError) {
-      console.error('Cache fallback failed:', cacheError.message);
+      console.error("Cache fallback failed:", cacheError.message);
     }
     return sendError(res, error);
   }
@@ -782,38 +911,42 @@ router.get("/recent-scores", async (req, res) => {
 router.get("/live-scores", async (req, res) => {
   try {
     setCacheHeaders(res, { maxAge: 30, staleWhileRevalidate: 15 });
-    
+
     // Validate query parameters
     let limit, offset;
     try {
-      const validated = validatePaginationParams(req.query, { defaultLimit: null, maxLimit: 50, allowNoLimit: true });
+      const validated = validatePaginationParams(req.query, {
+        defaultLimit: null,
+        maxLimit: 50,
+        allowNoLimit: true,
+      });
       limit = validated.limit;
       offset = validated.offset;
     } catch (validationError) {
       return sendError(res, validationError);
     }
-    
+
     // Try to get from cache first
     const cacheKey = "cricket:live-scores";
     const cachedData = await getCache(cacheKey);
-    
+
     if (cachedData) {
       // Apply limit/offset to cached data
       const allMatches = cachedData.data || [];
-      const slicedMatches = limit 
+      const slicedMatches = limit
         ? allMatches.slice(offset, offset + limit)
         : allMatches.slice(offset);
-      
+
       return res.json({
         ...cachedData,
         count: slicedMatches.length,
         total: allMatches.length,
         offset,
         limit: limit || allMatches.length,
-        data: slicedMatches
+        data: slicedMatches,
       });
     }
-    
+
     // Cache miss - fetch from source
     const matches = await scrapeCricbuzzMatches(urls.liveScores);
     const enrichedMatches = await enrichMatchesWithScorecard(matches);
@@ -825,12 +958,12 @@ router.get("/live-scores", async (req, res) => {
       data: enrichedMatches,
     };
     await setCache(cacheKey, fullResponse, 60);
-    
+
     // Apply limit/offset for this request
-    const slicedMatches = limit 
+    const slicedMatches = limit
       ? enrichedMatches.slice(offset, offset + limit)
       : enrichedMatches.slice(offset);
-    
+
     res.json({
       success: true,
       count: slicedMatches.length,
@@ -846,11 +979,15 @@ router.get("/live-scores", async (req, res) => {
       const cacheKey = "cricket:live-scores";
       const staleCache = await getCache(cacheKey);
       if (staleCache) {
-        console.log('Returning stale cache due to error');
-        return res.json({ ...staleCache, stale: true, error_note: 'Serving cached data due to source error' });
+        console.log("Returning stale cache due to error");
+        return res.json({
+          ...staleCache,
+          stale: true,
+          error_note: "Serving cached data due to source error",
+        });
       }
     } catch (cacheError) {
-      console.error('Cache fallback failed:', cacheError.message);
+      console.error("Cache fallback failed:", cacheError.message);
     }
     return sendError(res, error);
   }
@@ -860,38 +997,42 @@ router.get("/live-scores", async (req, res) => {
 router.get("/upcoming-matches", async (req, res) => {
   try {
     setCacheHeaders(res, { maxAge: 120, staleWhileRevalidate: 60 });
-    
+
     // Validate query parameters
     let limit, offset;
     try {
-      const validated = validatePaginationParams(req.query, { defaultLimit: null, maxLimit: 50, allowNoLimit: true });
+      const validated = validatePaginationParams(req.query, {
+        defaultLimit: null,
+        maxLimit: 50,
+        allowNoLimit: true,
+      });
       limit = validated.limit;
       offset = validated.offset;
     } catch (validationError) {
       return sendError(res, validationError);
     }
-    
+
     // Try to get from cache first
     const cacheKey = "cricket:upcoming-matches";
     const cachedData = await getCache(cacheKey);
-    
+
     if (cachedData) {
       // Apply limit/offset to cached data
       const allMatches = cachedData.data || [];
-      const slicedMatches = limit 
+      const slicedMatches = limit
         ? allMatches.slice(offset, offset + limit)
         : allMatches.slice(offset);
-      
+
       return res.json({
         ...cachedData,
         count: slicedMatches.length,
         total: allMatches.length,
         offset,
         limit: limit || allMatches.length,
-        data: slicedMatches
+        data: slicedMatches,
       });
     }
-    
+
     // Cache miss - fetch from source
     const matches = await scrapeCricbuzzMatches(urls.upcomingMatches);
     const enrichedMatches = await enrichMatchesWithScorecard(matches);
@@ -903,12 +1044,12 @@ router.get("/upcoming-matches", async (req, res) => {
       data: enrichedMatches,
     };
     await setCache(cacheKey, fullResponse, 10800);
-    
+
     // Apply limit/offset for this request
-    const slicedMatches = limit 
+    const slicedMatches = limit
       ? enrichedMatches.slice(offset, offset + limit)
       : enrichedMatches.slice(offset);
-    
+
     res.json({
       success: true,
       count: slicedMatches.length,
@@ -924,11 +1065,15 @@ router.get("/upcoming-matches", async (req, res) => {
       const cacheKey = "cricket:upcoming-matches";
       const staleCache = await getCache(cacheKey);
       if (staleCache) {
-        console.log('Returning stale cache due to error');
-        return res.json({ ...staleCache, stale: true, error_note: 'Serving cached data due to source error' });
+        console.log("Returning stale cache due to error");
+        return res.json({
+          ...staleCache,
+          stale: true,
+          error_note: "Serving cached data due to source error",
+        });
       }
     } catch (cacheError) {
-      console.error('Cache fallback failed:', cacheError.message);
+      console.error("Cache fallback failed:", cacheError.message);
     }
     return sendError(res, error);
   }
@@ -937,78 +1082,143 @@ router.get("/upcoming-matches", async (req, res) => {
 // Cricket News endpoint with database storage for SEO
 router.get("/news", async (req, res) => {
   try {
-    // Cache for 30 min (data refreshes every 6 hours via GitHub Actions)
-    setCacheHeaders(res, { maxAge: 1800, staleWhileRevalidate: 1800 });
-    
+    // Cache for 5 min (data refreshes every 6 hours via VPS cron)
+    setCacheHeaders(res, { maxAge: 300, staleWhileRevalidate: 600 });
+
     // Validate query parameters with consistent pagination
     let limit, offset;
     try {
-      const validated = validatePaginationParams(req.query, { 
-        defaultLimit: 10, 
-        maxLimit: 50, 
-        allowNoLimit: false 
+      const validated = validatePaginationParams(req.query, {
+        defaultLimit: 10,
+        maxLimit: 50,
+        allowNoLimit: false,
       });
       limit = validated.limit;
       offset = validated.offset;
     } catch (validationError) {
       return sendError(res, validationError);
     }
-    
+
     // Optional source filter (cricbuzz, espncricinfo, or all)
     const sourceFilter = req.query.source?.toLowerCase();
-    const validSources = ['cricbuzz', 'espncricinfo', 'all'];
+    const validSources = ["cricbuzz", "espncricinfo", "espn", "all"];
     if (sourceFilter && !validSources.includes(sourceFilter)) {
-      return sendError(res, new ValidationError(`Invalid source. Must be one of: ${validSources.join(', ')}`));
+      return sendError(
+        res,
+        new ValidationError(
+          `Invalid source. Must be one of: ${validSources.join(", ")}`
+        )
+      );
     }
-    
+
+    // Optional search query
+    const searchQuery = req.query.search?.trim();
+
+    // Optional tag filter
+    const tagFilter = req.query.tag?.trim();
+
+    // Optional sort (newest, oldest)
+    const sortOrder = req.query.sort?.toLowerCase() || "newest";
+    if (!["newest", "oldest"].includes(sortOrder)) {
+      return sendError(
+        res,
+        new ValidationError("Invalid sort. Must be 'newest' or 'oldest'")
+      );
+    }
+
     const prisma = require("../../component/prismaClient");
-    
-    // Build where clause for source filtering
+
+    // Build where clause for filtering
     const whereClause = {};
-    if (sourceFilter && sourceFilter !== 'all') {
-      whereClause.sourceName = sourceFilter === 'cricbuzz' ? 'Cricbuzz' : 'ESPN Cricinfo';
+
+    // Source filtering
+    if (sourceFilter && sourceFilter !== "all") {
+      if (sourceFilter === "espn" || sourceFilter === "espncricinfo") {
+        whereClause.sourceName = "ESPN Cricinfo";
+      } else {
+        whereClause.sourceName = "Cricbuzz";
+      }
     }
-    
-    // Cache key includes limit, offset, and source for proper caching
-    const cacheKey = `cricket:news:${limit}:${offset}:${sourceFilter || 'all'}`;
-    
+
+    // Search in title and content
+    if (searchQuery) {
+      whereClause.OR = [
+        { title: { contains: searchQuery, mode: "insensitive" } },
+        { description: { contains: searchQuery, mode: "insensitive" } },
+        { content: { contains: searchQuery, mode: "insensitive" } },
+      ];
+    }
+
+    // Tag filtering
+    if (tagFilter) {
+      whereClause.tags = { has: tagFilter };
+    }
+
+    // Cache key includes all filter params
+    const cacheKey = `cricket:news:${limit}:${offset}:${
+      sourceFilter || "all"
+    }:${searchQuery || ""}:${tagFilter || ""}:${sortOrder}`;
+
     // STEP 1: Try Redis cache first (fastest)
     const cachedData = await getCache(cacheKey);
-    
+
     if (cachedData) {
-      console.log(`✅ Returning news from Redis cache (limit=${limit}, offset=${offset})`);
-      return res.json({ ...cachedData, source: 'redis' });
+      console.log(`✅ Returning news from Redis cache`);
+      return res.json({ ...cachedData, source: "redis" });
     }
-    
+
     // STEP 2: Get total count for pagination metadata
     const totalCount = await prisma.newsArticle.count({
-      where: whereClause
+      where: whereClause,
     });
-    
+
     // STEP 3: Get paginated articles from database
     const articles = await prisma.newsArticle.findMany({
       where: whereClause,
       take: limit,
       skip: offset,
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: sortOrder === "newest" ? "desc" : "asc" },
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        description: true,
+        imageUrl: true,
+        thumbnailUrl: true,
+        publishedTime: true,
+        sourceName: true,
+        sourceUrl: true,
+        tags: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
-    
+
     // Build response with full pagination metadata
     const response = {
       success: true,
       count: articles.length,
       total: totalCount,
+      page: Math.floor(offset / limit) + 1,
+      totalPages: Math.ceil(totalCount / limit),
       offset,
       limit,
-      hasMore: offset + articles.length < totalCount,
+      hasNext: offset + articles.length < totalCount,
+      hasPrev: offset > 0,
+      filters: {
+        source: sourceFilter || "all",
+        search: searchQuery || null,
+        tag: tagFilter || null,
+        sort: sortOrder,
+      },
       data: articles,
-      source: 'database',
-      timestamp: new Date().toISOString()
+      source: "database",
+      timestamp: new Date().toISOString(),
     };
-    
-    // Cache in Redis for 30 minutes (1800 seconds)
-    await setCache(cacheKey, response, 1800);
-    
+
+    // Cache in Redis for 5 minutes (300 seconds)
+    await setCache(cacheKey, response, 300);
+
     return res.json(response);
   } catch (error) {
     console.error("Error fetching cricket news:", error.message);
@@ -1017,7 +1227,7 @@ router.get("/news", async (req, res) => {
 });
 
 // Get single article by slug (SEO endpoint)
-router.get('/news/:slug', async (req, res) => {
+router.get("/news/:slug", async (req, res) => {
   try {
     // Validate slug parameter
     let slug;
@@ -1026,29 +1236,32 @@ router.get('/news/:slug', async (req, res) => {
     } catch (validationError) {
       return sendError(res, validationError);
     }
-    
+
     // Set cache headers (1 hour)
-    res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400');
-    
+    res.setHeader(
+      "Cache-Control",
+      "public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400"
+    );
+
     const prisma = require("../../component/prismaClient");
-    
+
     const article = await prisma.newsArticle.findFirst({
-      where: { 
+      where: {
         slug: slug,
-        sport: 'cricket'
-      }
+        sport: "cricket",
+      },
     });
-    
+
     if (!article) {
-      return sendError(res, new NotFoundError('Article'));
+      return sendError(res, new NotFoundError("Article"));
     }
-    
+
     res.json({
       success: true,
-      data: article
+      data: article,
     });
   } catch (error) {
-    console.error('Error fetching article:', error.message);
+    console.error("Error fetching article:", error.message);
     return sendError(res, error);
   }
 });
@@ -1061,36 +1274,41 @@ router.get('/news/:slug', async (req, res) => {
 router.get("/stats/rankings", async (req, res) => {
   try {
     setCacheHeaders(res, { maxAge: 86400, staleWhileRevalidate: 3600 }); // 24 hours
-    
+
     const { category, formatType } = req.query;
-    
+
     // Validate required parameters
     if (!category || !formatType) {
-      return sendError(res, new ValidationError("Both 'category' and 'formatType' parameters are required"));
+      return sendError(
+        res,
+        new ValidationError(
+          "Both 'category' and 'formatType' parameters are required"
+        )
+      );
     }
-    
+
     // Check cache first
     const cacheKey = `cricket:stats:rankings:${category}:${formatType}`;
     const cachedData = await getCache(cacheKey);
-    
+
     if (cachedData) {
       return res.json({ ...cachedData, cached: true });
     }
-    
+
     // Fetch from RapidAPI
     const data = await fetchRankings(category, formatType);
-    
+
     const response = {
       success: true,
       data,
       source: "rapidapi",
       cached: false,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
-    
+
     // Cache for 6 hours
     await setCache(cacheKey, response, 86400);
-    
+
     res.json(response);
   } catch (error) {
     console.error("Error fetching rankings:", error.message);
@@ -1102,35 +1320,40 @@ router.get("/stats/rankings", async (req, res) => {
 router.get("/stats/standings", async (req, res) => {
   try {
     setCacheHeaders(res, { maxAge: 86400, staleWhileRevalidate: 3600 }); // 24 hours
-    
+
     const { matchType } = req.query;
-    
+
     if (!matchType) {
-      return sendError(res, new ValidationError("'matchType' parameter is required (1=World Test Championship, 2=World Cup Super League)"));
+      return sendError(
+        res,
+        new ValidationError(
+          "'matchType' parameter is required (1=World Test Championship, 2=World Cup Super League)"
+        )
+      );
     }
-    
+
     // Check cache first
     const cacheKey = `cricket:stats:standings:${matchType}`;
     const cachedData = await getCache(cacheKey);
-    
+
     if (cachedData) {
       return res.json({ ...cachedData, cached: true });
     }
-    
+
     // Fetch from RapidAPI
     const data = await fetchStandings(matchType);
-    
+
     const response = {
       success: true,
       data,
       source: "rapidapi",
       cached: false,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
-    
+
     // Cache for 6 hours
     await setCache(cacheKey, response, 86400);
-    
+
     res.json(response);
   } catch (error) {
     console.error("Error fetching standings:", error.message);
@@ -1142,29 +1365,29 @@ router.get("/stats/standings", async (req, res) => {
 router.get("/stats/record-filters", async (req, res) => {
   try {
     setCacheHeaders(res, { maxAge: 86400, staleWhileRevalidate: 3600 }); // 24 hours
-    
+
     // Check cache first
     const cacheKey = "cricket:stats:record-filters";
     const cachedData = await getCache(cacheKey);
-    
+
     if (cachedData) {
       return res.json({ ...cachedData, cached: true });
     }
-    
+
     // Fetch from RapidAPI
     const data = await fetchRecordFilters();
-    
+
     const response = {
       success: true,
       data,
       source: "rapidapi",
       cached: false,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
-    
+
     // Cache for 24 hours
     await setCache(cacheKey, response, 86400);
-    
+
     res.json(response);
   } catch (error) {
     console.error("Error fetching record filters:", error.message);
@@ -1176,36 +1399,44 @@ router.get("/stats/record-filters", async (req, res) => {
 router.get("/stats/records", async (req, res) => {
   try {
     setCacheHeaders(res, { maxAge: 86400, staleWhileRevalidate: 3600 }); // 24 hours
-    
+
     const { statsType, id = 0, ...otherFilters } = req.query;
-    
+
     if (!statsType) {
-      return sendError(res, new ValidationError("'statsType' parameter is required. Use /stats/record-filters to get available types."));
+      return sendError(
+        res,
+        new ValidationError(
+          "'statsType' parameter is required. Use /stats/record-filters to get available types."
+        )
+      );
     }
-    
+
     // Build cache key from all params
-    const filterStr = Object.entries(otherFilters).sort().map(([k, v]) => `${k}=${v}`).join("&");
+    const filterStr = Object.entries(otherFilters)
+      .sort()
+      .map(([k, v]) => `${k}=${v}`)
+      .join("&");
     const cacheKey = `cricket:stats:records:${statsType}:${id}:${filterStr}`;
     const cachedData = await getCache(cacheKey);
-    
+
     if (cachedData) {
       return res.json({ ...cachedData, cached: true });
     }
-    
+
     // Fetch from RapidAPI
     const data = await fetchRecords(statsType, id);
-    
+
     const response = {
       success: true,
       data,
       source: "rapidapi",
       cached: false,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
-    
+
     // Cache for 6 hours
     await setCache(cacheKey, response, 86400);
-    
+
     res.json(response);
   } catch (error) {
     console.error("Error fetching records:", error.message);
