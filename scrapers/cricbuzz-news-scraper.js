@@ -1,7 +1,7 @@
 // Use puppeteer-core for serverless compatibility
-const puppeteer = require('puppeteer-core');
-const chromium = require('@sparticuz/chromium');
-const axios = require('axios');
+const puppeteer = require("puppeteer-core");
+const chromium = require("@sparticuz/chromium");
+const axios = require("axios");
 
 /**
  * Cricbuzz News Scraper
@@ -10,8 +10,8 @@ const axios = require('axios');
  */
 class CricbuzzNewsScraper {
   constructor() {
-    this.baseUrl = 'https://www.cricbuzz.com';
-    this.newsUrl = 'https://www.cricbuzz.com/cricket-news/latest-news';
+    this.baseUrl = "https://www.cricbuzz.com";
+    this.newsUrl = "https://www.cricbuzz.com/cricket-news/latest-news";
     this.browser = null;
   }
 
@@ -22,11 +22,11 @@ class CricbuzzNewsScraper {
    */
   getHighQualityImageUrl(imageUrl) {
     if (!imageUrl) return null;
-    
+
     try {
       // Remove quality parameters to get original/best quality
       // Or replace d=low with d=high
-      return imageUrl.split('?')[0]; // Gets base URL without parameters
+      return imageUrl.split("?")[0]; // Gets base URL without parameters
     } catch (e) {
       return imageUrl; // Return original if parsing fails
     }
@@ -38,33 +38,46 @@ class CricbuzzNewsScraper {
   async initBrowser() {
     if (!this.browser) {
       // Detect if running in serverless environment (Vercel/AWS Lambda)
-      const isServerless = !!process.env.AWS_LAMBDA_FUNCTION_NAME || !!process.env.VERCEL;
-      
+      const isServerless =
+        !!process.env.AWS_LAMBDA_FUNCTION_NAME || !!process.env.VERCEL;
+
+      // Detect ARM64 architecture (Puppeteer bundled Chrome doesn't support ARM64)
+      const os = require("os");
+      const isArm64 = os.arch() === "arm64";
+
       const options = {
-        headless: 'new',
+        headless: "new",
         args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-gpu',
-          '--single-process',
-          '--no-zygote'
-        ]
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-gpu",
+          "--single-process",
+          "--no-zygote",
+        ],
       };
 
       if (isServerless) {
         // Serverless: Use @sparticuz/chromium
-        console.log('🌐 Running in serverless environment, using @sparticuz/chromium');
+        console.log(
+          "🌐 Running in serverless environment, using @sparticuz/chromium"
+        );
         options.executablePath = await chromium.executablePath();
         options.args = [...options.args, ...chromium.args];
+      } else if (isArm64) {
+        // ARM64: Use system Chromium (Puppeteer bundled Chrome is x86_64 only)
+        console.log("💻 Running on ARM64, using system Chromium");
+        options.executablePath = "/snap/bin/chromium";
       } else {
-        // Local: Try to find local Chromium from puppeteer package
-        console.log('💻 Running locally, using bundled Chromium');
+        // x86_64 Local: Try to find local Chromium from puppeteer package
+        console.log("💻 Running locally, using bundled Chromium");
         try {
-          const puppeteerLocal = require('puppeteer');
+          const puppeteerLocal = require("puppeteer");
           options.executablePath = puppeteerLocal.executablePath();
         } catch (e) {
-          console.log('⚠️  Puppeteer not found, will use system Chrome/Chromium');
+          console.log(
+            "⚠️  Puppeteer not found, will use system Chrome/Chromium"
+          );
           // Let puppeteer-core try to find Chrome/Chromium automatically
         }
       }
@@ -91,34 +104,39 @@ class CricbuzzNewsScraper {
   async fetchLatestNews() {
     let page;
     try {
-      console.log('🏏 Fetching latest cricket news from Cricbuzz...');
+      console.log("🏏 Fetching latest cricket news from Cricbuzz...");
       const browser = await this.initBrowser();
       page = await browser.newPage();
-      
+
       // Set user agent and viewport
-      await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      await page.setUserAgent(
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      );
       await page.setViewport({ width: 1920, height: 1080 });
-      
+
       // Navigate to the news page
-      console.log('📡 Loading page...');
-      await page.goto(this.newsUrl, { waitUntil: 'networkidle0', timeout: 60000 });
-      
+      console.log("📡 Loading page...");
+      await page.goto(this.newsUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: 30000,
+      });
+
       // Wait for dynamic content to load - scroll down to trigger lazy loading
       await page.evaluate(() => {
         window.scrollTo(0, document.body.scrollHeight);
       });
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
       // Scroll back to top
       await page.evaluate(() => {
         window.scrollTo(0, 0);
       });
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
       // Extract news articles using comprehensive selector strategy
       const newsArticles = await page.evaluate((baseUrl) => {
         const articles = [];
-        
+
         // Look for all elements that might contain news articles
         // Try multiple container patterns
         const containerSelectors = [
@@ -127,74 +145,81 @@ class CricbuzzNewsScraper {
           '[class*="article"]',
           'div[class*="cb"]',
         ];
-        
+
         const allContainers = [];
-        containerSelectors.forEach(selector => {
+        containerSelectors.forEach((selector) => {
           const elements = Array.from(document.querySelectorAll(selector));
           allContainers.push(...elements);
         });
-        
+
         // De-duplicate containers
         const uniqueContainers = [...new Set(allContainers)];
-        
+
         const seen = new Set();
-        
+
         // Search through containers for news patterns
-        uniqueContainers.forEach(container => {
+        uniqueContainers.forEach((container) => {
           // Look for links that might be news articles
           const links = container.querySelectorAll('a[href*="/cricket-news/"]');
-          
-          links.forEach(link => {
+
+          links.forEach((link) => {
             const href = link.href;
-            
+
             // Skip non-article URLs
-            if (!href || 
-                seen.has(href) ||
-                href.includes('/latest-news') || 
-                href.includes('/editorial/') || 
-                href.includes('/info/') ||
-                href.endsWith('/cricket-news') ||
-                href.endsWith('/cricket-news/') ||
-                href.includes('#')) {
+            if (
+              !href ||
+              seen.has(href) ||
+              href.includes("/latest-news") ||
+              href.includes("/editorial/") ||
+              href.includes("/info/") ||
+              href.endsWith("/cricket-news") ||
+              href.endsWith("/cricket-news/") ||
+              href.includes("#")
+            ) {
               return;
             }
-            
+
             // Only include URLs that look like news articles (have numbers)
             if (!/\d{5,}/.test(href)) {
               return;
             }
-            
+
             const title = link.textContent.trim();
             if (!title || title.length < 15) return;
-            
+
             seen.add(href);
-            
-            
+
             // Try to find description and metadata in parent/sibling elements
-            let description = '';
-            let publishedTime = '';
+            let description = "";
+            let publishedTime = "";
             let imageUrl = null;
-            
+
             // Search upward through the link's parents (not container) for additional info
             let currentElement = link.parentElement;
             for (let i = 0; i < 5 && currentElement; i++) {
               // Look for description
-              const descElements = currentElement.querySelectorAll('[class*="intr"], [class*="desc"], [class*="summary"], p');
+              const descElements = currentElement.querySelectorAll(
+                '[class*="intr"], [class*="desc"], [class*="summary"], p'
+              );
               for (const desc of descElements) {
                 const text = desc.textContent.trim();
                 // Make sure description is unique and not the title
-                if (text && 
-                    text.length > 30 && 
-                    text.length < 500 && 
-                    !description &&
-                    text !== title) {
+                if (
+                  text &&
+                  text.length > 30 &&
+                  text.length < 500 &&
+                  !description &&
+                  text !== title
+                ) {
                   description = text;
                   break;
                 }
               }
-              
+
               // Look for time
-              const timeElements = currentElement.querySelectorAll('[class*="time"], [class*="date"], time');
+              const timeElements = currentElement.querySelectorAll(
+                '[class*="time"], [class*="date"], time'
+              );
               for (const time of timeElements) {
                 const text = time.textContent.trim();
                 if (text && !publishedTime) {
@@ -202,49 +227,50 @@ class CricbuzzNewsScraper {
                   break;
                 }
               }
-              
+
               // Look for image
-              const images = currentElement.querySelectorAll('img');
+              const images = currentElement.querySelectorAll("img");
               for (const img of images) {
                 if (!imageUrl && (img.src || img.dataset?.src)) {
                   imageUrl = img.src || img.dataset.src;
                   break;
                 }
               }
-              
+
               currentElement = currentElement.parentElement;
             }
 
-            
-           const article = {
-            id: link.href.split('/').pop(),
-            title,
-            description,
-            link: link.href,
-            imageUrl: imageUrl || null,
-            thumbnailUrl: imageUrl || null, // Will be converted to high-quality after extraction
-            publishedTime,
-            source: 'Cricbuzz',
-            scrapedAt: new Date().toISOString()
-          };
-          articles.push(article);
+            const article = {
+              id: link.href.split("/").pop(),
+              title,
+              description,
+              link: link.href,
+              imageUrl: imageUrl || null,
+              thumbnailUrl: imageUrl || null, // Will be converted to high-quality after extraction
+              publishedTime,
+              source: "Cricbuzz",
+              scrapedAt: new Date().toISOString(),
+            };
+            articles.push(article);
           });
         });
-        
+
         return articles;
       }, this.baseUrl);
-      
+
       // Convert thumbnailUrls to high-quality versions (remove quality parameters)
-      newsArticles.forEach(article => {
+      newsArticles.forEach((article) => {
         article.thumbnailUrl = this.getHighQualityImageUrl(article.imageUrl);
       });
-      
+
       await page.close();
-      console.log(`✅ Successfully fetched ${newsArticles.length} news articles`);
+      console.log(
+        `✅ Successfully fetched ${newsArticles.length} news articles`
+      );
       return newsArticles;
     } catch (error) {
       if (page) await page.close();
-      console.error('❌ Error fetching news:', error.message);
+      console.error("❌ Error fetching news:", error.message);
       throw error;
     }
   }
@@ -260,26 +286,31 @@ class CricbuzzNewsScraper {
       console.log(`📰 Fetching article details from: ${articleUrl}`);
       const browser = await this.initBrowser();
       page = await browser.newPage();
-      
-      await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
+      await page.setUserAgent(
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      );
       await page.setViewport({ width: 1920, height: 1080 });
-      
-      await page.goto(articleUrl, { waitUntil: 'networkidle0', timeout: 60000 });
-      
+
+      await page.goto(articleUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: 30000,
+      });
+
       // Wait for content to load
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
       // Extract article details
       const articleDetails = await page.evaluate((baseUrl) => {
         // Find title
         const titleSelectors = [
-          'h1',
+          "h1",
           '[class*="headline"]',
           '[class*="title"]',
-          '[class*="hdln"]'
+          '[class*="hdln"]',
         ];
-        
-        let title = '';
+
+        let title = "";
         for (const selector of titleSelectors) {
           const element = document.querySelector(selector);
           if (element && element.textContent.trim().length > 10) {
@@ -287,24 +318,28 @@ class CricbuzzNewsScraper {
             break;
           }
         }
-        
+
         // Find time - Cricbuzz uses specific format: "Sun, Dec 14, 2025 • 9:09 AM"
         const timeSelectors = [
-          'span.text-gray-500', // Specific Cricbuzz time class
+          "span.text-gray-500", // Specific Cricbuzz time class
           'span[class*="gray"]', // Backup for gray text
-          'time',
+          "time",
           '[class*="time"]',
           '[class*="date"]',
-          '[datetime]'
+          "[datetime]",
         ];
-        
-        let publishedTime = '';
+
+        let publishedTime = "";
         for (const selector of timeSelectors) {
           const elements = document.querySelectorAll(selector);
           for (const element of elements) {
             const text = element.textContent.trim();
             // Look for pattern: "Day, Month Date, Year • Time AM/PM" or date-like patterns
-            if (text.match(/\w{3},\s+\w{3}\s+\d{1,2},\s+\d{4}|•|\d{1,2}:\d{2}\s*(AM|PM)/i)) {
+            if (
+              text.match(
+                /\w{3},\s+\w{3}\s+\d{1,2},\s+\d{4}|•|\d{1,2}:\d{2}\s*(AM|PM)/i
+              )
+            ) {
               publishedTime = text;
               break;
             }
@@ -312,117 +347,137 @@ class CricbuzzNewsScraper {
           if (publishedTime) break;
         }
 
-        
-        // Find main image
-        const imageSelectors = [
-          'img[class*="main"]',
-          'img[class*="hero"]',
-          'article img',
-          'img[class*="large"]',
-          '.content img'
-        ];
-        
-        let mainImage = null;
-        for (const selector of imageSelectors) {
-          const element = document.querySelector(selector);
-          if (element) {
-            mainImage = element.src || element.dataset?.src;
-            if (mainImage) break;
+        // Find main image - prioritize meta tags (more reliable)
+        const ogImage = document.querySelector(
+          'meta[property="og:image"]'
+        )?.content;
+        const twitterImage = document.querySelector(
+          'meta[name="twitter:image"]'
+        )?.content;
+
+        let mainImage = ogImage || twitterImage || null;
+
+        // Fallback to DOM selectors if meta tags not found
+        if (!mainImage) {
+          const imageSelectors = [
+            'img[class*="main"]',
+            'img[class*="hero"]',
+            "article img",
+            'img[class*="large"]',
+            ".content img",
+          ];
+
+          for (const selector of imageSelectors) {
+            const element = document.querySelector(selector);
+            if (element) {
+              mainImage = element.src || element.dataset?.src;
+              if (mainImage) break;
+            }
           }
         }
-        
+
         // Extract article content - look for paragraphs
         const contentParagraphs = [];
         const paragraphContainers = [
-          'article p',
+          "article p",
           '[class*="story"] p',
           '[class*="content"] p',
           '[class*="para"] p',
-          'main p'
+          "main p",
         ];
-        
+
         const allParagraphs = new Set();
-        paragraphContainers.forEach(selector => {
+        paragraphContainers.forEach((selector) => {
           const paras = document.querySelectorAll(selector);
-          paras.forEach(p => allParagraphs.add(p));
+          paras.forEach((p) => allParagraphs.add(p));
         });
-        
+
         // If no structured paragraphs found, get all p tags
         if (allParagraphs.size === 0) {
-          const allPs = document.querySelectorAll('p');
-          allPs.forEach(p => allParagraphs.add(p));
+          const allPs = document.querySelectorAll("p");
+          allPs.forEach((p) => allParagraphs.add(p));
         }
-        
-        allParagraphs.forEach(p => {
+
+        allParagraphs.forEach((p) => {
           const text = p.textContent.trim();
           // Filter out navigation, footer, cookie consent, and other non-content paragraphs
-          if (text && 
-              text.length > 50 && 
-              !text.toLowerCase().includes('follow us') &&
-              !text.toLowerCase().includes('download app') &&
-              !text.toLowerCase().includes('subscribe') &&
-              !text.toLowerCase().startsWith('more ') &&
-              !text.includes('©') &&
-              // Filter out cookie consent and privacy notice text
-              !text.toLowerCase().includes('we won\'t sell or share your personal information') &&
-              !text.toLowerCase().includes('personal information to inform the ads') &&
-              !text.toLowerCase().includes('you may still see interest-based ads') &&
-              !text.toLowerCase().includes('cookie') &&
-              !text.toLowerCase().includes('privacy policy') &&
-              !text.toLowerCase().includes('gdpr') &&
-              !text.toLowerCase().includes('consent')) {
+          if (
+            text &&
+            text.length > 50 &&
+            !text.toLowerCase().includes("follow us") &&
+            !text.toLowerCase().includes("download app") &&
+            !text.toLowerCase().includes("subscribe") &&
+            !text.toLowerCase().startsWith("more ") &&
+            !text.includes("©") &&
+            // Filter out cookie consent and privacy notice text
+            !text
+              .toLowerCase()
+              .includes("we won't sell or share your personal information") &&
+            !text
+              .toLowerCase()
+              .includes("personal information to inform the ads") &&
+            !text
+              .toLowerCase()
+              .includes("you may still see interest-based ads") &&
+            !text.toLowerCase().includes("cookie") &&
+            !text.toLowerCase().includes("privacy policy") &&
+            !text.toLowerCase().includes("gdpr") &&
+            !text.toLowerCase().includes("consent")
+          ) {
             contentParagraphs.push(text);
           }
         });
-        
-        const fullContent = contentParagraphs.join('\n\n');
-        
+
+        const fullContent = contentParagraphs.join("\n\n");
+
         // Extract tags
         const tags = [];
         const tagSelectors = [
           '[class*="tag"] a',
           '[class*="category"] a',
-          'a[rel="tag"]'
+          'a[rel="tag"]',
         ];
-        
-        tagSelectors.forEach(selector => {
+
+        tagSelectors.forEach((selector) => {
           const tagElements = document.querySelectorAll(selector);
-          tagElements.forEach(tag => {
+          tagElements.forEach((tag) => {
             const tagText = tag.textContent.trim();
             if (tagText && tagText.length < 30) {
               tags.push(tagText);
             }
           });
         });
-        
+
         // Extract related articles
         const relatedArticles = [];
         const relatedSelectors = [
           '[class*="related"] a[href*="/cricket-news/"]',
           '[class*="more"] a[href*="/cricket-news/"]',
-          'aside a[href*="/cricket-news/"]'
+          'aside a[href*="/cricket-news/"]',
         ];
-        
+
         const relatedLinks = new Set();
-        relatedSelectors.forEach(selector => {
+        relatedSelectors.forEach((selector) => {
           const links = document.querySelectorAll(selector);
-          links.forEach(link => {
+          links.forEach((link) => {
             if (link.href && /\d{5,}/.test(link.href)) {
-              relatedLinks.add(JSON.stringify({
-                title: link.textContent.trim(),
-                link: link.href
-              }));
+              relatedLinks.add(
+                JSON.stringify({
+                  title: link.textContent.trim(),
+                  link: link.href,
+                })
+              );
             }
           });
         });
-        
-        relatedLinks.forEach(linkJson => {
+
+        relatedLinks.forEach((linkJson) => {
           const linkObj = JSON.parse(linkJson);
           if (linkObj.title && linkObj.title.length > 10) {
             relatedArticles.push(linkObj);
           }
         });
-        
+
         return {
           title,
           publishedTime,
@@ -431,14 +486,14 @@ class CricbuzzNewsScraper {
           contentParagraphs,
           tags: [...new Set(tags)],
           relatedArticles: relatedArticles.slice(0, 5),
-          scrapedAt: new Date().toISOString()
+          scrapedAt: new Date().toISOString(),
         };
       }, this.baseUrl);
-      
+
       await page.close();
       return {
         ...articleDetails,
-        url: articleUrl
+        url: articleUrl,
       };
     } catch (error) {
       if (page) await page.close();
@@ -456,25 +511,32 @@ class CricbuzzNewsScraper {
     try {
       const latestNews = await this.fetchLatestNews();
       const detailedNews = [];
-      
+
       if (latestNews.length === 0) {
-        console.log('⚠️  No news articles found');
+        console.log("⚠️  No news articles found");
         return [];
       }
-      
-      console.log(`\n📚 Fetching detailed information for top ${Math.min(limit, latestNews.length)} articles...\n`);
-      
+
+      console.log(
+        `\n📚 Fetching detailed information for top ${Math.min(
+          limit,
+          latestNews.length
+        )} articles...\n`
+      );
+
       for (let i = 0; i < Math.min(limit, latestNews.length); i++) {
         const article = latestNews[i];
-        console.log(`${i + 1}/${Math.min(limit, latestNews.length)} - ${article.title}`);
-        
+        console.log(
+          `${i + 1}/${Math.min(limit, latestNews.length)} - ${article.title}`
+        );
+
         try {
           const details = await this.fetchArticleDetails(article.link);
           detailedNews.push({
             ...article,
-            details
+            details,
           });
-          
+
           // Add a small delay to avoid rate limiting
           await this.delay(1000);
         } catch (error) {
@@ -483,11 +545,13 @@ class CricbuzzNewsScraper {
           detailedNews.push(article);
         }
       }
-      
-      console.log(`\n✅ Successfully fetched ${detailedNews.length} detailed articles`);
+
+      console.log(
+        `\n✅ Successfully fetched ${detailedNews.length} detailed articles`
+      );
       return detailedNews;
     } catch (error) {
-      console.error('❌ Error in fetchLatestNewsWithDetails:', error.message);
+      console.error("❌ Error in fetchLatestNewsWithDetails:", error.message);
       throw error;
     }
   }
@@ -497,7 +561,7 @@ class CricbuzzNewsScraper {
    * @param {number} ms - Milliseconds to delay
    */
   delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
@@ -506,54 +570,63 @@ class CricbuzzNewsScraper {
    * @returns {string} Formatted news string
    */
   formatNews(newsArticles) {
-    let output = '\n╔═══════════════════════════════════════════════════════════════╗\n';
-    output += '║           🏏 LATEST CRICKET NEWS FROM CRICBUZZ 🏏            ║\n';
-    output += '╚═══════════════════════════════════════════════════════════════╝\n\n';
-    
+    let output =
+      "\n╔═══════════════════════════════════════════════════════════════╗\n";
+    output +=
+      "║           🏏 LATEST CRICKET NEWS FROM CRICBUZZ 🏏            ║\n";
+    output +=
+      "╚═══════════════════════════════════════════════════════════════╝\n\n";
+
     newsArticles.forEach((article, index) => {
       output += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
       output += `${index + 1}. ${article.title}\n`;
       output += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
-      
+
       if (article.description) {
         output += `📝 ${article.description}\n\n`;
       }
-      
+
       if (article.publishedTime) {
         output += `🕐 Published: ${article.publishedTime}\n`;
       }
-      
+
       output += `🔗 Link: ${article.link}\n`;
-      
+
       if (article.imageUrl) {
         output += `🖼️  Image: ${article.imageUrl}\n`;
       }
-      
+
       if (article.details) {
         output += `\n📰 FULL ARTICLE CONTENT:\n`;
-        output += `${'─'.repeat(60)}\n`;
-        
-        if (article.details.contentParagraphs && article.details.contentParagraphs.length > 0) {
+        output += `${"─".repeat(60)}\n`;
+
+        if (
+          article.details.contentParagraphs &&
+          article.details.contentParagraphs.length > 0
+        ) {
           article.details.contentParagraphs.forEach((para, idx) => {
             output += `\n${para}\n`;
           });
         }
-        
+
         if (article.details.tags && article.details.tags.length > 0) {
-          output += `\n🏷️  Tags: ${article.details.tags.join(', ')}\n`;
+          output += `\n🏷️  Tags: ${article.details.tags.join(", ")}\n`;
         }
-        
-        if (article.details.relatedArticles && article.details.relatedArticles.length > 0) {
+
+        if (
+          article.details.relatedArticles &&
+          article.details.relatedArticles.length > 0
+        ) {
           output += `\n📌 Related Articles:\n`;
           article.details.relatedArticles.forEach((related, idx) => {
             output += `   ${idx + 1}. ${related.title}\n`;
           });
         }
       }
-      
+
       output += `\n`;
     });
-    
+
     return output;
   }
 }
@@ -561,29 +634,29 @@ class CricbuzzNewsScraper {
 // Main execution
 async function main() {
   const scraper = new CricbuzzNewsScraper();
-  
+
   try {
     // Fetch latest news with full details for top 10 articles
     const detailedNews = await scraper.fetchLatestNewsWithDetails(10);
-    
+
     // Display formatted news
     console.log(scraper.formatNews(detailedNews));
-    
+
     // Optionally, save to JSON file
-    const fs = require('fs').promises;
+    const fs = require("fs").promises;
     await fs.writeFile(
-      'cricbuzz-latest-news.json',
+      "cricbuzz-latest-news.json",
       JSON.stringify(detailedNews, null, 2),
-      'utf-8'
+      "utf-8"
     );
-    console.log('\n💾 News data saved to cricbuzz-latest-news.json');
-    
+    console.log("\n💾 News data saved to cricbuzz-latest-news.json");
+
     // Close browser
     await scraper.closeBrowser();
-    
+
     return detailedNews;
   } catch (error) {
-    console.error('❌ Main execution error:', error);
+    console.error("❌ Main execution error:", error);
     await scraper.closeBrowser();
     process.exit(1);
   }
