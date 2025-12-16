@@ -1216,8 +1216,8 @@ router.get("/news", async (req, res) => {
       timestamp: new Date().toISOString(),
     };
 
-    // Cache in Redis for 5 minutes (300 seconds)
-    await setCache(cacheKey, response, 300);
+    // Cache in Redis for 30 minutes (1800 seconds)
+    await setCache(cacheKey, response, 1800);
 
     return res.json(response);
   } catch (error) {
