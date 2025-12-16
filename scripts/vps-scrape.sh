@@ -73,8 +73,9 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 # Send Discord notification
 if [ -z "$ERRORS" ]; then
-  send_discord "🏏 Cricket Scraper Success" "**Cricbuzz:** $CRICBUZZ_STATUS\n**ESPN:** $ESPN_STATUS\n**Duration:** ${DURATION}s" "3066993"
+  DESC="**Cricbuzz:** $CRICBUZZ_STATUS\n**ESPN:** $ESPN_STATUS\n**Duration:** ${DURATION}s"
+  send_discord "🏏 Cricket Scraper Success" "$DESC" "3066993"
 else
-  send_discord "⚠️ Cricket Scraper Issues" "**Cricbuzz:** $CRICBUZZ_STATUS\n**ESPN:** $ESPN_STATUS\n**Errors:**$ERRORS" "15158332"
+  DESC="**Cricbuzz:** $CRICBUZZ_STATUS\n**ESPN:** $ESPN_STATUS\n**Errors:** Check logs"
+  send_discord "⚠️ Cricket Scraper Issues" "$DESC" "15158332"
 fi
-
