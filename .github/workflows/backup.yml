@@ -1,0 +1,101 @@
+name: Daily Supabase Backup to R2
+
+on:
+  schedule:
+    # Run at 2:00 AM IST (20:30 UTC previous day)
+    - cron: '30 20 * * *'
+  workflow_dispatch:
+    # Allow manual trigger from GitHub Actions UI
+
+env:
+  R2_BUCKET: supabase-backups
+  RETENTION_DAYS: 30
+
+jobs:
+  backup:
+    name: Backup Supabase DB
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Configure AWS CLI for R2
+        run: |
+          aws configure set aws_access_key_id ${{ secrets.R2_ACCESS_KEY_ID }} --profile r2
+          aws configure set aws_secret_access_key ${{ secrets.R2_SECRET_ACCESS_KEY }} --profile r2
+          aws configure set region auto --profile r2
+
+      - name: Create database backup
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_BACKUP_URL }}
+        run: |
+          TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
+          BACKUP_FILE="backup_${TIMESTAMP}.dump"
+          
+          echo "📦 Creating backup: ${BACKUP_FILE}"
+          pg_dump "${DATABASE_URL}" \
+            --format=custom \
+            --no-owner \
+            --no-acl \
+            --file="/tmp/${BACKUP_FILE}"
+          
+          FILESIZE=$(du -h "/tmp/${BACKUP_FILE}" | cut -f1)
+          echo "✅ Backup created: ${FILESIZE}"
+          
+          echo "BACKUP_FILE=${BACKUP_FILE}" >> $GITHUB_ENV
+          echo "BACKUP_PATH=/tmp/${BACKUP_FILE}" >> $GITHUB_ENV
+          echo "FILESIZE=${FILESIZE}" >> $GITHUB_ENV
+
+      - name: Upload to Cloudflare R2
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          echo "☁️ Uploading to R2..."
+          aws s3 cp "${{ env.BACKUP_PATH }}" \
+            "s3://${{ env.R2_BUCKET }}/daily/${{ env.BACKUP_FILE }}" \
+            --endpoint-url "${{ secrets.R2_ENDPOINT }}" \
+            --profile r2
+          
+          echo "✅ Uploaded: s3://${{ env.R2_BUCKET }}/daily/${{ env.BACKUP_FILE }}"
+
+      - name: Cleanup old backups
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          CUTOFF_DATE=$(date -d "-${{ env.RETENTION_DAYS }} days" +%Y-%m-%d)
+          echo "🧹 Removing backups older than ${CUTOFF_DATE}..."
+          
+          aws s3 ls "s3://${{ env.R2_BUCKET }}/daily/" \
+            --endpoint-url "${{ secrets.R2_ENDPOINT }}" \
+            --profile r2 | while read -r line; do
+            
+            FILE_DATE=$(echo "$line" | awk '{print $1}')
+            FILE_NAME=$(echo "$line" | awk '{print $4}')
+            
+            if [[ -n "${FILE_NAME}" && "${FILE_DATE}" < "${CUTOFF_DATE}" ]]; then
+              echo "  🗑️ Deleting: ${FILE_NAME}"
+              aws s3 rm "s3://${{ env.R2_BUCKET }}/daily/${FILE_NAME}" \
+                --endpoint-url "${{ secrets.R2_ENDPOINT }}" \
+                --profile r2
+            fi
+          done
+          
+          echo "✅ Cleanup complete"
+
+      - name: Backup summary
+        run: |
+          echo ""
+          echo "============================================"
+          echo "🎉 BACKUP COMPLETE!"
+          echo "============================================"
+          echo "📁 File: ${{ env.BACKUP_FILE }}"
+          echo "📊 Size: ${{ env.FILESIZE }}"
+          echo "📍 Bucket: ${{ env.R2_BUCKET }}"
+          echo "🕐 Retention: ${{ env.RETENTION_DAYS }} days"
+          echo "============================================"
