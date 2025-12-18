@@ -41,3 +41,6 @@ Thumbs.db
 *-latest-news.json
 *_enriched*.json
 temp_*.json
+# Scraped data files
+cricbuzz-latest-news.json
+espncricinfo-puppeteer-results.json
