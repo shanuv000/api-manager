@@ -9,7 +9,7 @@ on:
 
 env:
   R2_BUCKET: supabase-backups
-  RETENTION_DAYS: 30
+  RETENTION_DAYS: 365
 
 jobs:
   backup:
