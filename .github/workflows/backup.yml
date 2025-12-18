@@ -41,7 +41,7 @@ jobs:
           BACKUP_FILE="backup_${TIMESTAMP}.dump"
           
           echo "📦 Creating backup: ${BACKUP_FILE}"
-          pg_dump "${DATABASE_URL}" \
+          /usr/lib/postgresql/17/bin/pg_dump "${DATABASE_URL}" \
             --format=custom \
             --no-owner \
             --no-acl \
