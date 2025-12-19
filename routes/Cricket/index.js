@@ -26,6 +26,7 @@ const {
   sendError,
   isRateLimited,
 } = require("../../utils/apiErrors");
+const scraperHealth = require("../../utils/scraper-health");
 
 const router = express.Router();
 
@@ -972,8 +973,14 @@ router.get("/live-scores", async (req, res) => {
       limit: limit || enrichedMatches.length,
       data: slicedMatches,
     });
+
+    // Record success for health monitoring
+    scraperHealth.recordSuccess("liveScores", Date.now());
   } catch (error) {
     console.error("Error fetching live scores:", error.message);
+
+    // Record failure for health monitoring (may trigger Discord alert)
+    await scraperHealth.recordFailure("liveScores", error, 0);
     // Try to return cached data as fallback
     try {
       const cacheKey = "cricket:live-scores";

@@ -1,15 +1,20 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
+const { withAxiosRetry } = require("../../utils/scraper-retry");
 
 async function getScorecardDetails(url) {
   try {
-    const response = await axios.get(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      },
-      timeout: 10000,
-    });
+    const response = await withAxiosRetry(
+      () =>
+        axios.get(url, {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          },
+          timeout: 15000,
+        }),
+      { operationName: "Scorecard Fetch", maxRetries: 2 }
+    );
 
     const html = response.data;
     const $ = cheerio.load(html);
@@ -21,7 +26,7 @@ async function getScorecardDetails(url) {
       const $innings = $(element);
       // The header is usually the previous sibling div
       const headerText = $innings.prev().text().trim();
-      
+
       let teamName = "";
       // Try to extract team name (e.g. "IND" from "IND 349-8")
       // Usually it's the text before the first digit
@@ -48,7 +53,7 @@ async function getScorecardDetails(url) {
         if (!batterName) return; // Skip if no batter name (e.g. extras row)
 
         const dismissal = $row.find(".text-cbTxtSec").text().trim();
-        
+
         // Check if currently batting
         const isBatting = dismissal === "batting" || dismissal === "not out";
 
@@ -59,7 +64,7 @@ async function getScorecardDetails(url) {
         // 3: 4s
         // 4: 6s
         // 5: SR
-        
+
         const runs = cols.eq(1).text().trim();
         const balls = cols.eq(2).text().trim();
         const fours = cols.eq(3).text().trim();
@@ -105,7 +110,7 @@ async function getScorecardDetails(url) {
           nb,
           wd,
           eco,
-          isBowling: false // Default to false
+          isBowling: false, // Default to false
         });
       });
 
@@ -116,8 +121,8 @@ async function getScorecardDetails(url) {
       for (let i = bowlers.length - 1; i >= 0; i--) {
         const overs = bowlers[i].overs;
         if (overs.includes(".")) {
-           activeBowlerIndex = i;
-           break;
+          activeBowlerIndex = i;
+          break;
         }
       }
 
@@ -126,9 +131,9 @@ async function getScorecardDetails(url) {
       }
 
       inningData.bowling = bowlers;
-      
+
       if (inningData.batting.length > 0 || inningData.bowling.length > 0) {
-          innings.push(inningData);
+        innings.push(inningData);
       }
     });
 
