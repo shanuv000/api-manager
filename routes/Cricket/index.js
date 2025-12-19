@@ -10,6 +10,9 @@ const {
   fetchStandings,
   fetchRecordFilters,
   fetchRecords,
+  fetchPhotosList,
+  fetchPhotoGallery,
+  fetchImage,
 } = require("./stats");
 const {
   ApiError,
@@ -45,20 +48,29 @@ router.get("/", (req, res) => {
 
   res.json({
     name: "Cricket API",
-    version: "1.0.0",
+    version: "2.0.0",
     description:
-      "Real-time cricket scores, matches, and news scraped from Cricbuzz",
+      "Comprehensive cricket API featuring real-time scores, matches, news, stats, rankings, and photo galleries from Cricbuzz",
     baseUrl,
+    lastUpdated: "2025-12-19",
     documentation: {
       note: "All endpoints return JSON responses with consistent structure",
       authentication: "No authentication required",
-      rateLimit: "No rate limit (cached responses)",
+      rateLimit: "Rate limited at 30 requests per minute per IP",
       caching: "Responses are cached in Redis for optimal performance",
+      errorHandling: "All errors return { success: false, error: { code, message, details, timestamp } }",
+    },
+    categories: {
+      scores: ["/live-scores", "/recent-scores", "/upcoming-matches"],
+      news: ["/news", "/news/:slug"],
+      stats: ["/stats/rankings", "/stats/standings", "/stats/record-filters", "/stats/records"],
+      photos: ["/photos/list", "/photos/gallery/:galleryId", "/photos/image/*"],
     },
     endpoints: [
       {
         path: "/live-scores",
         method: "GET",
+        category: "scores",
         description: "Get currently live cricket matches with real-time scores",
         cacheTTL: "60 seconds",
         parameters: {
@@ -89,6 +101,7 @@ router.get("/", (req, res) => {
       {
         path: "/recent-scores",
         method: "GET",
+        category: "scores",
         description:
           "Get recently completed cricket matches with final scores (optimized: max 30 scraped)",
         cacheTTL: "1 hour",
@@ -120,6 +133,7 @@ router.get("/", (req, res) => {
       {
         path: "/upcoming-matches",
         method: "GET",
+        category: "scores",
         description: "Get scheduled upcoming cricket matches with start times",
         cacheTTL: "3 hours",
         parameters: {
@@ -150,6 +164,7 @@ router.get("/", (req, res) => {
       {
         path: "/news",
         method: "GET",
+        category: "news",
         description:
           "Get latest cricket news articles from database (Cricbuzz + ESPN Cricinfo)",
         cacheTTL: "30 minutes",
@@ -190,6 +205,7 @@ router.get("/", (req, res) => {
       {
         path: "/news/:slug",
         method: "GET",
+        category: "news",
         description: "Get single news article by slug (ID)",
         cacheTTL: "1 hour",
         parameters: {
@@ -209,6 +225,7 @@ router.get("/", (req, res) => {
       {
         path: "/stats/rankings",
         method: "GET",
+        category: "stats",
         description: "Get ICC player/team rankings (via RapidAPI)",
         cacheTTL: "24 hours",
         parameters: {
@@ -235,6 +252,7 @@ router.get("/", (req, res) => {
       {
         path: "/stats/standings",
         method: "GET",
+        category: "stats",
         description: "Get ICC championship standings (via RapidAPI)",
         cacheTTL: "24 hours",
         parameters: {
@@ -255,6 +273,7 @@ router.get("/", (req, res) => {
       {
         path: "/stats/record-filters",
         method: "GET",
+        category: "stats",
         description:
           "Get available filter options for cricket records (via RapidAPI)",
         cacheTTL: "24 hours",
@@ -268,6 +287,7 @@ router.get("/", (req, res) => {
       {
         path: "/stats/records",
         method: "GET",
+        category: "stats",
         description: "Get cricket records/stats (via RapidAPI)",
         cacheTTL: "24 hours",
         parameters: {
@@ -291,51 +311,220 @@ router.get("/", (req, res) => {
         },
         example: `${baseUrl}/stats/records?statsType=mostRuns`,
       },
+      {
+        path: "/photos/list",
+        method: "GET",
+        category: "photos",
+        description: "Get list of photo galleries from Cricbuzz featuring match highlights, player photos, and event coverage",
+        cacheTTL: "1 hour",
+        parameters: {},
+        response: {
+          success: "boolean - Indicates if the request was successful",
+          data: {
+            photoGalleryInfoList: "array - List of gallery items",
+            appIndex: "object - SEO metadata including title and description",
+          },
+          source: "string - Data source (rapidapi)",
+          cached: "boolean - Whether response was served from cache",
+          timestamp: "string - ISO timestamp of the response",
+        },
+        responseExample: {
+          success: true,
+          data: {
+            photoGalleryInfoList: [
+              {
+                photoGalleryInfo: {
+                  galleryId: 6064,
+                  headline: "India vs South Africa, 2025 - 2nd ODI, Raipur",
+                  imageId: 791826,
+                  publishedTime: "1764782490515",
+                  imageHash: "363badb0a608ba8a3e10c0d7e682b169",
+                },
+              },
+            ],
+          },
+        },
+        example: `${baseUrl}/photos/list`,
+      },
+      {
+        path: "/photos/gallery/:galleryId",
+        method: "GET",
+        category: "photos",
+        description: "Get specific photo gallery details including all photos, captions, and associated tags (teams, series, matches)",
+        cacheTTL: "1 hour",
+        parameters: {
+          galleryId: {
+            type: "integer",
+            required: true,
+            location: "path",
+            description: "Unique gallery identifier (numeric). Get gallery IDs from /photos/list endpoint",
+            example: "6064",
+          },
+        },
+        response: {
+          success: "boolean",
+          data: {
+            photoGalleryDetails: "array - List of photos with imageId, caption, and imageHash",
+            tags: "array - Associated tags (series, match, teams) with itemName, itemType, itemId",
+            headline: "string - Gallery title",
+            intro: "string - Gallery description",
+            publishedTime: "string - Unix timestamp of publication",
+            appIndex: "object - SEO metadata with webURL for the gallery page",
+          },
+          cached: "boolean",
+        },
+        responseExample: {
+          success: true,
+          data: {
+            photoGalleryDetails: [
+              {
+                imageId: 791826,
+                caption: "Ruturaj Gaikwad registered his maiden ODI hundred",
+                imageHash: "363badb0a608ba8a3e10c0d7e682b169",
+              },
+            ],
+            tags: [
+              { itemName: "South Africa tour of India, 2025", itemType: "series", itemId: "9638" },
+              { itemName: "India", itemType: "team", itemId: "2" },
+            ],
+            headline: "India vs South Africa, 2025 - 2nd ODI, Raipur",
+          },
+        },
+        errors: {
+          VALIDATION_ERROR: "Gallery ID must be a valid number",
+        },
+        example: `${baseUrl}/photos/gallery/6064`,
+      },
+      {
+        path: "/photos/image/*",
+        method: "GET",
+        category: "photos",
+        description: "Proxy endpoint to fetch and cache images from Cricbuzz CDN. Returns binary image data with appropriate headers. Use this to avoid CORS issues when displaying Cricbuzz images in web applications.",
+        cacheTTL: "7 days",
+        parameters: {
+          "*": {
+            type: "string",
+            required: true,
+            location: "path",
+            description: "Image path in format: i1/c{imageId}/i.jpg",
+            examples: [
+              "i1/c791826/i.jpg - Standard image format",
+            ],
+            note: "Currently only i1 size is supported by the Cricbuzz API",
+          },
+        },
+        response: "Binary image data (JPEG/PNG) with Content-Type header",
+        headers: {
+          "Content-Type": "image/jpeg or image/png based on image format",
+          "Cache-Control": "public, max-age=604800, stale-while-revalidate=86400",
+          "X-Cache": "HIT or MISS indicating cache status",
+        },
+        usage: {
+          inHTML: `<img src="${baseUrl}/photos/image/i1/c791826/i.jpg" alt="Cricket photo" />`,
+          constructFromGallery: "Use imageId from gallery response: /photos/image/i1/c{imageId}/i.jpg",
+        },
+        errors: {
+          VALIDATION_ERROR: "Invalid image path format",
+          NOT_FOUND: "Image not found (404)",
+        },
+        example: `${baseUrl}/photos/image/i1/c791826/i.jpg`,
+      },
     ],
-    matchObject: {
-      description: "Structure of match objects returned by score endpoints",
-      fields: {
-        title:
-          "string - Full match title (e.g., 'India vs Australia, 2nd Test')",
-        matchLink: "string - URL to match page on Cricbuzz",
-        matchDetails: "string - Match description",
-        status: "string - Current match status from page",
-        matchStatus: "string - Match state: 'completed', 'live', or 'upcoming'",
-        result:
-          "string - Match result (only for completed matches, e.g., 'India won by 7 wkts')",
-        time: "string - Start time for upcoming, 'LIVE' for live, or formatted date for completed",
-        matchStartTime: "object - Detailed time info with ISO date",
-        location: "string - Venue location",
-        teams: "array - Full team names",
-        teamAbbr: "array - Team abbreviations",
-        team1Icon: "string - URL to team 1 logo image",
-        team2Icon: "string - URL to team 2 logo image",
-        playingTeamBat: "string - Team currently batting",
-        playingTeamBall: "string - Team currently bowling",
-        liveScorebat: "string - Current batting team score",
-        liveScoreball: "string - Current bowling team score",
-        liveCommentary: "string - Latest match commentary",
-        links: "object - URLs to scorecard, full commentary, news",
-        scorecard: "object - Detailed scorecard (when available)",
+    dataModels: {
+      matchObject: {
+        description: "Structure of match objects returned by score endpoints",
+        fields: {
+          title:
+            "string - Full match title (e.g., 'India vs Australia, 2nd Test')",
+          matchLink: "string - URL to match page on Cricbuzz",
+          matchDetails: "string - Match description",
+          status: "string - Current match status from page",
+          matchStatus: "string - Match state: 'completed', 'live', or 'upcoming'",
+          result:
+            "string - Match result (only for completed matches, e.g., 'India won by 7 wkts')",
+          time: "string - Start time for upcoming, 'LIVE' for live, or formatted date for completed",
+          matchStartTime: "object - Detailed time info with ISO date",
+          location: "string - Venue location",
+          teams: "array - Full team names",
+          teamAbbr: "array - Team abbreviations",
+          team1Icon: "string - URL to team 1 logo image",
+          team2Icon: "string - URL to team 2 logo image",
+          playingTeamBat: "string - Team currently batting",
+          playingTeamBall: "string - Team currently bowling",
+          liveScorebat: "string - Current batting team score",
+          liveScoreball: "string - Current bowling team score",
+          liveCommentary: "string - Latest match commentary",
+          links: "object - URLs to scorecard, full commentary, news",
+          scorecard: "object - Detailed scorecard (when available)",
+        },
+      },
+      newsObject: {
+        description: "Structure of news article objects",
+        fields: {
+          id: "string - Unique article identifier",
+          title: "string - Article headline",
+          description: "string - Article summary",
+          imageUrl: "string - Featured image URL",
+          publishedAt: "string - ISO date of publication",
+          content: "string - Full article content (in single article endpoint)",
+          tags: "array - Article tags/categories",
+          sourceName: "string - Source website name",
+        },
+      },
+      photoGalleryObject: {
+        description: "Structure of photo gallery list items from /photos/list",
+        fields: {
+          galleryId: "integer - Unique gallery identifier, use with /photos/gallery/:galleryId",
+          headline: "string - Gallery title describing the event/match",
+          imageId: "integer - Cover image ID, use with /photos/image/i1/c{imageId}/i.jpg",
+          publishedTime: "string - Unix timestamp in milliseconds",
+          imageHash: "string - Hash for image validation/caching",
+        },
+      },
+      photoObject: {
+        description: "Structure of individual photo objects within a gallery",
+        fields: {
+          imageId: "integer - Unique image identifier",
+          caption: "string - Description of what the photo shows",
+          imageHash: "string - Hash for image validation",
+        },
+        imageUrlConstruction: {
+          description: "How to construct image URLs from imageId",
+          format: "/photos/image/i1/c{imageId}/i.jpg",
+          note: "Currently only i1 format is supported by the Cricbuzz API",
+        },
       },
     },
-    newsObject: {
-      description: "Structure of news article objects",
-      fields: {
-        id: "string - Unique article identifier",
-        title: "string - Article headline",
-        description: "string - Article summary",
-        imageUrl: "string - Featured image URL",
-        publishedAt: "string - ISO date of publication",
-        content: "string - Full article content (in single article endpoint)",
-        tags: "array - Article tags/categories",
-        sourceName: "string - Source website name",
-      },
+    errorCodes: {
+      VALIDATION_ERROR: "Invalid or missing required parameters",
+      NOT_FOUND: "Requested resource not found",
+      RATE_LIMIT_ERROR: "Too many requests, please slow down",
+      SCRAPING_ERROR: "Failed to fetch data from source",
+      TIMEOUT_ERROR: "Request timed out",
+      SERVICE_UNAVAILABLE: "External API is temporarily unavailable",
     },
     examples: {
-      pagination: `${baseUrl}/live-scores?limit=5&offset=10`,
-      allMatches: `${baseUrl}/live-scores`,
-      firstFiveUpcoming: `${baseUrl}/upcoming-matches?limit=5`,
+      scores: {
+        pagination: `${baseUrl}/live-scores?limit=5&offset=10`,
+        allLiveMatches: `${baseUrl}/live-scores`,
+        firstFiveUpcoming: `${baseUrl}/upcoming-matches?limit=5`,
+        recentWithPagination: `${baseUrl}/recent-scores?limit=10&offset=5`,
+      },
+      news: {
+        latestNews: `${baseUrl}/news?limit=10`,
+        cricbuzzOnly: `${baseUrl}/news?source=cricbuzz`,
+        singleArticle: `${baseUrl}/news/136890`,
+      },
+      stats: {
+        testBatsmen: `${baseUrl}/stats/rankings?category=batsmen&formatType=test`,
+        wtcStandings: `${baseUrl}/stats/standings?matchType=1`,
+        mostRuns: `${baseUrl}/stats/records?statsType=mostRuns`,
+      },
+      photos: {
+        allGalleries: `${baseUrl}/photos/list`,
+        specificGallery: `${baseUrl}/photos/gallery/6064`,
+        image: `${baseUrl}/photos/image/i1/c791826/i.jpg`,
+      },
     },
   });
 });
@@ -1447,6 +1636,141 @@ router.get("/stats/records", async (req, res) => {
     res.json(response);
   } catch (error) {
     console.error("Error fetching records:", error.message);
+    return sendError(res, error);
+  }
+});
+
+// ============================================
+// PHOTOS ENDPOINTS
+// ============================================
+
+// Photos List endpoint - Get list of photo galleries
+router.get("/photos/list", async (req, res) => {
+  try {
+    setCacheHeaders(res, { maxAge: 3600, staleWhileRevalidate: 600 }); // 1 hour
+
+    // Check cache first
+    const cacheKey = "cricket:photos:list";
+    const cachedData = await getCache(cacheKey);
+
+    if (cachedData) {
+      return res.json({ ...cachedData, cached: true });
+    }
+
+    // Fetch from RapidAPI
+    const data = await fetchPhotosList();
+
+    const response = {
+      success: true,
+      data,
+      source: "rapidapi",
+      cached: false,
+      timestamp: new Date().toISOString(),
+    };
+
+    // Cache for 1 hour
+    await setCache(cacheKey, response, 3600);
+
+    res.json(response);
+  } catch (error) {
+    console.error("Error fetching photos list:", error.message);
+    return sendError(res, error);
+  }
+});
+
+// Photo Gallery endpoint - Get specific gallery details
+router.get("/photos/gallery/:galleryId", async (req, res) => {
+  try {
+    setCacheHeaders(res, { maxAge: 3600, staleWhileRevalidate: 600 }); // 1 hour
+
+    const { galleryId } = req.params;
+
+    if (!galleryId) {
+      return sendError(res, new ValidationError("Gallery ID is required"));
+    }
+
+    // Validate galleryId is a number
+    if (!/^\d+$/.test(galleryId)) {
+      return sendError(res, new ValidationError("Gallery ID must be a valid number"));
+    }
+
+    // Check cache first
+    const cacheKey = `cricket:photos:gallery:${galleryId}`;
+    const cachedData = await getCache(cacheKey);
+
+    if (cachedData) {
+      return res.json({ ...cachedData, cached: true });
+    }
+
+    // Fetch from RapidAPI
+    const data = await fetchPhotoGallery(galleryId);
+
+    const response = {
+      success: true,
+      data,
+      source: "rapidapi",
+      cached: false,
+      timestamp: new Date().toISOString(),
+    };
+
+    // Cache for 1 hour
+    await setCache(cacheKey, response, 3600);
+
+    res.json(response);
+  } catch (error) {
+    console.error("Error fetching photo gallery:", error.message);
+    return sendError(res, error);
+  }
+});
+
+// Photo Image endpoint - Proxy images from Cricbuzz
+router.get("/photos/image/*", async (req, res) => {
+  try {
+    // Get the image path from the URL (everything after /photos/image/)
+    const imagePath = req.params[0];
+
+    if (!imagePath) {
+      return sendError(res, new ValidationError("Image path is required"));
+    }
+
+    // Validate image path format (basic security check)
+    if (!/^[a-zA-Z0-9\/_.-]+$/.test(imagePath)) {
+      return sendError(res, new ValidationError("Invalid image path format"));
+    }
+
+    // Check cache first (cache the image as base64)
+    const cacheKey = `cricket:photos:image:${imagePath}`;
+    const cachedData = await getCache(cacheKey);
+
+    if (cachedData) {
+      // Set appropriate headers for cached image
+      res.set("Content-Type", cachedData.contentType);
+      res.set("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400"); // 7 days
+      res.set("X-Cache", "HIT");
+      return res.send(Buffer.from(cachedData.data, "base64"));
+    }
+
+    // Fetch from RapidAPI
+    const imageData = await fetchImage(imagePath);
+
+    // Cache the image for 7 days (as base64 string for Redis compatibility)
+    await setCache(cacheKey, {
+      data: imageData.data.toString("base64"),
+      contentType: imageData.contentType,
+    }, 604800);
+
+    // Set appropriate headers
+    res.set("Content-Type", imageData.contentType);
+    res.set("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400"); // 7 days
+    res.set("X-Cache", "MISS");
+    res.send(imageData.data);
+  } catch (error) {
+    console.error("Error fetching image:", error.message);
+    
+    // For images, return a 404 or appropriate error status
+    if (error.message.includes("not found")) {
+      return res.status(404).json({ success: false, error: "Image not found" });
+    }
     return sendError(res, error);
   }
 });

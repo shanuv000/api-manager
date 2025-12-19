@@ -3,16 +3,55 @@ const puppeteer = require("puppeteer-core");
 const chromium = require("@sparticuz/chromium");
 const axios = require("axios");
 
+// ===== CONFIGURATION =====
+const CONFIG = {
+  // Timeout settings (in milliseconds)
+  PAGE_LOAD_TIMEOUT: 45000, // 45s for initial page load (increased from 30s)
+  CONTENT_WAIT_TIMEOUT: 5000, // 5s for content to render after scroll
+  SCROLL_DELAY: 2000, // 2s delay after scrolling
+
+  // Retry settings
+  MAX_RETRIES: 3, // Number of retry attempts
+  RETRY_DELAY: 3000, // 3s delay between retries
+  RETRY_TIMEOUT_MULTIPLIER: 1.5, // Increase timeout by 50% on each retry
+
+  // Scraping settings
+  MAX_ARTICLES: 20, // Max articles to process
+  ARTICLE_DELAY: 1000, // Delay between article detail fetches
+
+  // Logging
+  VERBOSE_LOGGING: true, // Enable step-by-step logging
+};
+
 /**
  * Cricbuzz News Scraper
  * Fetches latest cricket news from Cricbuzz with detailed information
  * Uses puppeteer-core with @sparticuz/chromium for serverless compatibility
+ *
+ * Enhanced with:
+ * - Configurable timeouts
+ * - Retry logic with exponential backoff
+ * - Step-by-step logging for debugging
  */
 class CricbuzzNewsScraper {
-  constructor() {
+  constructor(options = {}) {
     this.baseUrl = "https://www.cricbuzz.com";
     this.newsUrl = "https://www.cricbuzz.com/cricket-news/latest-news";
     this.browser = null;
+
+    // Allow overriding config via constructor
+    this.config = { ...CONFIG, ...options };
+  }
+
+  /**
+   * Log message if verbose logging is enabled
+   */
+  log(message, level = "info") {
+    if (this.config.VERBOSE_LOGGING || level === "error") {
+      const timestamp = new Date().toISOString().split("T")[1].slice(0, 8);
+      const prefix = level === "error" ? "❌" : level === "warn" ? "⚠️" : "📍";
+      console.log(`[${timestamp}] ${prefix} ${message}`);
+    }
   }
 
   /**
@@ -98,40 +137,85 @@ class CricbuzzNewsScraper {
   }
 
   /**
-   * Fetch the latest news from Cricbuzz
+   * Fetch the latest news from Cricbuzz with retry logic
+   * @param {number} retryCount - Current retry attempt (internal use)
    * @returns {Promise<Array>} Array of news articles
    */
-  async fetchLatestNews() {
+  async fetchLatestNews(retryCount = 0) {
     let page;
+    const startTime = Date.now();
+
+    // Calculate timeout with exponential backoff on retries
+    const currentTimeout = Math.round(
+      this.config.PAGE_LOAD_TIMEOUT *
+        Math.pow(this.config.RETRY_TIMEOUT_MULTIPLIER, retryCount)
+    );
+
     try {
       console.log("🏏 Fetching latest cricket news from Cricbuzz...");
+      if (retryCount > 0) {
+        console.log(
+          `🔄 Retry attempt ${retryCount}/${
+            this.config.MAX_RETRIES
+          } (timeout: ${currentTimeout / 1000}s)`
+        );
+      }
+
+      // Step 1: Initialize browser
+      this.log("Step 1/6: Initializing browser...");
       const browser = await this.initBrowser();
+      this.log("Step 1/6: Browser initialized ✓");
+
+      // Step 2: Create new page
+      this.log("Step 2/6: Creating new page...");
       page = await browser.newPage();
+
+      // Set up page error handlers
+      page.on("error", (err) =>
+        this.log(`Page error: ${err.message}`, "error")
+      );
+      page.on("pageerror", (err) =>
+        this.log(`Page JS error: ${err.message}`, "warn")
+      );
 
       // Set user agent and viewport
       await page.setUserAgent(
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
       );
       await page.setViewport({ width: 1920, height: 1080 });
+      this.log("Step 2/6: Page created with user agent ✓");
 
-      // Navigate to the news page
-      console.log("📡 Loading page...");
+      // Step 3: Navigate to news page
+      this.log(
+        `Step 3/6: Navigating to ${this.newsUrl} (timeout: ${
+          currentTimeout / 1000
+        }s)...`
+      );
+      const navStartTime = Date.now();
+
       await page.goto(this.newsUrl, {
         waitUntil: "domcontentloaded",
-        timeout: 30000,
+        timeout: currentTimeout,
       });
 
-      // Wait for dynamic content to load - scroll down to trigger lazy loading
+      const navDuration = Date.now() - navStartTime;
+      this.log(`Step 3/6: Page loaded in ${navDuration}ms ✓`);
+
+      // Step 4: Scroll to trigger lazy loading
+      this.log("Step 4/6: Triggering lazy load (scrolling down)...");
       await page.evaluate(() => {
         window.scrollTo(0, document.body.scrollHeight);
       });
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await this.delay(this.config.SCROLL_DELAY);
+      this.log("Step 4/6: Scrolled to bottom ✓");
 
-      // Scroll back to top
+      // Step 5: Scroll back to top
+      this.log("Step 5/6: Scrolling back to top...");
       await page.evaluate(() => {
         window.scrollTo(0, 0);
       });
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await this.delay(1000);
+      this.log("Step 5/6: Back to top ✓");
 
       // Extract news articles using comprehensive selector strategy
       const newsArticles = await page.evaluate((baseUrl) => {
@@ -258,19 +342,72 @@ class CricbuzzNewsScraper {
         return articles;
       }, this.baseUrl);
 
+      // Step 6: Extract articles
+      this.log("Step 6/6: Extracting article data from page...");
+
       // Convert thumbnailUrls to high-quality versions (remove quality parameters)
       newsArticles.forEach((article) => {
         article.thumbnailUrl = this.getHighQualityImageUrl(article.imageUrl);
       });
 
+      const totalDuration = Date.now() - startTime;
       await page.close();
       console.log(
-        `✅ Successfully fetched ${newsArticles.length} news articles`
+        `✅ Successfully fetched ${newsArticles.length} news articles in ${totalDuration}ms`
+      );
+      this.log(
+        `Step 6/6: Extraction complete ✓ (${newsArticles.length} articles)`
       );
       return newsArticles;
     } catch (error) {
-      if (page) await page.close();
-      console.error("❌ Error fetching news:", error.message);
+      const totalDuration = Date.now() - startTime;
+
+      // Clean up page on error
+      if (page) {
+        try {
+          await page.close();
+        } catch (closeError) {
+          this.log(`Failed to close page: ${closeError.message}`, "warn");
+        }
+      }
+
+      // Determine if this is a retryable error
+      const isRetryable =
+        error.name === "TimeoutError" ||
+        error.message.includes("timeout") ||
+        error.message.includes("Navigation") ||
+        error.message.includes("Protocol error") ||
+        error.message.includes("Target closed") ||
+        error.message.includes("net::");
+
+      console.error(
+        `❌ Error fetching news (attempt ${retryCount + 1}): ${error.message}`
+      );
+      this.log(
+        `Error type: ${error.name}, retryable: ${isRetryable}, duration: ${totalDuration}ms`,
+        "error"
+      );
+
+      // Retry logic
+      if (isRetryable && retryCount < this.config.MAX_RETRIES) {
+        const retryDelay = this.config.RETRY_DELAY * Math.pow(1.5, retryCount);
+        console.log(`⏳ Waiting ${retryDelay / 1000}s before retry...`);
+        await this.delay(retryDelay);
+
+        // Close and reinitialize browser for fresh connection
+        try {
+          await this.closeBrowser();
+        } catch (e) {
+          this.log(`Failed to close browser for retry: ${e.message}`, "warn");
+        }
+
+        return this.fetchLatestNews(retryCount + 1);
+      }
+
+      // All retries exhausted or non-retryable error
+      console.error(
+        `❌ Failed after ${retryCount + 1} attempt(s): ${error.message}`
+      );
       throw error;
     }
   }
@@ -278,12 +415,16 @@ class CricbuzzNewsScraper {
   /**
    * Fetch detailed information for a specific news article
    * @param {string} articleUrl - The URL of the article
+   * @param {number} retryCount - Current retry attempt (internal use)
    * @returns {Promise<Object>} Detailed article information
    */
-  async fetchArticleDetails(articleUrl) {
+  async fetchArticleDetails(articleUrl, retryCount = 0) {
     let page;
+    const startTime = Date.now();
+    const maxRetries = 2; // Fewer retries for individual articles
+
     try {
-      console.log(`📰 Fetching article details from: ${articleUrl}`);
+      this.log(`Fetching article: ${articleUrl.split("/").pop()}`);
       const browser = await this.initBrowser();
       page = await browser.newPage();
 
@@ -292,13 +433,19 @@ class CricbuzzNewsScraper {
       );
       await page.setViewport({ width: 1920, height: 1080 });
 
+      // Calculate timeout with backoff
+      const currentTimeout = Math.round(
+        this.config.PAGE_LOAD_TIMEOUT *
+          Math.pow(this.config.RETRY_TIMEOUT_MULTIPLIER, retryCount)
+      );
+
       await page.goto(articleUrl, {
         waitUntil: "domcontentloaded",
-        timeout: 30000,
+        timeout: currentTimeout,
       });
 
       // Wait for content to load
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await this.delay(this.config.SCROLL_DELAY);
 
       // Extract article details
       const articleDetails = await page.evaluate((baseUrl) => {
@@ -490,14 +637,53 @@ class CricbuzzNewsScraper {
         };
       }, this.baseUrl);
 
+      const duration = Date.now() - startTime;
       await page.close();
+
+      const wordCount = articleDetails.content
+        ? articleDetails.content.split(/\s+/).length
+        : 0;
+      console.log(
+        `   ✓ ${wordCount} words, published: ${
+          articleDetails.publishedTime || "unknown"
+        }`
+      );
+
       return {
         ...articleDetails,
         url: articleUrl,
       };
     } catch (error) {
-      if (page) await page.close();
-      console.error(`❌ Error fetching article details: ${error.message}`);
+      const duration = Date.now() - startTime;
+
+      if (page) {
+        try {
+          await page.close();
+        } catch (e) {
+          // Ignore close errors
+        }
+      }
+
+      // Determine if retryable
+      const isRetryable =
+        error.name === "TimeoutError" ||
+        error.message.includes("timeout") ||
+        error.message.includes("Navigation") ||
+        error.message.includes("net::");
+
+      if (isRetryable && retryCount < maxRetries) {
+        const retryDelay = this.config.RETRY_DELAY * Math.pow(1.5, retryCount);
+        this.log(
+          `Article fetch failed (${error.message}), retrying in ${
+            retryDelay / 1000
+          }s...`,
+          "warn"
+        );
+        await this.delay(retryDelay);
+        return this.fetchArticleDetails(articleUrl, retryCount + 1);
+      }
+
+      console.error(`   ❌ Error (${duration}ms): ${error.message}`);
       throw error;
     }
   }

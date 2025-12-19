@@ -14,7 +14,7 @@ set -o pipefail
 
 SCRIPT_DIR="/home/ubuntu/app/projects/api_pro/api-manager"
 LOCK_FILE="/tmp/cricket-scraper.lock"
-SCRAPER_TIMEOUT=120  # 2 minutes max per scraper
+SCRAPER_TIMEOUT=180  # 3 minutes max per scraper (increased to accommodate retries)
 
 cd "$SCRIPT_DIR"
 

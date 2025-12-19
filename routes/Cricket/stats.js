@@ -112,9 +112,86 @@ const fetchRecords = async (statsType, id = 0) => {
   return makeRequest(`/stats/v1/topstats/${id}`, { statsType });
 };
 
+/**
+ * Fetch list of photo galleries
+ * @returns {Promise<object>} List of photo galleries
+ */
+const fetchPhotosList = async () => {
+  // Endpoint: /photos/v1/index
+  return makeRequest("/photos/v1/index");
+};
+
+/**
+ * Fetch specific photo gallery details
+ * @param {string|number} galleryId - Gallery ID to fetch
+ * @returns {Promise<object>} Gallery details with photos
+ */
+const fetchPhotoGallery = async (galleryId) => {
+  if (!galleryId) {
+    throw new Error("galleryId is required");
+  }
+  // Endpoint: /photos/v1/detail/{galleryId}
+  return makeRequest(`/photos/v1/detail/${galleryId}`);
+};
+
+/**
+ * Fetch image from Cricbuzz
+ * @param {string} imagePath - Image path (e.g., 'i1/c231889/i.jpg')
+ * @returns {Promise<object>} Image data as buffer with content type
+ */
+const fetchImage = async (imagePath) => {
+  if (!imagePath) {
+    throw new Error("imagePath is required");
+  }
+  
+  const apiKey = process.env.RAPIDAPI_CRICBUZZ_KEY;
+  
+  if (!apiKey) {
+    throw new Error("RAPIDAPI_CRICBUZZ_KEY environment variable is not set");
+  }
+
+  try {
+    const response = await axios.get(`${RAPIDAPI_BASE_URL}/img/v1/${imagePath}`, {
+      headers: getHeaders(),
+      responseType: 'arraybuffer',
+      timeout: 30000,
+    });
+    return {
+      data: response.data,
+      contentType: response.headers['content-type'] || 'image/jpeg',
+    };
+  } catch (error) {
+    if (error.response) {
+      const status = error.response.status;
+      const message = error.response.data?.message || error.message;
+      
+      if (status === 401 || status === 403) {
+        throw new Error(`RapidAPI authentication failed: ${message}`);
+      }
+      if (status === 429) {
+        throw new Error("Rate limit exceeded on RapidAPI. Please try again later.");
+      }
+      if (status === 404) {
+        throw new Error(`Image not found: ${imagePath}`);
+      }
+      if (status >= 500) {
+        throw new Error(`Cricbuzz API is temporarily unavailable: ${message}`);
+      }
+      throw new Error(`API request failed (${status}): ${message}`);
+    }
+    if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") {
+      throw new Error("Request to Cricbuzz API timed out. Please try again.");
+    }
+    throw error;
+  }
+};
+
 module.exports = {
   fetchRankings,
   fetchStandings,
   fetchRecordFilters,
   fetchRecords,
+  fetchPhotosList,
+  fetchPhotoGallery,
+  fetchImage,
 };
