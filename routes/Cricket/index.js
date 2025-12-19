@@ -13,6 +13,7 @@ const {
   fetchPhotosList,
   fetchPhotoGallery,
   fetchImage,
+  getRapidAPIQuota,
 } = require("./stats");
 const {
   ApiError,
@@ -2016,6 +2017,115 @@ router.get("/photos/image/*", async (req, res) => {
     if (error.message.includes("not found")) {
       return res.status(404).json({ success: false, error: "Image not found" });
     }
+    return sendError(res, error);
+  }
+});
+
+// ============================================
+// RAPIDAPI HEALTH & ANALYTICS ENDPOINT
+// ============================================
+
+// RapidAPI Health Dashboard - Monitor quota and scraper health
+router.get("/rapidapi/health", async (req, res) => {
+  try {
+    // Set cache headers - allow 5 minute cache for dashboard
+    res.setHeader(
+      "Cache-Control",
+      "public, max-age=300, s-maxage=300, stale-while-revalidate=60"
+    );
+
+    // Get RapidAPI quota status
+    const quota = await getRapidAPIQuota();
+
+    // Get health metrics for RapidAPI-dependent scrapers only
+    const allMetrics = scraperHealth.getAllMetrics();
+    const rapidAPIScrapers = [
+      "stats-rankings",
+      "stats-standings",
+      "stats-record-filters",
+      "stats-records",
+      "photos-list",
+      "photos-gallery",
+      "photos-image",
+    ];
+
+    const scraperMetrics = {};
+    let hasIssues = false;
+
+    rapidAPIScrapers.forEach((name) => {
+      const m = allMetrics[name];
+      if (m) {
+        scraperMetrics[name] = {
+          status: m.status,
+          consecutiveFailures: m.consecutiveFailures,
+          successCount: m.successCount,
+          failureCount: m.failureCount,
+          successRate:
+            m.requestCount > 0
+              ? ((m.successCount / m.requestCount) * 100).toFixed(1) + "%"
+              : "N/A",
+          avgResponseTime:
+            m.requestCount > 0
+              ? Math.round(m.totalResponseTime / m.requestCount) + "ms"
+              : "N/A",
+          lastSuccess: m.lastSuccess,
+          lastFailure: m.lastFailure,
+        };
+        if (m.status !== "healthy") hasIssues = true;
+      }
+    });
+
+    // Calculate days remaining in month
+    const now = new Date();
+    const daysInMonth = new Date(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      0
+    ).getDate();
+    const dayOfMonth = now.getDate();
+    const daysRemaining = daysInMonth - dayOfMonth;
+
+    // Calculate usage rate
+    const usageRate =
+      dayOfMonth > 0 ? (quota.monthlyUsed / dayOfMonth).toFixed(2) : 0;
+    const projectedMonthly = Math.round(usageRate * daysInMonth);
+
+    const response = {
+      success: true,
+      timestamp: new Date().toISOString(),
+      overview: {
+        status: hasIssues ? "degraded" : "healthy",
+        quotaStatus:
+          quota.monthlyRemaining <= 10
+            ? "critical"
+            : quota.monthlyRemaining <= 50
+            ? "warning"
+            : "healthy",
+      },
+      quota: {
+        ...quota,
+        daysRemaining,
+        usageRatePerDay: parseFloat(usageRate),
+        projectedMonthlyUsage: projectedMonthly,
+        willExceedLimit: projectedMonthly > quota.monthlyLimit,
+      },
+      scrapers: scraperMetrics,
+      tips: {
+        cacheOptimization:
+          "All RapidAPI endpoints use aggressive caching to minimize API calls",
+        fallbackEnabled:
+          "Stale cache fallback is enabled for all RapidAPI endpoints",
+        recommendedUsage: `With ${
+          quota.monthlyLimit
+        } requests/month, aim for ~${Math.floor(
+          quota.monthlyLimit / 30
+        )} requests/day`,
+      },
+    };
+
+    res.json(response);
+  } catch (error) {
+    console.error("Error generating RapidAPI health report:", error.message);
     return sendError(res, error);
   }
 });

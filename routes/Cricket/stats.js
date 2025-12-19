@@ -6,14 +6,154 @@
  */
 
 const axios = require("axios");
+const { getCache, setCache } = require("../component/redisClient");
 
 // RapidAPI configuration
 const RAPIDAPI_BASE_URL = "https://cricbuzz-cricket.p.rapidapi.com";
+const RAPIDAPI_MONTHLY_LIMIT = 200; // Free tier limit
+
 const getHeaders = () => ({
   "x-rapidapi-host":
     process.env.RAPIDAPI_CRICBUZZ_HOST || "cricbuzz-cricket.p.rapidapi.com",
   "x-rapidapi-key": process.env.RAPIDAPI_CRICBUZZ_KEY,
 });
+
+/**
+ * Get current month key for quota tracking (YYYY-MM format)
+ */
+const getMonthKey = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+};
+
+/**
+ * Get current day key for quota tracking (YYYY-MM-DD format)
+ */
+const getDayKey = () => {
+  return new Date().toISOString().split("T")[0];
+};
+
+/**
+ * Track RapidAPI usage in Redis
+ * @param {string} endpoint - The endpoint called
+ * @param {number} responseSize - Size of response in bytes (approximate)
+ */
+const trackRapidAPIUsage = async (endpoint, responseSize = 0) => {
+  try {
+    const monthKey = getMonthKey();
+    const dayKey = getDayKey();
+    const quotaKey = "rapidapi:quota";
+
+    // Get current quota data
+    let quotaData = await getCache(quotaKey);
+    if (!quotaData) {
+      quotaData = {
+        monthlyCount: 0,
+        dailyCount: 0,
+        totalCount: 0,
+        bandwidthMB: 0,
+        currentMonth: monthKey,
+        currentDay: dayKey,
+        lastRequest: null,
+        history: [],
+      };
+    }
+
+    // Reset monthly count if new month
+    if (quotaData.currentMonth !== monthKey) {
+      quotaData.monthlyCount = 0;
+      quotaData.currentMonth = monthKey;
+    }
+
+    // Reset daily count if new day
+    if (quotaData.currentDay !== dayKey) {
+      quotaData.dailyCount = 0;
+      quotaData.currentDay = dayKey;
+    }
+
+    // Update counts
+    quotaData.monthlyCount++;
+    quotaData.dailyCount++;
+    quotaData.totalCount++;
+    quotaData.bandwidthMB += responseSize / (1024 * 1024);
+    quotaData.lastRequest = {
+      endpoint,
+      timestamp: new Date().toISOString(),
+      responseSize,
+    };
+
+    // Keep last 20 requests in history
+    quotaData.history.unshift({
+      endpoint,
+      timestamp: new Date().toISOString(),
+      day: dayKey,
+    });
+    if (quotaData.history.length > 20) {
+      quotaData.history = quotaData.history.slice(0, 20);
+    }
+
+    // Store for 35 days (covers full month + buffer)
+    await setCache(quotaKey, quotaData, 3024000);
+
+    // Log warning if approaching limit
+    const remaining = RAPIDAPI_MONTHLY_LIMIT - quotaData.monthlyCount;
+    if (remaining <= 20) {
+      console.warn(
+        `⚠️ RapidAPI quota warning: ${remaining} requests remaining this month!`
+      );
+    }
+  } catch (error) {
+    console.error("Failed to track RapidAPI usage:", error.message);
+    // Don't throw - tracking failure shouldn't break the request
+  }
+};
+
+/**
+ * Get current RapidAPI quota status
+ * @returns {Promise<object>} Quota status
+ */
+const getRapidAPIQuota = async () => {
+  try {
+    const quotaData = await getCache("rapidapi:quota");
+    if (!quotaData) {
+      return {
+        monthlyUsed: 0,
+        monthlyLimit: RAPIDAPI_MONTHLY_LIMIT,
+        monthlyRemaining: RAPIDAPI_MONTHLY_LIMIT,
+        dailyUsed: 0,
+        percentUsed: 0,
+        currentMonth: getMonthKey(),
+        lastRequest: null,
+        history: [],
+      };
+    }
+
+    // Check if we need to reset for new month/day
+    const currentMonth = getMonthKey();
+    const currentDay = getDayKey();
+    const monthlyCount =
+      quotaData.currentMonth === currentMonth ? quotaData.monthlyCount : 0;
+    const dailyCount =
+      quotaData.currentDay === currentDay ? quotaData.dailyCount : 0;
+
+    return {
+      monthlyUsed: monthlyCount,
+      monthlyLimit: RAPIDAPI_MONTHLY_LIMIT,
+      monthlyRemaining: RAPIDAPI_MONTHLY_LIMIT - monthlyCount,
+      dailyUsed: dailyCount,
+      totalAllTime: quotaData.totalCount || 0,
+      bandwidthMB: (quotaData.bandwidthMB || 0).toFixed(2),
+      percentUsed: ((monthlyCount / RAPIDAPI_MONTHLY_LIMIT) * 100).toFixed(1),
+      currentMonth,
+      currentDay,
+      lastRequest: quotaData.lastRequest,
+      recentHistory: (quotaData.history || []).slice(0, 10),
+    };
+  } catch (error) {
+    console.error("Failed to get RapidAPI quota:", error.message);
+    return { error: "Failed to retrieve quota data" };
+  }
+};
 
 /**
  * Make a request to the Cricbuzz RapidAPI
@@ -34,6 +174,11 @@ const makeRequest = async (endpoint, params = {}) => {
       params,
       timeout: 15000,
     });
+
+    // Track usage after successful request
+    const responseSize = JSON.stringify(response.data).length;
+    await trackRapidAPIUsage(endpoint, responseSize);
+
     return response.data;
   } catch (error) {
     if (error.response) {
@@ -208,4 +353,5 @@ module.exports = {
   fetchPhotosList,
   fetchPhotoGallery,
   fetchImage,
+  getRapidAPIQuota,
 };
