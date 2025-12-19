@@ -79,7 +79,7 @@ router.get("/", (req, res) => {
         method: "GET",
         category: "scores",
         description: "Get currently live cricket matches with real-time scores",
-        cacheTTL: "60 seconds",
+        cacheTTL: "30 seconds",
         parameters: {
           limit: {
             type: "integer",
