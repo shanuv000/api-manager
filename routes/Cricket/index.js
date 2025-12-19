@@ -1166,7 +1166,7 @@ router.get("/live-scores", async (req, res) => {
       count: enrichedMatches.length,
       data: enrichedMatches,
     };
-    await setCache(cacheKey, fullResponse, 60);
+    await setCache(cacheKey, fullResponse, 30);
 
     // Apply limit/offset for this request
     const slicedMatches = limit
