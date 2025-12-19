@@ -58,12 +58,18 @@ router.get("/", (req, res) => {
       authentication: "No authentication required",
       rateLimit: "Rate limited at 30 requests per minute per IP",
       caching: "Responses are cached in Redis for optimal performance",
-      errorHandling: "All errors return { success: false, error: { code, message, details, timestamp } }",
+      errorHandling:
+        "All errors return { success: false, error: { code, message, details, timestamp } }",
     },
     categories: {
       scores: ["/live-scores", "/recent-scores", "/upcoming-matches"],
       news: ["/news", "/news/:slug"],
-      stats: ["/stats/rankings", "/stats/standings", "/stats/record-filters", "/stats/records"],
+      stats: [
+        "/stats/rankings",
+        "/stats/standings",
+        "/stats/record-filters",
+        "/stats/records",
+      ],
       photos: ["/photos/list", "/photos/gallery/:galleryId", "/photos/image/*"],
     },
     endpoints: [
@@ -315,7 +321,8 @@ router.get("/", (req, res) => {
         path: "/photos/list",
         method: "GET",
         category: "photos",
-        description: "Get list of photo galleries from Cricbuzz featuring match highlights, player photos, and event coverage",
+        description:
+          "Get list of photo galleries from Cricbuzz featuring match highlights, player photos, and event coverage",
         cacheTTL: "1 hour",
         parameters: {},
         response: {
@@ -350,21 +357,24 @@ router.get("/", (req, res) => {
         path: "/photos/gallery/:galleryId",
         method: "GET",
         category: "photos",
-        description: "Get specific photo gallery details including all photos, captions, and associated tags (teams, series, matches)",
+        description:
+          "Get specific photo gallery details including all photos, captions, and associated tags (teams, series, matches)",
         cacheTTL: "1 hour",
         parameters: {
           galleryId: {
             type: "integer",
             required: true,
             location: "path",
-            description: "Unique gallery identifier (numeric). Get gallery IDs from /photos/list endpoint",
+            description:
+              "Unique gallery identifier (numeric). Get gallery IDs from /photos/list endpoint",
             example: "6064",
           },
         },
         response: {
           success: "boolean",
           data: {
-            photoGalleryDetails: "array - List of photos with imageId, caption, and imageHash",
+            photoGalleryDetails:
+              "array - List of photos with imageId, caption, and imageHash",
             tags: "array - Associated tags (series, match, teams) with itemName, itemType, itemId",
             headline: "string - Gallery title",
             intro: "string - Gallery description",
@@ -384,7 +394,11 @@ router.get("/", (req, res) => {
               },
             ],
             tags: [
-              { itemName: "South Africa tour of India, 2025", itemType: "series", itemId: "9638" },
+              {
+                itemName: "South Africa tour of India, 2025",
+                itemType: "series",
+                itemId: "9638",
+              },
               { itemName: "India", itemType: "team", itemId: "2" },
             ],
             headline: "India vs South Africa, 2025 - 2nd ODI, Raipur",
@@ -399,7 +413,8 @@ router.get("/", (req, res) => {
         path: "/photos/image/*",
         method: "GET",
         category: "photos",
-        description: "Proxy endpoint to fetch and cache images from Cricbuzz CDN. Returns binary image data with appropriate headers. Use this to avoid CORS issues when displaying Cricbuzz images in web applications.",
+        description:
+          "Proxy endpoint to fetch and cache images from Cricbuzz CDN. Returns binary image data with appropriate headers. Use this to avoid CORS issues when displaying Cricbuzz images in web applications.",
         cacheTTL: "7 days",
         parameters: {
           "*": {
@@ -407,21 +422,21 @@ router.get("/", (req, res) => {
             required: true,
             location: "path",
             description: "Image path in format: i1/c{imageId}/i.jpg",
-            examples: [
-              "i1/c791826/i.jpg - Standard image format",
-            ],
+            examples: ["i1/c791826/i.jpg - Standard image format"],
             note: "Currently only i1 size is supported by the Cricbuzz API",
           },
         },
         response: "Binary image data (JPEG/PNG) with Content-Type header",
         headers: {
           "Content-Type": "image/jpeg or image/png based on image format",
-          "Cache-Control": "public, max-age=604800, stale-while-revalidate=86400",
+          "Cache-Control":
+            "public, max-age=604800, stale-while-revalidate=86400",
           "X-Cache": "HIT or MISS indicating cache status",
         },
         usage: {
           inHTML: `<img src="${baseUrl}/photos/image/i1/c791826/i.jpg" alt="Cricket photo" />`,
-          constructFromGallery: "Use imageId from gallery response: /photos/image/i1/c{imageId}/i.jpg",
+          constructFromGallery:
+            "Use imageId from gallery response: /photos/image/i1/c{imageId}/i.jpg",
         },
         errors: {
           VALIDATION_ERROR: "Invalid image path format",
@@ -439,7 +454,8 @@ router.get("/", (req, res) => {
           matchLink: "string - URL to match page on Cricbuzz",
           matchDetails: "string - Match description",
           status: "string - Current match status from page",
-          matchStatus: "string - Match state: 'completed', 'live', or 'upcoming'",
+          matchStatus:
+            "string - Match state: 'completed', 'live', or 'upcoming'",
           result:
             "string - Match result (only for completed matches, e.g., 'India won by 7 wkts')",
           time: "string - Start time for upcoming, 'LIVE' for live, or formatted date for completed",
@@ -474,9 +490,11 @@ router.get("/", (req, res) => {
       photoGalleryObject: {
         description: "Structure of photo gallery list items from /photos/list",
         fields: {
-          galleryId: "integer - Unique gallery identifier, use with /photos/gallery/:galleryId",
+          galleryId:
+            "integer - Unique gallery identifier, use with /photos/gallery/:galleryId",
           headline: "string - Gallery title describing the event/match",
-          imageId: "integer - Cover image ID, use with /photos/image/i1/c{imageId}/i.jpg",
+          imageId:
+            "integer - Cover image ID, use with /photos/image/i1/c{imageId}/i.jpg",
           publishedTime: "string - Unix timestamp in milliseconds",
           imageHash: "string - Hash for image validation/caching",
         },
@@ -1468,23 +1486,26 @@ router.get("/news/:slug", async (req, res) => {
 
 // ICC Rankings endpoint
 router.get("/stats/rankings", async (req, res) => {
+  const startTime = Date.now();
+  const SCRAPER_NAME = "stats-rankings";
+  const { category, formatType } = req.query;
+
+  // Validate required parameters early
+  if (!category || !formatType) {
+    return sendError(
+      res,
+      new ValidationError(
+        "Both 'category' and 'formatType' parameters are required"
+      )
+    );
+  }
+
+  const cacheKey = `cricket:stats:rankings:${category}:${formatType}`;
+
   try {
     setCacheHeaders(res, { maxAge: 86400, staleWhileRevalidate: 3600 }); // 24 hours
 
-    const { category, formatType } = req.query;
-
-    // Validate required parameters
-    if (!category || !formatType) {
-      return sendError(
-        res,
-        new ValidationError(
-          "Both 'category' and 'formatType' parameters are required"
-        )
-      );
-    }
-
     // Check cache first
-    const cacheKey = `cricket:stats:rankings:${category}:${formatType}`;
     const cachedData = await getCache(cacheKey);
 
     if (cachedData) {
@@ -1502,34 +1523,64 @@ router.get("/stats/rankings", async (req, res) => {
       timestamp: new Date().toISOString(),
     };
 
-    // Cache for 6 hours
+    // Cache for 24 hours
     await setCache(cacheKey, response, 86400);
+
+    // Record success for health monitoring
+    scraperHealth.recordSuccess(SCRAPER_NAME, Date.now() - startTime);
 
     res.json(response);
   } catch (error) {
     console.error("Error fetching rankings:", error.message);
+
+    // Record failure for health monitoring
+    await scraperHealth.recordFailure(
+      SCRAPER_NAME,
+      error,
+      Date.now() - startTime
+    );
+
+    // Try to return stale cached data as fallback
+    try {
+      const staleCache = await getCache(cacheKey);
+      if (staleCache) {
+        console.log("Returning stale cache for rankings due to error");
+        return res.json({
+          ...staleCache,
+          cached: true,
+          stale: true,
+          error_note: "Serving cached data due to RapidAPI error",
+        });
+      }
+    } catch (cacheError) {
+      console.error("Cache fallback failed:", cacheError.message);
+    }
+
     return sendError(res, error);
   }
 });
 
 // ICC Standings endpoint
 router.get("/stats/standings", async (req, res) => {
+  const startTime = Date.now();
+  const SCRAPER_NAME = "stats-standings";
+  const { matchType } = req.query;
+
+  if (!matchType) {
+    return sendError(
+      res,
+      new ValidationError(
+        "'matchType' parameter is required (1=World Test Championship, 2=World Cup Super League)"
+      )
+    );
+  }
+
+  const cacheKey = `cricket:stats:standings:${matchType}`;
+
   try {
     setCacheHeaders(res, { maxAge: 86400, staleWhileRevalidate: 3600 }); // 24 hours
 
-    const { matchType } = req.query;
-
-    if (!matchType) {
-      return sendError(
-        res,
-        new ValidationError(
-          "'matchType' parameter is required (1=World Test Championship, 2=World Cup Super League)"
-        )
-      );
-    }
-
     // Check cache first
-    const cacheKey = `cricket:stats:standings:${matchType}`;
     const cachedData = await getCache(cacheKey);
 
     if (cachedData) {
@@ -1547,23 +1598,54 @@ router.get("/stats/standings", async (req, res) => {
       timestamp: new Date().toISOString(),
     };
 
-    // Cache for 6 hours
+    // Cache for 24 hours
     await setCache(cacheKey, response, 86400);
+
+    // Record success for health monitoring
+    scraperHealth.recordSuccess(SCRAPER_NAME, Date.now() - startTime);
 
     res.json(response);
   } catch (error) {
     console.error("Error fetching standings:", error.message);
+
+    // Record failure for health monitoring
+    await scraperHealth.recordFailure(
+      SCRAPER_NAME,
+      error,
+      Date.now() - startTime
+    );
+
+    // Try to return stale cached data as fallback
+    try {
+      const staleCache = await getCache(cacheKey);
+      if (staleCache) {
+        console.log("Returning stale cache for standings due to error");
+        return res.json({
+          ...staleCache,
+          cached: true,
+          stale: true,
+          error_note: "Serving cached data due to RapidAPI error",
+        });
+      }
+    } catch (cacheError) {
+      console.error("Cache fallback failed:", cacheError.message);
+    }
+
     return sendError(res, error);
   }
 });
 
 // Record Filters endpoint
 router.get("/stats/record-filters", async (req, res) => {
+  const startTime = Date.now();
+  const SCRAPER_NAME = "stats-record-filters";
+  const cacheKey = "cricket:stats:record-filters";
+
   try {
-    setCacheHeaders(res, { maxAge: 86400, staleWhileRevalidate: 3600 }); // 24 hours
+    // 7 days cache - filters rarely change, conserve free tier quota
+    setCacheHeaders(res, { maxAge: 604800, staleWhileRevalidate: 86400 });
 
     // Check cache first
-    const cacheKey = "cricket:stats:record-filters";
     const cachedData = await getCache(cacheKey);
 
     if (cachedData) {
@@ -1581,38 +1663,69 @@ router.get("/stats/record-filters", async (req, res) => {
       timestamp: new Date().toISOString(),
     };
 
-    // Cache for 24 hours
-    await setCache(cacheKey, response, 86400);
+    // Cache for 7 days (604800 seconds) - static data
+    await setCache(cacheKey, response, 604800);
+
+    // Record success for health monitoring
+    scraperHealth.recordSuccess(SCRAPER_NAME, Date.now() - startTime);
 
     res.json(response);
   } catch (error) {
     console.error("Error fetching record filters:", error.message);
+
+    // Record failure for health monitoring
+    await scraperHealth.recordFailure(
+      SCRAPER_NAME,
+      error,
+      Date.now() - startTime
+    );
+
+    // Try to return stale cached data as fallback
+    try {
+      const staleCache = await getCache(cacheKey);
+      if (staleCache) {
+        console.log("Returning stale cache for record-filters due to error");
+        return res.json({
+          ...staleCache,
+          cached: true,
+          stale: true,
+          error_note: "Serving cached data due to RapidAPI error",
+        });
+      }
+    } catch (cacheError) {
+      console.error("Cache fallback failed:", cacheError.message);
+    }
+
     return sendError(res, error);
   }
 });
 
 // Records endpoint
 router.get("/stats/records", async (req, res) => {
+  const startTime = Date.now();
+  const SCRAPER_NAME = "stats-records";
+  const { statsType, id = 0, ...otherFilters } = req.query;
+
+  if (!statsType) {
+    return sendError(
+      res,
+      new ValidationError(
+        "'statsType' parameter is required. Use /stats/record-filters to get available types."
+      )
+    );
+  }
+
+  // Build cache key from all params
+  const filterStr = Object.entries(otherFilters)
+    .sort()
+    .map(([k, v]) => `${k}=${v}`)
+    .join("&");
+  const cacheKey = `cricket:stats:records:${statsType}:${id}:${filterStr}`;
+
   try {
-    setCacheHeaders(res, { maxAge: 86400, staleWhileRevalidate: 3600 }); // 24 hours
+    // 48 hours cache - records don't change often, conserve free tier quota
+    setCacheHeaders(res, { maxAge: 172800, staleWhileRevalidate: 43200 });
 
-    const { statsType, id = 0, ...otherFilters } = req.query;
-
-    if (!statsType) {
-      return sendError(
-        res,
-        new ValidationError(
-          "'statsType' parameter is required. Use /stats/record-filters to get available types."
-        )
-      );
-    }
-
-    // Build cache key from all params
-    const filterStr = Object.entries(otherFilters)
-      .sort()
-      .map(([k, v]) => `${k}=${v}`)
-      .join("&");
-    const cacheKey = `cricket:stats:records:${statsType}:${id}:${filterStr}`;
     const cachedData = await getCache(cacheKey);
 
     if (cachedData) {
@@ -1630,12 +1743,39 @@ router.get("/stats/records", async (req, res) => {
       timestamp: new Date().toISOString(),
     };
 
-    // Cache for 6 hours
-    await setCache(cacheKey, response, 86400);
+    // Cache for 48 hours (172800 seconds)
+    await setCache(cacheKey, response, 172800);
+
+    // Record success for health monitoring
+    scraperHealth.recordSuccess(SCRAPER_NAME, Date.now() - startTime);
 
     res.json(response);
   } catch (error) {
     console.error("Error fetching records:", error.message);
+
+    // Record failure for health monitoring
+    await scraperHealth.recordFailure(
+      SCRAPER_NAME,
+      error,
+      Date.now() - startTime
+    );
+
+    // Try to return stale cached data as fallback
+    try {
+      const staleCache = await getCache(cacheKey);
+      if (staleCache) {
+        console.log("Returning stale cache for records due to error");
+        return res.json({
+          ...staleCache,
+          cached: true,
+          stale: true,
+          error_note: "Serving cached data due to RapidAPI error",
+        });
+      }
+    } catch (cacheError) {
+      console.error("Cache fallback failed:", cacheError.message);
+    }
+
     return sendError(res, error);
   }
 });
@@ -1646,11 +1786,15 @@ router.get("/stats/records", async (req, res) => {
 
 // Photos List endpoint - Get list of photo galleries
 router.get("/photos/list", async (req, res) => {
+  const startTime = Date.now();
+  const SCRAPER_NAME = "photos-list";
+  const cacheKey = "cricket:photos:list";
+
   try {
-    setCacheHeaders(res, { maxAge: 3600, staleWhileRevalidate: 600 }); // 1 hour
+    // 6 hours cache - optimized for free tier RapidAPI (200 req/month)
+    setCacheHeaders(res, { maxAge: 21600, staleWhileRevalidate: 3600 });
 
     // Check cache first
-    const cacheKey = "cricket:photos:list";
     const cachedData = await getCache(cacheKey);
 
     if (cachedData) {
@@ -1668,34 +1812,68 @@ router.get("/photos/list", async (req, res) => {
       timestamp: new Date().toISOString(),
     };
 
-    // Cache for 1 hour
-    await setCache(cacheKey, response, 3600);
+    // Cache for 6 hours (21600 seconds) - conserve API quota
+    await setCache(cacheKey, response, 21600);
+
+    // Record success for health monitoring
+    scraperHealth.recordSuccess(SCRAPER_NAME, Date.now() - startTime);
 
     res.json(response);
   } catch (error) {
     console.error("Error fetching photos list:", error.message);
+
+    // Record failure for health monitoring (may trigger Discord alert)
+    await scraperHealth.recordFailure(
+      SCRAPER_NAME,
+      error,
+      Date.now() - startTime
+    );
+
+    // Try to return stale cached data as fallback
+    try {
+      const staleCache = await getCache(cacheKey);
+      if (staleCache) {
+        console.log("Returning stale cache for photos list due to error");
+        return res.json({
+          ...staleCache,
+          cached: true,
+          stale: true,
+          error_note: "Serving cached data due to RapidAPI error",
+        });
+      }
+    } catch (cacheError) {
+      console.error("Cache fallback failed:", cacheError.message);
+    }
+
     return sendError(res, error);
   }
 });
 
 // Photo Gallery endpoint - Get specific gallery details
 router.get("/photos/gallery/:galleryId", async (req, res) => {
+  const startTime = Date.now();
+  const SCRAPER_NAME = "photos-gallery";
+  const { galleryId } = req.params;
+
+  // Validate early before any cache operations
+  if (!galleryId) {
+    return sendError(res, new ValidationError("Gallery ID is required"));
+  }
+
+  if (!/^\d+$/.test(galleryId)) {
+    return sendError(
+      res,
+      new ValidationError("Gallery ID must be a valid number")
+    );
+  }
+
+  const cacheKey = `cricket:photos:gallery:${galleryId}`;
+
   try {
-    setCacheHeaders(res, { maxAge: 3600, staleWhileRevalidate: 600 }); // 1 hour
-
-    const { galleryId } = req.params;
-
-    if (!galleryId) {
-      return sendError(res, new ValidationError("Gallery ID is required"));
-    }
-
-    // Validate galleryId is a number
-    if (!/^\d+$/.test(galleryId)) {
-      return sendError(res, new ValidationError("Gallery ID must be a valid number"));
-    }
+    // 12 hours cache - galleries don't change, conserve free tier quota
+    setCacheHeaders(res, { maxAge: 43200, staleWhileRevalidate: 7200 });
 
     // Check cache first
-    const cacheKey = `cricket:photos:gallery:${galleryId}`;
     const cachedData = await getCache(cacheKey);
 
     if (cachedData) {
@@ -1713,39 +1891,75 @@ router.get("/photos/gallery/:galleryId", async (req, res) => {
       timestamp: new Date().toISOString(),
     };
 
-    // Cache for 1 hour
-    await setCache(cacheKey, response, 3600);
+    // Cache for 12 hours (43200 seconds) - galleries are static content
+    await setCache(cacheKey, response, 43200);
+
+    // Record success for health monitoring
+    scraperHealth.recordSuccess(SCRAPER_NAME, Date.now() - startTime);
 
     res.json(response);
   } catch (error) {
     console.error("Error fetching photo gallery:", error.message);
+
+    // Record failure for health monitoring (may trigger Discord alert)
+    await scraperHealth.recordFailure(
+      SCRAPER_NAME,
+      error,
+      Date.now() - startTime
+    );
+
+    // Try to return stale cached data as fallback
+    try {
+      const staleCache = await getCache(cacheKey);
+      if (staleCache) {
+        console.log(
+          `Returning stale cache for gallery ${galleryId} due to error`
+        );
+        return res.json({
+          ...staleCache,
+          cached: true,
+          stale: true,
+          error_note: "Serving cached data due to RapidAPI error",
+        });
+      }
+    } catch (cacheError) {
+      console.error("Cache fallback failed:", cacheError.message);
+    }
+
     return sendError(res, error);
   }
 });
 
 // Photo Image endpoint - Proxy images from Cricbuzz
 router.get("/photos/image/*", async (req, res) => {
+  const startTime = Date.now();
+  const SCRAPER_NAME = "photos-image";
+
+  // Get the image path from the URL (everything after /photos/image/)
+  const imagePath = req.params[0];
+
+  if (!imagePath) {
+    return sendError(res, new ValidationError("Image path is required"));
+  }
+
+  // Validate image path format (basic security check)
+  if (!/^[a-zA-Z0-9\/_.-]+$/.test(imagePath)) {
+    return sendError(res, new ValidationError("Invalid image path format"));
+  }
+
+  const cacheKey = `cricket:photos:image:${imagePath}`;
+
   try {
-    // Get the image path from the URL (everything after /photos/image/)
-    const imagePath = req.params[0];
-
-    if (!imagePath) {
-      return sendError(res, new ValidationError("Image path is required"));
-    }
-
-    // Validate image path format (basic security check)
-    if (!/^[a-zA-Z0-9\/_.-]+$/.test(imagePath)) {
-      return sendError(res, new ValidationError("Invalid image path format"));
-    }
-
     // Check cache first (cache the image as base64)
-    const cacheKey = `cricket:photos:image:${imagePath}`;
     const cachedData = await getCache(cacheKey);
 
     if (cachedData) {
       // Set appropriate headers for cached image
       res.set("Content-Type", cachedData.contentType);
-      res.set("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400"); // 7 days
+      res.set(
+        "Cache-Control",
+        "public, max-age=2592000, stale-while-revalidate=604800"
+      ); // 30 days + 7 days stale
       res.set("X-Cache", "HIT");
       return res.send(Buffer.from(cachedData.data, "base64"));
     }
@@ -1753,20 +1967,51 @@ router.get("/photos/image/*", async (req, res) => {
     // Fetch from RapidAPI
     const imageData = await fetchImage(imagePath);
 
-    // Cache the image for 7 days (as base64 string for Redis compatibility)
-    await setCache(cacheKey, {
-      data: imageData.data.toString("base64"),
-      contentType: imageData.contentType,
-    }, 604800);
+    // Cache the image for 30 days (2592000 seconds) - images never change
+    await setCache(
+      cacheKey,
+      {
+        data: imageData.data.toString("base64"),
+        contentType: imageData.contentType,
+      },
+      2592000
+    );
+
+    // Record success for health monitoring
+    scraperHealth.recordSuccess(SCRAPER_NAME, Date.now() - startTime);
 
     // Set appropriate headers
     res.set("Content-Type", imageData.contentType);
-    res.set("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400"); // 7 days
+    res.set(
+      "Cache-Control",
+      "public, max-age=2592000, stale-while-revalidate=604800"
+    ); // 30 days + 7 days stale
     res.set("X-Cache", "MISS");
     res.send(imageData.data);
   } catch (error) {
     console.error("Error fetching image:", error.message);
-    
+
+    // Record failure for health monitoring
+    await scraperHealth.recordFailure(
+      SCRAPER_NAME,
+      error,
+      Date.now() - startTime
+    );
+
+    // Try to return stale cached image as fallback
+    try {
+      const staleCache = await getCache(cacheKey);
+      if (staleCache) {
+        console.log(`Returning stale cached image: ${imagePath}`);
+        res.set("Content-Type", staleCache.contentType);
+        res.set("Cache-Control", "public, max-age=86400"); // 1 day for stale
+        res.set("X-Cache", "STALE");
+        return res.send(Buffer.from(staleCache.data, "base64"));
+      }
+    } catch (cacheError) {
+      console.error("Image cache fallback failed:", cacheError.message);
+    }
+
     // For images, return a 404 or appropriate error status
     if (error.message.includes("not found")) {
       return res.status(404).json({ success: false, error: "Image not found" });
