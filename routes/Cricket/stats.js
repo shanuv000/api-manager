@@ -6,7 +6,7 @@
  */
 
 const axios = require("axios");
-const { getCache, setCache } = require("../component/redisClient");
+const { getCache, setCache } = require("../../component/redisClient");
 
 // RapidAPI configuration
 const RAPIDAPI_BASE_URL = "https://cricbuzz-cricket.p.rapidapi.com";
