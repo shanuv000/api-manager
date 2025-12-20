@@ -650,19 +650,52 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
       }
     });
 
-    // Also extract from embedded RSC payload - look for SportsEvent pattern
-    const sportsEvents = html.match(
+    // Also extract from embedded RSC payload - look for SportsEvent pattern with competitors
+    // Use a broader regex to capture the full SportsEvent object including competitor teams
+    const sportsEventPattern =
+      /"@type":"SportsEvent","name":"([^"]+)"[^]*?"competitor":\[([^\]]+)\][^]*?"startDate":"([^"]+)"[^]*?"eventStatus":"([^"]+)"/g;
+    let eventMatch;
+    while ((eventMatch = sportsEventPattern.exec(html)) !== null) {
+      const name = eventMatch[1];
+      const competitorBlock = eventMatch[2];
+      const startDate = eventMatch[3];
+      const status = eventMatch[4];
+
+      // Extract team names from competitor block
+      const teamNames = [];
+      const teamPattern = /"name":"([^"]+)"/g;
+      let teamMatch;
+      while ((teamMatch = teamPattern.exec(competitorBlock)) !== null) {
+        teamNames.push(teamMatch[1].toLowerCase());
+      }
+
+      if (name && (startDate || status)) {
+        matchTimeMap.set(name, {
+          startDate: startDate || null,
+          status: status || null,
+          teams: teamNames, // Store team names for validation
+        });
+      }
+    }
+
+    // Fallback: simpler pattern without competitors (for cases where competitor is missing)
+    const simpleSportsEvents = html.match(
       /"@type":"SportsEvent","name":"([^"]+)"[^}]*?"startDate":"([^"]+)"[^}]*?"eventStatus":"([^"]+)"/g
     );
-    if (sportsEvents) {
-      for (const eventStr of sportsEvents) {
+    if (simpleSportsEvents) {
+      for (const eventStr of simpleSportsEvents) {
         const nameMatch = eventStr.match(/"name":"([^"]+)"/);
         const dateMatch = eventStr.match(/"startDate":"([^"]+)"/);
         const statusMatch = eventStr.match(/"eventStatus":"([^"]+)"/);
-        if (nameMatch && (dateMatch || statusMatch)) {
+        if (
+          nameMatch &&
+          (dateMatch || statusMatch) &&
+          !matchTimeMap.has(nameMatch[1])
+        ) {
           matchTimeMap.set(nameMatch[1], {
             startDate: dateMatch ? dateMatch[1] : null,
             status: statusMatch ? statusMatch[1] : null,
+            teams: [], // No teams available
           });
         }
       }
@@ -848,9 +881,9 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
     }
 
     // Try to get time from JSON-LD data
-    // JSON-LD names are like "2nd Match, Big Bash League 2025-26"
-    // Scraped titles are like "Melbourne Renegades vs Brisbane Heat, 2nd Match"
-    // We need to find the common match description (e.g., "2nd Match", "7th Match")
+    // JSON-LD names are like "3rd Test, The Ashes, 2025-26"
+    // Scraped titles are like "Australia vs England, 3rd Test"
+    // Match by: 1) match description (e.g., "3rd Test") AND 2) team name validation
     let timeInfo = null;
 
     // Extract match number/description from scraped data
@@ -861,24 +894,41 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
       )
       ?.trim();
 
-    // Try to match by match description
+    // Helper to check if scraped teams match JSON-LD teams
+    const teamsMatch = (scrapedTeams, jsonLdTeams) => {
+      if (!jsonLdTeams || jsonLdTeams.length === 0) return false; // No teams = can't validate
+      if (!scrapedTeams || scrapedTeams.length === 0) return false;
+
+      // Check if at least one scraped team matches a JSON-LD team
+      const scrapedLower = scrapedTeams.map((t) => t.toLowerCase());
+      return jsonLdTeams.some((jsonTeam) =>
+        scrapedLower.some(
+          (scraped) => scraped.includes(jsonTeam) || jsonTeam.includes(scraped)
+        )
+      );
+    };
+
+    // Try to match by match description AND team validation
     for (const [eventName, value] of matchTimeMap) {
-      // Check if the event name starts with similar match description
-      if (
+      // Check if the event name contains the match number (e.g., "3rd Test")
+      const descriptionMatches =
         matchNumber &&
-        eventName.toLowerCase().includes(matchNumber.toLowerCase())
-      ) {
-        timeInfo = value;
-        break;
-      }
+        eventName.toLowerCase().includes(matchNumber.toLowerCase());
+
       // Also check if scraped matchDetails contains the key parts of event name
       const eventParts = eventName.split(",");
-      if (
+      const eventPartMatches =
         eventParts.length > 0 &&
-        match.matchDetails?.includes(eventParts[0].trim())
-      ) {
-        timeInfo = value;
-        break;
+        match.matchDetails?.includes(eventParts[0].trim());
+
+      if (descriptionMatches || eventPartMatches) {
+        // CRITICAL FIX: Validate team names before assigning
+        // This prevents "NZ vs WI, 3rd Test" from matching "AUS vs ENG, 3rd Test" data
+        if (teamsMatch(match.teams, value.teams)) {
+          timeInfo = value;
+          break;
+        }
+        // If teams don't match, continue searching for correct match
       }
     }
 
