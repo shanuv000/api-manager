@@ -137,7 +137,20 @@ async function getScorecardDetails(url) {
       }
     });
 
-    return innings;
+    // Deduplicate innings by inningsHeader (Cricbuzz page has duplicate elements)
+    const seen = new Set();
+    const uniqueInnings = innings.filter((inn) => {
+      if (seen.has(inn.inningsHeader)) return false;
+      seen.add(inn.inningsHeader);
+      return true;
+    });
+
+    // Re-assign correct inningsId after deduplication
+    uniqueInnings.forEach((inn, idx) => {
+      inn.inningsId = idx + 1;
+    });
+
+    return uniqueInnings;
   } catch (error) {
     console.error(`Error fetching scorecard from ${url}:`, error.message);
     return null;

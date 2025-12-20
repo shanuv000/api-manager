@@ -958,6 +958,9 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
         /innings break/i,
         /tea\b|lunch\b|stumps/i,
         /at (bat|crease)/i,
+        /opt to (bat|bowl)/i, // Toss result - match just started
+        /trail by|lead by/i, // Ongoing multi-day match
+        /\bneed\s+\d+\s+runs?\b/i, // Chasing team needs runs
       ];
       return livePatterns.some((pattern) => pattern.test(str));
     };
@@ -965,8 +968,20 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
     if (timeInfo && timeInfo.status) {
       const statusStr = timeInfo.status;
 
-      // Check if this is a completed match result
-      if (isMatchResult(statusStr)) {
+      // IMPORTANT: Check if this is a LIVE match status FIRST
+      // This prevents "Day 4: Stumps - England need 228 runs" from being marked as completed
+      // because "228 runs" would match the result pattern otherwise
+      if (isLiveStatus(statusStr)) {
+        match.matchStatus = "live";
+        match.result = statusStr; // Store as result for display
+        match.time = "LIVE";
+        match.matchStartTime = {
+          startDateISO: timeInfo.startDate || null,
+          status: statusStr,
+        };
+      }
+      // Then check if this is a completed match result
+      else if (isMatchResult(statusStr)) {
         match.result = statusStr;
         match.matchStatus = "completed";
         // For completed matches, use the ISO date if available, otherwise mark time as N/A
@@ -992,15 +1007,6 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
           match.time = "Completed";
           match.matchStartTime = { note: "Match completed" };
         }
-      }
-      // Check if this is a live match
-      else if (isLiveStatus(statusStr)) {
-        match.matchStatus = "live";
-        match.time = "LIVE";
-        match.matchStartTime = {
-          startDateISO: timeInfo.startDate || null,
-          status: statusStr,
-        };
       }
       // Parse "Match starts at Dec 15, 08:15 GMT" format for upcoming matches
       else {
@@ -1034,16 +1040,17 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
     } else if (match.liveCommentary) {
       // Fallback: try to extract from liveCommentary
 
-      // Check if it's a result
-      if (isMatchResult(match.liveCommentary)) {
+      // IMPORTANT: Check live status FIRST (same fix as above)
+      if (isLiveStatus(match.liveCommentary)) {
+        match.result = match.liveCommentary;
+        match.matchStatus = "live";
+        match.time = "LIVE";
+      }
+      // Then check if it's a completed result
+      else if (isMatchResult(match.liveCommentary)) {
         match.result = match.liveCommentary;
         match.matchStatus = "completed";
         match.time = "Completed";
-      }
-      // Check if it's live
-      else if (isLiveStatus(match.liveCommentary)) {
-        match.matchStatus = "live";
-        match.time = "LIVE";
       }
       // Try to parse start time
       else {
@@ -1065,11 +1072,15 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
             raw: match.liveCommentary,
           };
         } else {
+          // Bug #3 fix: Default to 'live' for /live-scores endpoint
           match.time = "N/A";
+          match.matchStatus = "live";
         }
       }
     } else {
+      // Bug #3 fix: Ensure matchStatus is never null
       match.time = "N/A";
+      match.matchStatus = "live";
     }
 
     matches.push(match);
