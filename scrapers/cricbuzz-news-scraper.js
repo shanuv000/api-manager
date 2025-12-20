@@ -8,7 +8,7 @@ const CONFIG = {
   // Timeout settings (in milliseconds)
   PAGE_LOAD_TIMEOUT: 45000, // 45s for initial page load (increased from 30s)
   CONTENT_WAIT_TIMEOUT: 5000, // 5s for content to render after scroll
-  SCROLL_DELAY: 2000, // 2s delay after scrolling
+  SCROLL_DELAY: 1500, // 1.5s delay after each scroll iteration
 
   // Retry settings
   MAX_RETRIES: 3, // Number of retry attempts
@@ -18,6 +18,7 @@ const CONFIG = {
   // Scraping settings
   MAX_ARTICLES: 20, // Max articles to process
   ARTICLE_DELAY: 1000, // Delay between article detail fetches
+  SCROLL_ITERATIONS: 3, // Number of scroll iterations to trigger infinite scroll
 
   // Logging
   VERBOSE_LOGGING: true, // Enable step-by-step logging
@@ -201,13 +202,36 @@ class CricbuzzNewsScraper {
       const navDuration = Date.now() - navStartTime;
       this.log(`Step 3/6: Page loaded in ${navDuration}ms ✓`);
 
-      // Step 4: Scroll to trigger lazy loading
-      this.log("Step 4/6: Triggering lazy load (scrolling down)...");
-      await page.evaluate(() => {
-        window.scrollTo(0, document.body.scrollHeight);
-      });
-      await this.delay(this.config.SCROLL_DELAY);
-      this.log("Step 4/6: Scrolled to bottom ✓");
+      // Step 4: Multiple scrolls to trigger infinite scroll/lazy loading
+      // Cricbuzz uses Next.js with lazy loading - need multiple scrolls to load all articles
+      const scrollIterations = this.config.SCROLL_ITERATIONS || 3;
+      this.log(
+        `Step 4/6: Triggering lazy load (${scrollIterations} scrolls)...`
+      );
+
+      let finalArticleCount = 0;
+      for (let i = 0; i < scrollIterations; i++) {
+        await page.evaluate(() => {
+          window.scrollBy(0, window.innerHeight * 2);
+        });
+        await this.delay(this.config.SCROLL_DELAY);
+
+        // Get article count after scroll
+        finalArticleCount = await page.evaluate(() => {
+          const seen = new Set();
+          return Array.from(
+            document.querySelectorAll('a[href*="/cricket-news/"]')
+          ).filter((a) => {
+            if (!/\/\d{5,}\//.test(a.href)) return false;
+            if (seen.has(a.href)) return false;
+            seen.add(a.href);
+            return true;
+          }).length;
+        });
+      }
+      this.log(
+        `Step 4/6: Infinite scroll complete - ${finalArticleCount} articles loaded ✓`
+      );
 
       // Step 5: Scroll back to top
       this.log("Step 5/6: Scrolling back to top...");

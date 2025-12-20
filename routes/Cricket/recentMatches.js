@@ -170,6 +170,25 @@ router.get("/recent-scores", async (req, res) => {
         ? resultSpan.text().trim()
         : match.status || "N/A";
 
+      // === ENHANCED DATA EXTRACTION ===
+
+      // Extract match format (Test, ODI, T20, T10)
+      const formatMatch = title.match(
+        /(\d+(?:st|nd|rd|th)?\s*(?:Test|T20I?|ODI|T10))/i
+      );
+      match.matchFormat = formatMatch ? formatMatch[1] : null;
+
+      // Extract series/tournament from location
+      const locationParts = match.location.split("•").map((s) => s.trim());
+      match.matchNumber = locationParts[0] || null;
+      match.venue = locationParts[1] || match.location;
+
+      // Match state - for recent matches, parse winner
+      // Capture multi-word team names like "New Zealand", "Sierra Leone"
+      const winnerMatch = match.liveCommentary.match(/^(.+?)\s+won\b/i);
+      match.winner = winnerMatch ? winnerMatch[1].trim() : null;
+      match.matchState = "completed";
+
       // Extract related links
       match.links = {};
       if (href) {
@@ -186,7 +205,7 @@ router.get("/recent-scores", async (req, res) => {
         ] = `https://www.cricbuzz.com/cricket-match-news/${basePath}`;
       }
 
-      match.time = "N/A"; // Time not readily available in new structure
+      match.time = "N/A";
 
       // Add the match object to the matches array
       matches.push(match);

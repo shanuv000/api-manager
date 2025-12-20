@@ -1,8 +1,8 @@
-# Cricket API - Cricbuzz Scraper
+# Cricket API Documentation
 
 ## Overview
 
-This API provides real-time cricket match information scraped from Cricbuzz.com. It supports recent matches, live scores, and upcoming matches.
+Real-time cricket match information scraped from Cricbuzz.com. Includes live scores, recent matches, upcoming matches, scorecard details, and news.
 
 ## Base URL
 
@@ -10,54 +10,52 @@ This API provides real-time cricket match information scraped from Cricbuzz.com.
 http://localhost:5003/api/cricket
 ```
 
+---
+
 ## Endpoints
 
-### 1. Recent Scores
+### 1. Live Scores
 
-Get information about recently completed matches.
+Get information about matches currently in progress with detailed scorecards.
 
-**Endpoint:** `GET /api/cricket/recent-scores`
+**Endpoint:** `GET /api/cricket/live-scores`
+
+**Features:**
+
+- ✅ In-memory caching (30s TTL)
+- ✅ Retry logic (3 attempts with exponential backoff)
+- ✅ Health monitoring with Discord alerts
+- ✅ Concurrent scorecard fetching (max 3 parallel)
 
 **Response:**
 
 ```json
 {
   "success": true,
-  "count": 94,
-  "data": [
-    {
-      "title": "Ireland vs Bangladesh, 1st Test",
-      "matchLink": "https://www.cricbuzz.com/live-cricket-scores/...",
-      "matchDetails": "Ireland vs Bangladesh, 1st Test",
-      "status": "N/A",
-      "location": "1st Test • Sylhet, Sylhet International Cricket Stadium",
-      "playingTeamBat": "Ireland",
-      "playingTeamBall": "Bangladesh",
-      "teams": ["Ireland", "Bangladesh"],
-      "teamAbbr": ["IRE", "BAN"],
-      "liveScorebat": "286 & 254",
-      "liveScoreball": "587-8 d",
-      "scores": ["286 & 254", "587-8 d"],
-      "liveCommentary": "Bangladesh won by an innings and 446 runs",
-      "links": {
-        "Live Score": "https://www.cricbuzz.com/...",
-        "Scorecard": "https://www.cricbuzz.com/...",
-        "Full Commentary": "https://www.cricbuzz.com/...",
-        "News": "https://www.cricbuzz.com/..."
-      },
-      "time": "N/A"
-    }
-  ]
+  "count": 5,
+  "data": [...],
+  "fromCache": false,
+  "responseTime": 1523
 }
 ```
 
-### 2. Live Scores
+---
 
-Get information about matches currently in progress.
+### 2. Recent Scores
 
-**Endpoint:** `GET /api/cricket/live-scores`
+Get information about recently completed matches.
 
-**Response:** Same structure as recent-scores
+**Endpoint:** `GET /api/cricket/recent-scores`
+
+**Features:**
+
+- ✅ In-memory caching (2min TTL)
+- ✅ Retry logic (3 attempts with exponential backoff)
+- ✅ Health monitoring with Discord alerts
+
+**Response:** Same structure as live-scores (without scorecard details)
+
+---
 
 ### 3. Upcoming Matches
 
@@ -65,33 +63,226 @@ Get information about scheduled upcoming matches.
 
 **Endpoint:** `GET /api/cricket/upcoming-matches`
 
-**Response:** Same structure as recent-scores (scores may be empty for matches not yet started)
+**Features:**
+
+- ✅ In-memory caching (5min TTL)
+- ✅ Retry logic (3 attempts with exponential backoff)
+- ✅ Health monitoring with Discord alerts
+
+**Response:** Same structure as live-scores (scores empty for unstarted matches)
+
+---
+
+### 4. News
+
+Get cricket news articles from multiple sources.
+
+**Endpoint:** `GET /api/cricket/news`
+
+**Query Parameters:**
+
+- `limit` (optional): Number of articles to return (default: 20, max: 100)
+- `source` (optional): Filter by source ("Cricbuzz" or "ESPN Cricinfo")
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "count": 20,
+  "data": [
+    {
+      "id": "cuid123",
+      "slug": "article-slug",
+      "title": "Article Title",
+      "description": "Brief description",
+      "content": "Full article content",
+      "imageUrl": "https://...",
+      "sourceName": "Cricbuzz",
+      "sourceUrl": "https://...",
+      "publishedTime": "2025-12-20T10:00:00.000Z",
+      "tags": ["IPL", "India"],
+      "createdAt": "2025-12-20T10:00:00.000Z"
+    }
+  ]
+}
+```
+
+---
+
+### 5. Single News Article
+
+Get a specific news article by slug.
+
+**Endpoint:** `GET /api/cricket/news/:slug`
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "cuid123",
+    "slug": "article-slug",
+    "title": "Full Article Title",
+    "description": "Brief description",
+    "content": "Full article content with paragraphs",
+    "imageUrl": "https://...",
+    "thumbnailUrl": "https://...",
+    "sourceName": "Cricbuzz",
+    "sourceUrl": "https://...",
+    "publishedTime": "2025-12-20T10:00:00.000Z",
+    "metaTitle": "SEO Title",
+    "metaDesc": "SEO Description",
+    "tags": ["IPL", "India"],
+    "relatedArticles": [...]
+  }
+}
+```
+
+---
+
+### 6. Photos
+
+Get cricket photo galleries.
+
+**Endpoint:** `GET /api/cricket/photos`
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "data": [...]
+}
+```
+
+---
+
+### 7. Stats
+
+Get cricket statistics.
+
+**Endpoint:** `GET /api/cricket/stats`
+
+**Features:**
+
+- ✅ In-memory caching (10min TTL)
+- ✅ Retry logic
+- ✅ Health monitoring
+
+---
+
+### 8. Scraper Health
+
+Get health status of all scrapers.
+
+**Endpoint:** `GET /api/cricket/health`
+
+**Response:**
+
+```json
+{
+  "overall": "healthy",
+  "scrapers": {
+    "liveScores": {
+      "status": "healthy",
+      "consecutiveFailures": 0,
+      "successRate": "99.5%",
+      "avgResponseTime": "1200ms",
+      "lastSuccess": "2025-12-20T10:00:00.000Z"
+    },
+    "recentMatches": {...},
+    "upcomingMatches": {...}
+  }
+}
+```
+
+---
 
 ## Response Structure
 
 ### Success Response
 
-- `success` (boolean): Indicates if the request was successful
-- `count` (number): Number of matches returned
-- `data` (array): Array of match objects
+| Field          | Type         | Description                    |
+| -------------- | ------------ | ------------------------------ |
+| `success`      | boolean      | Request status                 |
+| `count`        | number       | Number of items returned       |
+| `data`         | array/object | Response data                  |
+| `fromCache`    | boolean      | Whether response is from cache |
+| `responseTime` | number       | Response time in milliseconds  |
 
 ### Match Object
 
-- `title` (string): Full match title
-- `matchLink` (string): URL to the match page
-- `matchDetails` (string): Match description
-- `status` (string): Match status
-- `location` (string): Match location and venue
-- `playingTeamBat` (string): Batting team name
-- `playingTeamBall` (string): Bowling team name
-- `teams` (array): Array of team names
-- `teamAbbr` (array): Array of team abbreviations
-- `liveScorebat` (string): Batting team score
-- `liveScoreball` (string): Bowling team score
-- `scores` (array): Array of scores
-- `liveCommentary` (string): Match status/result commentary
-- `links` (object): Related links (scorecard, commentary, news)
-- `time` (string): Match time (if available)
+| Field             | Type   | Description                                             |
+| ----------------- | ------ | ------------------------------------------------------- |
+| `title`           | string | Full match title (e.g., "India vs Australia, 3rd Test") |
+| `matchLink`       | string | URL to match page                                       |
+| `matchDetails`    | string | Match description                                       |
+| `status`          | string | Match status                                            |
+| `location`        | string | Venue information                                       |
+| `playingTeamBat`  | string | Batting team name                                       |
+| `playingTeamBall` | string | Bowling team name                                       |
+| `teams`           | array  | Full team names                                         |
+| `teamAbbr`        | array  | Team abbreviations                                      |
+| `liveScorebat`    | string | Batting team score                                      |
+| `liveScoreball`   | string | Bowling team score                                      |
+| `scores`          | array  | All scores                                              |
+| `liveCommentary`  | string | Match result/status text                                |
+| `links`           | object | Related links (scorecard, commentary, news)             |
+| `scorecard`       | object | Detailed scorecard (live-scores only)                   |
+
+#### Enhanced Fields (NEW)
+
+| Field         | Type   | Description                                    |
+| ------------- | ------ | ---------------------------------------------- |
+| `matchFormat` | string | Match format (e.g., "3rd Test", "T20I", "ODI") |
+| `matchNumber` | string | Match number in series                         |
+| `venue`       | string | Stadium/venue name                             |
+| `matchState`  | string | `live`, `completed`, `upcoming`, or `break`    |
+| `day`         | number | Day number (Test matches only)                 |
+| `session`     | number | Session number (Test matches only)             |
+| `target`      | number | Target score (chasing team)                    |
+| `lead`        | number | Lead by runs (if applicable)                   |
+| `trail`       | number | Trail by runs (if applicable)                  |
+| `winner`      | string | Winner team name (recent-scores only)          |
+
+### Scorecard Object
+
+```json
+{
+  "scorecard": [
+    {
+      "inningsId": 1,
+      "inningsHeader": "IND 349-8 (50 Ov)",
+      "teamName": "IND",
+      "batting": [
+        {
+          "batter": "Rohit Sharma",
+          "dismissal": "c Smith b Starc",
+          "runs": "85",
+          "balls": "98",
+          "fours": "10",
+          "sixes": "2",
+          "sr": "86.73",
+          "isBatting": false
+        }
+      ],
+      "bowling": [
+        {
+          "bowler": "Mitchell Starc",
+          "overs": "10",
+          "maidens": "1",
+          "runs": "65",
+          "wickets": "3",
+          "eco": "6.50",
+          "isBowling": false
+        }
+      ]
+    }
+  ]
+}
+```
 
 ### Error Response
 
@@ -99,70 +290,106 @@ Get information about scheduled upcoming matches.
 {
   "success": false,
   "error": "Error fetching the webpage",
-  "message": "Detailed error message"
+  "message": "Detailed error message",
+  "responseTime": 15000
 }
 ```
 
-## Technical Details
+---
+
+## Technical Architecture
 
 ### Technology Stack
 
-- **Node.js** with Express.js
-- **Axios** for HTTP requests
+- **Node.js** + Express.js
 - **Cheerio** for HTML parsing
-- Modern Tailwind CSS selectors for Cricbuzz's redesigned website
+- **Puppeteer** for JavaScript-rendered content (news scraper)
+- **Prisma** + PostgreSQL (Supabase) for news storage
+- **node-cache** for in-memory caching
+- **p-limit** for concurrency control
 
-### Rate Limiting
+### Caching Configuration
 
-The API respects Cricbuzz's servers with:
+| Scraper           | TTL   | Purpose                   |
+| ----------------- | ----- | ------------------------- |
+| `liveScores`      | 30s   | Scores change frequently  |
+| `recentMatches`   | 2min  | Results update less often |
+| `upcomingMatches` | 5min  | Schedule rarely changes   |
+| `scorecard`       | 1min  | During live matches       |
+| `stats`           | 10min | Static data               |
 
-- 10-second timeout per request
-- User-Agent header to identify requests
-- Proper error handling
+### Retry Configuration
 
-### Caching Recommendations
+- **Max Retries:** 3
+- **Base Delay:** 2000ms
+- **Backoff Multiplier:** 1.5x
+- **Retryable Errors:** Timeout, Network, Rate Limit
+- **Non-Retryable:** Parse errors, 403 Forbidden
 
-For production use, consider implementing:
+### Health Monitoring
 
-- Redis caching (5-10 minute TTL for live scores)
-- CDN caching for static match data
-- Request throttling to prevent abuse
+- Tracks success/failure counts per scraper
+- Sends Discord alerts after 3 consecutive failures
+- Alert cooldown: 5 minutes
+- Provides `/health` endpoint for monitoring
 
-## Development
+---
 
-### Prerequisites
+## News Scraper (Cron Job)
+
+News articles are scraped every 6 hours via cron:
 
 ```bash
-npm install
+# Cron schedule (0:30, 6:30, 12:30, 18:30 IST)
+30 0,6,12,18 * * * /path/to/scripts/vps-scrape.sh
 ```
 
-### Start Server
+### Sources
 
-```bash
-npm start
-# or for development with auto-reload
-npm run dev
-```
+1. **Cricbuzz** - Uses Puppeteer with infinite scroll
+2. **ESPN Cricinfo** - Uses Puppeteer
 
-### Environment Variables
+### Features
 
-- `PORT` - Server port (default: 5003)
+- **Multi-scroll support:** Captures 30+ articles (vs 10 before)
+- **Duplicate detection:** Skips already-stored articles
+- **Auto-tagging:** Generates tags via Perplexity API
+- **Discord notifications:** Reports scraper status
+
+---
 
 ## Maintenance Notes
 
-### Cricbuzz Website Changes
+### CSS Selectors (if Cricbuzz changes)
 
-If the API stops returning data, Cricbuzz may have updated their HTML structure. Check:
+| Element    | Selector                                  |
+| ---------- | ----------------------------------------- |
+| Match card | `a.w-full.bg-cbWhite.flex.flex-col`       |
+| Team name  | `span.hidden.wb\:block.whitespace-nowrap` |
+| Score      | `span.font-medium.wb\:font-semibold`      |
+| Location   | `span.text-xs.text-cbTxtSec`              |
+| Status     | `span[class*="text-cbComplete"]`          |
 
-1. CSS selectors: `a.w-full.bg-cbWhite.flex.flex-col`
-2. Team name selectors: `span.hidden.wb\:block.whitespace-nowrap`
-3. Score selectors: `span.font-medium.wb\:font-semibold`
-4. Location selectors: `span.text-xs.text-cbTxtSec`
+### Troubleshooting
 
-### Last Updated
+1. **Empty responses:** Check if Cricbuzz HTML structure changed
+2. **Rate limiting:** Reduce concurrent requests, add delays
+3. **Timeouts:** Increase timeout settings
+4. **Parsing errors:** Update CSS selectors
 
-November 14, 2025 - Updated for Cricbuzz's Tailwind CSS redesign
+---
 
-## License
+## Environment Variables
 
-ISC
+| Variable              | Description                  |
+| --------------------- | ---------------------------- |
+| `PORT`                | Server port (default: 5003)  |
+| `DATABASE_URL`        | PostgreSQL connection string |
+| `DISCORD_WEBHOOK_URL` | Discord webhook for alerts   |
+| `PERPLEXITY_API_KEY`  | For auto-tagging (optional)  |
+
+---
+
+## Last Updated
+
+December 20, 2025 - Added caching, retry logic, health monitoring, and concurrent request limiting

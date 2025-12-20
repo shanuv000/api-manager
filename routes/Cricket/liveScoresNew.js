@@ -1,6 +1,7 @@
 const express = require("express");
 const axios = require("axios");
 const cheerio = require("cheerio");
+const { createLimiter } = require("../../utils/concurrency-limiter");
 const getScorecardDetails = require("./scorecard");
 const { withAxiosRetry } = require("../../utils/scraper-retry");
 const scraperCache = require("../../utils/scraper-cache");
@@ -13,6 +14,9 @@ const url = "https://www.cricbuzz.com/cricket-match/live-scores";
 
 // Scraper name for health tracking
 const SCRAPER_NAME = "liveScores";
+
+// Limit concurrent scorecard fetches to prevent rate limiting
+const CONCURRENT_SCORECARD_LIMIT = 3;
 
 // Define a GET route to scrape live scores
 router.get("/live-scores", async (req, res) => {
@@ -171,6 +175,59 @@ router.get("/live-scores", async (req, res) => {
         ? resultSpan.text().trim()
         : match.status || "N/A";
 
+      // === ENHANCED DATA EXTRACTION ===
+
+      // Extract match format (Test, ODI, T20, T10)
+      const formatMatch = title.match(
+        /(\d+(?:st|nd|rd|th)?\s*(?:Test|T20I?|ODI|T10))/i
+      );
+      match.matchFormat = formatMatch ? formatMatch[1] : null;
+
+      // Extract series/tournament from location (e.g., "3rd Test • Adelaide")
+      const locationParts = match.location.split("•").map((s) => s.trim());
+      match.matchNumber = locationParts[0] || null;
+      match.venue = locationParts[1] || match.location;
+
+      // Parse commentary for day/session (Test matches)
+      const dayMatch = match.liveCommentary.match(/Day\s*(\d+)/i);
+      match.day = dayMatch ? parseInt(dayMatch[1]) : null;
+
+      const sessionMatch = match.liveCommentary.match(
+        /(\d+)(?:st|nd|rd|th)?\s*Session/i
+      );
+      match.session = sessionMatch ? parseInt(sessionMatch[1]) : null;
+
+      // Parse target/lead/trail/need from commentary
+      const targetMatch = match.liveCommentary.match(
+        /(?:need|require|target)[:\s]+(\d+)/i
+      );
+      match.target = targetMatch ? parseInt(targetMatch[1]) : null;
+
+      const leadMatch = match.liveCommentary.match(/lead\s+(?:by\s+)?(\d+)/i);
+      match.lead = leadMatch ? parseInt(leadMatch[1]) : null;
+
+      const trailMatch = match.liveCommentary.match(/trail\s+(?:by\s+)?(\d+)/i);
+      match.trail = trailMatch ? parseInt(trailMatch[1]) : null;
+
+      // Determine match state
+      if (match.liveCommentary.toLowerCase().includes("won")) {
+        match.matchState = "completed";
+      } else if (
+        match.liveCommentary.toLowerCase().includes("preview") ||
+        match.liveCommentary.toLowerCase().includes("upcoming")
+      ) {
+        match.matchState = "upcoming";
+      } else if (
+        match.liveCommentary.toLowerCase().includes("stumps") ||
+        match.liveCommentary.toLowerCase().includes("lunch") ||
+        match.liveCommentary.toLowerCase().includes("tea") ||
+        match.liveCommentary.toLowerCase().includes("break")
+      ) {
+        match.matchState = "break";
+      } else {
+        match.matchState = "live";
+      }
+
       // Extract related links
       match.links = {};
       if (href) {
@@ -194,32 +251,38 @@ router.get("/live-scores", async (req, res) => {
     });
 
     // Enrich matches with detailed scorecard data
-    // We use Promise.all to fetch details in parallel
-    console.log(`Fetching details for ${matches.length} matches...`);
-    const enrichedMatches = await Promise.all(
-      matches.map(async (match) => {
-        if (match.links && match.links["Scorecard"]) {
-          try {
-            console.log(`Fetching scorecard for ${match.title}...`);
-            const details = await getScorecardDetails(match.links["Scorecard"]);
-            if (details) {
-              console.log(`Successfully fetched scorecard for ${match.title}`);
-              match.scorecard = details;
-            } else {
-              console.log(`No details returned for ${match.title}`);
-            }
-          } catch (err) {
-            console.error(
-              `Failed to fetch details for ${match.title}: ${err.message}`
-            );
-          }
-        } else {
-          console.log(`No scorecard link for ${match.title}`);
-        }
-        return match;
-      })
+    // Use limiter to control concurrent requests and prevent rate limiting
+    const limit = createLimiter(CONCURRENT_SCORECARD_LIMIT);
+    console.log(
+      `Fetching scorecards for ${matches.length} matches (max ${CONCURRENT_SCORECARD_LIMIT} concurrent)...`
     );
-    console.log("Finished fetching details.");
+
+    const enrichedMatches = await Promise.all(
+      matches.map((match) =>
+        limit(async () => {
+          if (match.links && match.links["Scorecard"]) {
+            try {
+              const details = await getScorecardDetails(
+                match.links["Scorecard"]
+              );
+              if (details) {
+                match.scorecard = details;
+              }
+            } catch (err) {
+              console.error(
+                `Scorecard fetch failed for ${match.title}: ${err.message}`
+              );
+            }
+          }
+          return match;
+        })
+      )
+    );
+    console.log(
+      `Fetched ${enrichedMatches.filter((m) => m.scorecard).length}/${
+        matches.length
+      } scorecards`
+    );
 
     // Cache the results
     scraperCache.set("liveScores", cacheKey, enrichedMatches);

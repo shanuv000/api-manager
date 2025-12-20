@@ -473,8 +473,20 @@ router.get("/", (req, res) => {
           liveCommentary: "string - Latest match commentary",
           links: "object - URLs to scorecard, full commentary, news",
           scorecard: "object - Detailed scorecard (when available)",
+          // Enhanced fields
+          matchFormat:
+            "string - Match format (e.g., '3rd Test', 'T20I', 'ODI')",
+          matchNumberInfo: "string - Match number in series",
+          venue: "string - Stadium/venue name",
+          day: "number - Day number for Test matches (1-5)",
+          session: "number - Session number for Test matches (1-3)",
+          target: "number - Target score for chasing team",
+          lead: "number - Lead by runs (if applicable)",
+          trail: "number - Trail by runs (if applicable)",
+          winner: "string - Winner team name (for completed matches)",
         },
       },
+
       newsObject: {
         description: "Structure of news article objects",
         fields: {
@@ -781,6 +793,44 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
     match.liveCommentary = resultSpan.length
       ? resultSpan.text().trim()
       : match.status || "N/A";
+
+    // === ENHANCED DATA EXTRACTION ===
+
+    // Extract match format (Test, ODI, T20, T10)
+    const formatMatch = title.match(
+      /(\d+(?:st|nd|rd|th)?\s*(?:Test|T20I?|ODI|T10))/i
+    );
+    match.matchFormat = formatMatch ? formatMatch[1] : null;
+
+    // Extract venue from location (e.g., "3rd Test • Adelaide, Adelaide Oval")
+    const locationParts = match.location.split("•").map((s) => s.trim());
+    match.matchNumberInfo = locationParts[0] || null;
+    match.venue = locationParts[1] || match.location;
+
+    // Parse commentary for day/session (Test matches)
+    const dayMatch = match.liveCommentary.match(/Day\s*(\d+)/i);
+    match.day = dayMatch ? parseInt(dayMatch[1]) : null;
+
+    const sessionMatch = match.liveCommentary.match(
+      /(\d+)(?:st|nd|rd|th)?\s*Session/i
+    );
+    match.session = sessionMatch ? parseInt(sessionMatch[1]) : null;
+
+    // Parse target/lead/trail/need from commentary
+    const targetMatch = match.liveCommentary.match(
+      /(?:need|require|target)[:\s]+(\d+)/i
+    );
+    match.target = targetMatch ? parseInt(targetMatch[1]) : null;
+
+    const leadMatch = match.liveCommentary.match(/lead\s+(?:by\s+)?(\d+)/i);
+    match.lead = leadMatch ? parseInt(leadMatch[1]) : null;
+
+    const trailMatch = match.liveCommentary.match(/trail\s+(?:by\s+)?(\d+)/i);
+    match.trail = trailMatch ? parseInt(trailMatch[1]) : null;
+
+    // Parse winner from result (for completed matches)
+    const winnerMatch = match.liveCommentary.match(/^(.+?)\s+won\b/i);
+    match.winner = winnerMatch ? winnerMatch[1].trim() : null;
 
     match.links = {};
     if (href) {

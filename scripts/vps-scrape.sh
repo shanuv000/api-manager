@@ -4,17 +4,17 @@
 #
 # RECOMMENDED CRON SETUP (with timeout and lock to prevent overlapping/stuck runs):
 # crontab -e
-# 30 0,6,12,18 * * * flock -n /tmp/cricket-scraper.lock timeout 300 /home/ubuntu/app/projects/api_pro/api-manager/scripts/vps-scrape.sh >> /var/log/cricket-scraper.log 2>&1
+# 30 0,6,12,18 * * * flock -n /tmp/cricket-scraper.lock timeout 600 /home/ubuntu/app/projects/api_pro/api-manager/scripts/vps-scrape.sh >> /var/log/cricket-scraper.log 2>&1
 #
 # This ensures:
 # - flock -n: Only one instance runs at a time (non-blocking)
-# - timeout 300: Kill if running longer than 5 minutes
+# - timeout 600: Kill if running longer than 10 minutes
 
 set -o pipefail
 
 SCRIPT_DIR="/home/ubuntu/app/projects/api_pro/api-manager"
 LOCK_FILE="/tmp/cricket-scraper.lock"
-SCRAPER_TIMEOUT=180  # 3 minutes max per scraper (increased to accommodate retries)
+SCRAPER_TIMEOUT=300  # 5 minutes max per scraper (increased to accommodate retries)
 
 cd "$SCRIPT_DIR"
 

@@ -1,6 +1,9 @@
 const express = require("express");
 const axios = require("axios");
 const cheerio = require("cheerio");
+const { withAxiosRetry } = require("../../utils/scraper-retry");
+const scraperCache = require("../../utils/scraper-cache");
+const scraperHealth = require("../../utils/scraper-health");
 
 const router = express.Router();
 
@@ -8,17 +11,39 @@ const router = express.Router();
 const url =
   "https://www.cricbuzz.com/cricket-match/live-scores/upcoming-matches";
 
+// Scraper name for health tracking
+const SCRAPER_NAME = "upcomingMatches";
+
 // Define a GET route to scrape upcoming matches
 router.get("/upcoming-matches", async (req, res) => {
+  const startTime = Date.now();
+  const cacheKey = scraperCache.generateKey("upcoming", "matches");
+
   try {
-    // Fetch the webpage
-    const response = await axios.get(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      },
-      timeout: 10000,
-    });
+    // Check cache first
+    const cached = scraperCache.get("upcomingMatches", cacheKey);
+    if (cached) {
+      return res.json({
+        success: true,
+        count: cached.length,
+        data: cached,
+        fromCache: true,
+        responseTime: Date.now() - startTime,
+      });
+    }
+
+    // Fetch the webpage with retry logic
+    const response = await withAxiosRetry(
+      () =>
+        axios.get(url, {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          },
+          timeout: 15000,
+        }),
+      { operationName: "Upcoming Matches Fetch", maxRetries: 3 }
+    );
 
     const html = response.data;
     const $ = cheerio.load(html);
@@ -146,6 +171,22 @@ router.get("/upcoming-matches", async (req, res) => {
         ? resultSpan.text().trim()
         : match.status || "N/A";
 
+      // === ENHANCED DATA EXTRACTION ===
+
+      // Extract match format (Test, ODI, T20, T10)
+      const formatMatch = title.match(
+        /(\d+(?:st|nd|rd|th)?\s*(?:Test|T20I?|ODI|T10))/i
+      );
+      match.matchFormat = formatMatch ? formatMatch[1] : null;
+
+      // Extract series/tournament from location
+      const locationParts = match.location.split("•").map((s) => s.trim());
+      match.matchNumber = locationParts[0] || null;
+      match.venue = locationParts[1] || match.location;
+
+      // Match state - upcoming matches
+      match.matchState = "upcoming";
+
       // Extract related links
       match.links = {};
       if (href) {
@@ -162,25 +203,41 @@ router.get("/upcoming-matches", async (req, res) => {
         ] = `https://www.cricbuzz.com/cricket-match-news/${basePath}`;
       }
 
-      match.time = "N/A"; // Time not readily available in new structure
+      match.time = "N/A";
 
       // Add the match object to the matches array
       matches.push(match);
     });
+
+    // Cache the results
+    scraperCache.set("upcomingMatches", cacheKey, matches);
+
+    // Record success
+    scraperHealth.recordSuccess(SCRAPER_NAME, Date.now() - startTime);
 
     // Send the scraped data as a JSON response
     res.json({
       success: true,
       count: matches.length,
       data: matches,
+      fromCache: false,
+      responseTime: Date.now() - startTime,
     });
   } catch (error) {
+    // Record failure for health monitoring
+    await scraperHealth.recordFailure(
+      SCRAPER_NAME,
+      error,
+      Date.now() - startTime
+    );
+
     // Handle errors in fetching the webpage or processing the HTML
     console.error("Error fetching upcoming matches:", error.message);
     res.status(500).json({
       success: false,
       error: "Error fetching the webpage",
       message: error.message,
+      responseTime: Date.now() - startTime,
     });
   }
 });
