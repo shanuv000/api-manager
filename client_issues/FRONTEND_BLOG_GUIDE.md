@@ -93,11 +93,11 @@ The `content` field format depends on the news source. Use `react-markdown` for 
 
 ### Content Features by Source (Verified Dec 23, 2025)
 
-| Source            | Bold          | Headings     | Links            | Content Quality                           |
-| ----------------- | ------------- | ------------ | ---------------- | ----------------------------------------- |
-| **ICC Cricket**   | ✅ `**text**` | ✅ `#`, `##` | ✅ `[text](url)` | **Rich markdown** (avg 36 bold, 10 links) |
-| **ESPN Cricinfo** | ❌ Plain text | ❌           | ❌               | **Plain text** from JSON-LD               |
-| **Cricbuzz**      | ❌ Plain text | ❌           | ❌               | **Plain text**                            |
+| Source            | Bold          | Headings     | Links            | Tables      | Tweets       |
+| ----------------- | ------------- | ------------ | ---------------- | ----------- | ------------ |
+| **ICC Cricket**   | ✅ `**text**` | ✅ `#`, `##` | ✅ `[text](url)` | ✅ Markdown | ✅ IDs array |
+| **ESPN Cricinfo** | ❌ Plain text | ❌           | ❌               | ❌          | ❌           |
+| **Cricbuzz**      | ❌ Plain text | ❌           | ❌               | ❌          | ❌           |
 
 > **Why ESPN/Cricbuzz are plain text:** These sources use JSON-LD structured data for content, which strips HTML formatting. ICC embeds rich HTML in their article pages.
 
@@ -117,7 +117,14 @@ Defending champions South Africa have made a leap following a [historic 2-0 seri
 **Points Percentage:** 100
 
 **Leading run-scorer this cycle:** Travis Head (603 runs)
-**Leading wicket-taker this cycle:** Mitchell Starc (37 wickets)
+
+### Most Wickets in a Series (NZ vs WI)
+
+| Player         | Against     | Year | Total Wickets |
+| -------------- | ----------- | ---- | ------------- |
+| Jacob Duffy    | West Indies | 2025 | 23            |
+| Trent Boult    | West Indies | 2013 | 20            |
+| Richard Hadlee | West Indies | 1979 | 19            |
 ```
 
 ### Sample ESPN/Cricbuzz Content (Plain Text)
