@@ -22,11 +22,14 @@ GET /api/cricket/news/:id
 
 ### Query Parameters
 
-| Parameter  | Type   | Description            | Example                                 |
-| ---------- | ------ | ---------------------- | --------------------------------------- |
-| `limit`    | number | Max articles to return | `?limit=10`                             |
-| `source`   | string | Filter by source       | `?source=ICC Cricket`                   |
-| `category` | string | Filter by category     | `?category=ICC World Test Championship` |
+| Parameter | Type   | Description                                        | Example                            |
+| --------- | ------ | -------------------------------------------------- | ---------------------------------- |
+| `limit`   | number | Max articles to return (default: 10, max: 50)      | `?limit=10`                        |
+| `offset`  | number | Skip articles for pagination                       | `?offset=20`                       |
+| `source`  | string | Filter by source: `cricbuzz`, `espn`, `icc`, `all` | `?source=icc`                      |
+| `search`  | string | Search in title/description/content                | `?search=ashes`                    |
+| `tag`     | string | Filter by tag                                      | `?tag=ICC World Test Championship` |
+| `sort`    | string | Sort order: `newest` (default) or `oldest`         | `?sort=oldest`                     |
 
 ---
 
@@ -63,6 +66,9 @@ interface NewsArticle {
 
   // Related Content
   relatedArticles: RelatedArticle[] | null;
+
+  // Embedded Tweets (ICC Cricket only)
+  embeddedTweets: string[]; // Array of Twitter/X tweet IDs
 
   // Timestamps
   publishedTime: string | null; // ISO 8601 format
@@ -434,7 +440,80 @@ function ArticleCard({ article }) {
 
 ---
 
-## 10. Performance Tips
+## 10. Rendering Embedded Tweets (ICC Cricket)
+
+ICC Cricket articles may contain embedded tweets. The `embeddedTweets` field contains an array of tweet IDs.
+
+### Install Package
+
+```bash
+npm install react-twitter-embed
+```
+
+### Basic Usage
+
+```jsx
+import { TwitterTweetEmbed } from "react-twitter-embed";
+
+function ArticleWithTweets({ article }) {
+  return (
+    <article>
+      <ReactMarkdown>{article.content}</ReactMarkdown>
+
+      {/* Render embedded tweets */}
+      {article.embeddedTweets?.length > 0 && (
+        <div className="embedded-tweets mt-8">
+          <h3 className="text-lg font-semibold mb-4">Related Tweets</h3>
+          {article.embeddedTweets.map((tweetId) => (
+            <div key={tweetId} className="mb-4">
+              <TwitterTweetEmbed tweetId={tweetId} />
+            </div>
+          ))}
+        </div>
+      )}
+    </article>
+  );
+}
+```
+
+### With Loading Placeholder
+
+```jsx
+import { TwitterTweetEmbed } from "react-twitter-embed";
+
+function TweetEmbed({ tweetId }) {
+  return (
+    <TwitterTweetEmbed
+      tweetId={tweetId}
+      placeholder={
+        <div className="animate-pulse bg-gray-200 rounded-lg h-48 flex items-center justify-center">
+          Loading tweet...
+        </div>
+      }
+      options={{ theme: "dark" }} // or 'light'
+    />
+  );
+}
+```
+
+### Sample Data
+
+```json
+{
+  "title": "Ashes secured in Adelaide as Australia boost WTC27 hopes",
+  "embeddedTweets": [
+    "2002586142227734739",
+    "2002602030289023024",
+    "2002579464199233798"
+  ]
+}
+```
+
+> **Note:** Only ICC Cricket articles have embedded tweets. ESPN and Cricbuzz articles will have an empty array.
+
+---
+
+## 11. Performance Tips
 
 1. **Use `thumbnailUrl` for lists** - Faster loading for article cards
 2. **Lazy load images** - Use `loading="lazy"` or Next.js Image
@@ -444,7 +523,7 @@ function ArticleCard({ article }) {
 
 ---
 
-## 11. Complete Example
+## 12. Complete Example
 
 ```jsx
 // pages/news/[slug].tsx

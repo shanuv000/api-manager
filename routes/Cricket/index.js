@@ -1425,9 +1425,9 @@ router.get("/news", async (req, res) => {
       return sendError(res, validationError);
     }
 
-    // Optional source filter (cricbuzz, espncricinfo, or all)
+    // Optional source filter (cricbuzz, espncricinfo, icc, or all)
     const sourceFilter = req.query.source?.toLowerCase();
-    const validSources = ["cricbuzz", "espncricinfo", "espn", "all"];
+    const validSources = ["cricbuzz", "espncricinfo", "espn", "icc", "all"];
     if (sourceFilter && !validSources.includes(sourceFilter)) {
       return sendError(
         res,
@@ -1461,6 +1461,8 @@ router.get("/news", async (req, res) => {
     if (sourceFilter && sourceFilter !== "all") {
       if (sourceFilter === "espn" || sourceFilter === "espncricinfo") {
         whereClause.sourceName = "ESPN Cricinfo";
+      } else if (sourceFilter === "icc") {
+        whereClause.sourceName = "ICC Cricket";
       } else {
         whereClause.sourceName = "Cricbuzz";
       }
@@ -1515,6 +1517,7 @@ router.get("/news", async (req, res) => {
         sourceName: true,
         sourceUrl: true,
         tags: true,
+        embeddedTweets: true,
         createdAt: true,
         updatedAt: true,
       },
