@@ -392,25 +392,102 @@ class ICCNewsScraper {
           author = authorEl.textContent.trim();
         }
 
-        const contentParagraphs = [];
-        const paragraphs = document.querySelectorAll(
-          "article p, [class*='content'] p, [class*='story'] p, main p"
-        );
+        // Enhanced content extraction with markdown formatting
+        const contentParts = [];
+        const article =
+          document.querySelector("article") || document.querySelector("main");
 
-        paragraphs.forEach((p) => {
-          const text = p.textContent.trim();
-          if (
-            text &&
-            text.length > 50 &&
-            !text.toLowerCase().includes("follow us") &&
-            !text.toLowerCase().includes("subscribe") &&
-            !text.toLowerCase().includes("cookie") &&
-            !text.toLowerCase().includes("privacy") &&
-            !text.includes("©")
-          ) {
-            contentParagraphs.push(text);
-          }
-        });
+        if (article) {
+          const elements = article.querySelectorAll(
+            "h1, h2, h3, h4, p, ul, ol"
+          );
+          const skipPatterns = [
+            /follow us/i,
+            /subscribe/i,
+            /cookie/i,
+            /privacy/i,
+            /terms of/i,
+            /©/,
+            /copyright/i,
+          ];
+
+          elements.forEach((el) => {
+            let text = "";
+
+            if (el.tagName === "P") {
+              // Convert paragraph with bold/links to markdown
+              el.childNodes.forEach((node) => {
+                if (node.nodeType === Node.TEXT_NODE) {
+                  text += node.textContent;
+                } else if (
+                  node.nodeName === "STRONG" ||
+                  node.nodeName === "B"
+                ) {
+                  text += "**" + node.textContent + "**";
+                } else if (node.nodeName === "EM" || node.nodeName === "I") {
+                  text += "_" + node.textContent + "_";
+                } else if (node.nodeName === "A") {
+                  const href = node.getAttribute("href");
+                  if (href && !href.startsWith("#")) {
+                    text += "[" + node.textContent + "](" + href + ")";
+                  } else {
+                    text += node.textContent;
+                  }
+                } else {
+                  text += node.textContent || "";
+                }
+              });
+            } else if (el.tagName.match(/^H[1-4]$/)) {
+              // Convert headings to markdown
+              const level = parseInt(el.tagName[1]);
+              text = "#".repeat(level) + " " + el.textContent.trim();
+            } else if (el.tagName === "UL") {
+              // Convert unordered lists to markdown
+              const items = el.querySelectorAll("li");
+              const listItems = [];
+              items.forEach((li) => {
+                const itemText = li.textContent.trim();
+                if (itemText) listItems.push("- " + itemText);
+              });
+              text = listItems.join("\n");
+            } else if (el.tagName === "OL") {
+              // Convert ordered lists to markdown
+              const items = el.querySelectorAll("li");
+              const listItems = [];
+              items.forEach((li, idx) => {
+                const itemText = li.textContent.trim();
+                if (itemText) listItems.push(idx + 1 + ". " + itemText);
+              });
+              text = listItems.join("\n");
+            }
+
+            text = text.trim();
+
+            // Skip if empty, too short, or contains boilerplate
+            if (!text || text.length < 20) return;
+            const isBoilerplate = skipPatterns.some((pat) => pat.test(text));
+            if (isBoilerplate && text.length < 150) return;
+
+            // Avoid duplicate content
+            if (contentParts.some((p) => p.includes(text) || text.includes(p)))
+              return;
+
+            contentParts.push(text);
+          });
+        }
+
+        // Fallback to plain paragraph extraction if no content found
+        if (contentParts.length === 0) {
+          const paragraphs = document.querySelectorAll(
+            "article p, [class*='content'] p, main p"
+          );
+          paragraphs.forEach((p) => {
+            const text = p.textContent.trim();
+            if (text && text.length > 50) {
+              contentParts.push(text);
+            }
+          });
+        }
 
         const tags = [];
         const tagElements = document.querySelectorAll(
@@ -437,18 +514,17 @@ class ICCNewsScraper {
           }
         });
 
+        const fullContent = contentParts.join("\n\n");
+
         return {
           title,
           seoDescription,
           mainImage,
           publishedTime,
           author,
-          content: contentParagraphs.join("\n\n"),
-          contentParagraphs,
-          wordCount: contentParagraphs
-            .join(" ")
-            .split(/\s+/)
-            .filter((w) => w).length,
+          content: fullContent,
+          contentParagraphs: contentParts,
+          wordCount: fullContent.split(/\s+/).filter((w) => w).length,
           tags: [...new Set(tags)],
           relatedArticles: relatedArticles.slice(0, 5),
           scrapedAt: new Date().toISOString(),
