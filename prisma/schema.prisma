@@ -38,6 +38,7 @@ model NewsArticle {
   // Tags & Relations
   tags            String[]
   relatedArticles Json?
+  embeddedTweets  String[]  // Twitter/X tweet IDs embedded in article
   
   // Timestamps
   scrapedAt       DateTime @default(now())

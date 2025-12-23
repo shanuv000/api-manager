@@ -299,28 +299,59 @@ class CricbuzzNewsScraper {
 
             // Try to find description and metadata in parent/sibling elements
             let description = "";
+            let descriptionSource = "none"; // Track where description came from
             let publishedTime = "";
             let imageUrl = null;
 
             // Search upward through the link's parents (not container) for additional info
             let currentElement = link.parentElement;
             for (let i = 0; i < 5 && currentElement; i++) {
-              // Look for description
-              const descElements = currentElement.querySelectorAll(
-                '[class*="intr"], [class*="desc"], [class*="summary"], p'
-              );
-              for (const desc of descElements) {
-                const text = desc.textContent.trim();
-                // Make sure description is unique and not the title
-                if (
-                  text &&
-                  text.length > 30 &&
-                  text.length < 500 &&
-                  !description &&
-                  text !== title
-                ) {
-                  description = text;
-                  break;
+              // Look for description - prioritize elements with intro/desc classes
+              // These are more likely to be proper SEO descriptions
+              const descSelectors = [
+                '[class*="intr"]', // Cricbuzz intro class - highest priority
+                '[class*="desc"]', // Description class
+                '[class*="summary"]', // Summary class
+              ];
+
+              for (const selector of descSelectors) {
+                if (description) break;
+                const descElements = currentElement.querySelectorAll(selector);
+                for (const desc of descElements) {
+                  const text = desc.textContent.trim();
+                  // Optimal SEO description: 100-200 chars, unique from title
+                  if (
+                    text &&
+                    text.length >= 50 &&
+                    text.length <= 300 &&
+                    text !== title &&
+                    !text.toLowerCase().includes("follow us") &&
+                    !text.toLowerCase().includes("download")
+                  ) {
+                    description = text;
+                    descriptionSource = "dom";
+                    break;
+                  }
+                }
+              }
+
+              // Fallback to <p> tags if no structured description found
+              if (!description) {
+                const paragraphs = currentElement.querySelectorAll("p");
+                for (const p of paragraphs) {
+                  const text = p.textContent.trim();
+                  if (
+                    text &&
+                    text.length >= 80 &&
+                    text.length <= 250 &&
+                    text !== title &&
+                    !text.toLowerCase().includes("follow us") &&
+                    !text.toLowerCase().includes("download")
+                  ) {
+                    description = text;
+                    descriptionSource = "dom";
+                    break;
+                  }
                 }
               }
 
@@ -352,6 +383,8 @@ class CricbuzzNewsScraper {
               id: link.href.split("/").pop(),
               title,
               description,
+              descriptionSource, // Track origin: "meta", "dom", or "none"
+              descriptionLength: description.length,
               link: link.href,
               imageUrl: imageUrl || null,
               thumbnailUrl: imageUrl || null, // Will be converted to high-quality after extraction
@@ -488,6 +521,36 @@ class CricbuzzNewsScraper {
             title = element.textContent.trim();
             break;
           }
+        }
+
+        // Extract SEO description from meta tags (priority order)
+        // These are the most reliable for SEO as they're specifically written for search engines
+        const ogDescription = document.querySelector(
+          'meta[property="og:description"]'
+        )?.content;
+        const metaDescription = document.querySelector(
+          'meta[name="description"]'
+        )?.content;
+        const twitterDescription = document.querySelector(
+          'meta[name="twitter:description"]'
+        )?.content;
+
+        // Priority: og:description > meta description > twitter:description
+        let seoDescription = "";
+        let descriptionSource = "none";
+
+        if (ogDescription && ogDescription.trim().length >= 50) {
+          seoDescription = ogDescription.trim();
+          descriptionSource = "og:description";
+        } else if (metaDescription && metaDescription.trim().length >= 50) {
+          seoDescription = metaDescription.trim();
+          descriptionSource = "meta:description";
+        } else if (
+          twitterDescription &&
+          twitterDescription.trim().length >= 50
+        ) {
+          seoDescription = twitterDescription.trim();
+          descriptionSource = "twitter:description";
         }
 
         // Find time - Cricbuzz uses specific format: "Sun, Dec 14, 2025 • 9:09 AM"
@@ -651,6 +714,8 @@ class CricbuzzNewsScraper {
 
         return {
           title,
+          seoDescription, // Meta tag description (SEO-optimized)
+          descriptionSource, // Source: og:description, meta:description, twitter:description, or none
           publishedTime,
           mainImage,
           content: fullContent,
