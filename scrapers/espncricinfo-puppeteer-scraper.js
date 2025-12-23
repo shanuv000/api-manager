@@ -450,19 +450,64 @@ class ESPNCricinfoPuppeteerScraper {
         for (const sel of contentSelectors) {
           const paras = document.querySelectorAll(sel);
           for (const p of paras) {
-            const text = p.textContent?.trim();
-            if (!text || text.length < 40 || seenText.has(text)) continue;
+            const plainText = p.textContent?.trim();
+            if (!plainText || plainText.length < 40 || seenText.has(plainText))
+              continue;
 
-            const isBoilerplate = skipPatterns.some((pat) => pat.test(text));
-            if (isBoilerplate && text.length < 200) continue;
+            const isBoilerplate = skipPatterns.some((pat) =>
+              pat.test(plainText)
+            );
+            if (isBoilerplate && plainText.length < 200) continue;
 
-            seenText.add(text);
-            contentParagraphs.push(text);
+            seenText.add(plainText);
+
+            // Convert to markdown preserving formatting
+            let markdownText = "";
+            p.childNodes.forEach((node) => {
+              if (node.nodeType === Node.TEXT_NODE) {
+                markdownText += node.textContent;
+              } else if (node.nodeName === "STRONG" || node.nodeName === "B") {
+                markdownText += "**" + node.textContent + "**";
+              } else if (node.nodeName === "EM" || node.nodeName === "I") {
+                markdownText += "_" + node.textContent + "_";
+              } else if (node.nodeName === "A") {
+                const href = node.getAttribute("href");
+                const linkText = node.textContent?.trim();
+                if (href && linkText && !href.startsWith("#")) {
+                  // Make relative URLs absolute
+                  const fullUrl = href.startsWith("http")
+                    ? href
+                    : "https://www.espncricinfo.com" + href;
+                  markdownText += "[" + linkText + "](" + fullUrl + ")";
+                } else {
+                  markdownText += node.textContent || "";
+                }
+              } else if (node.nodeName === "DIV" || node.nodeName === "SPAN") {
+                // Handle nested content
+                markdownText += node.textContent || "";
+              } else {
+                markdownText += node.textContent || "";
+              }
+            });
+
+            contentParagraphs.push(markdownText.trim());
           }
 
           // Stop if we found enough content
           if (contentParagraphs.length >= 5) break;
         }
+
+        // Also try to get headings
+        const headings = [];
+        document
+          .querySelectorAll("article h2, article h3, main h2, main h3")
+          .forEach((h) => {
+            const text = h.textContent?.trim();
+            if (text && text.length > 5) {
+              const level = h.tagName === "H2" ? 2 : 3;
+              headings.push({ level, text });
+            }
+          });
 
         // Use JSON-LD articleBody as fallback if no paragraphs found
         if (contentParagraphs.length === 0 && result.jsonLd?.articleBody) {
@@ -470,6 +515,7 @@ class ESPNCricinfoPuppeteerScraper {
         }
 
         result.contentParagraphs = contentParagraphs;
+        result.headings = headings;
         result.content = contentParagraphs.join("\n\n");
 
         // ========== TAGS ==========
