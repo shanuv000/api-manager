@@ -81,33 +81,45 @@ interface RelatedArticle {
 
 ## 3. Content Formatting
 
-### ⚠️ IMPORTANT: Content is Markdown
+### ⚠️ IMPORTANT: Content Format Varies by Source
 
-The `content` field contains **Markdown-formatted text**. You must render it properly.
+The `content` field format depends on the news source. Use `react-markdown` for all sources - it handles both plain text and markdown correctly.
 
-### Content Features by Source
+### Content Features by Source (Verified Dec 23, 2025)
 
-| Source            | Bold          | Italics     | Links            | Headings | Lists       |
-| ----------------- | ------------- | ----------- | ---------------- | -------- | ----------- |
-| **ICC Cricket**   | ✅ `**text**` | ✅ `_text_` | ✅ `[text](url)` | ✅ `###` | ✅ `-` `1.` |
-| **ESPN Cricinfo** | ✅            | ✅          | ⚠️ Limited       | ✅       | ⚠️ Limited  |
-| **Cricbuzz**      | ❌ Plain text | ❌          | ❌               | ❌       | ❌          |
+| Source            | Bold          | Headings     | Links            | Content Quality                           |
+| ----------------- | ------------- | ------------ | ---------------- | ----------------------------------------- |
+| **ICC Cricket**   | ✅ `**text**` | ✅ `#`, `##` | ✅ `[text](url)` | **Rich markdown** (avg 36 bold, 10 links) |
+| **ESPN Cricinfo** | ❌ Plain text | ❌           | ❌               | **Plain text** from JSON-LD               |
+| **Cricbuzz**      | ❌ Plain text | ❌           | ❌               | **Plain text**                            |
 
-### Sample ICC Content (Markdown)
+> **Why ESPN/Cricbuzz are plain text:** These sources use JSON-LD structured data for content, which strips HTML formatting. ICC embeds rich HTML in their article pages.
+
+### Sample ICC Content (Markdown - Rich Formatting)
 
 ```markdown
 # ICC World Test Championship 2025-27: State of Play
 
 The [ICC World Test Championship](https://www.icc-cricket.com/...) cycle has entered a crucial period.
 
+Defending champions South Africa have made a leap following a [historic 2-0 series sweep](https://www.icc-cricket.com/news/...).
+
 ### 1. Australia
 
 **Played:** Six
-**Wins:** Six
+**Wins:** Six  
 **Points Percentage:** 100
 
 **Leading run-scorer this cycle:** Travis Head (603 runs)
 **Leading wicket-taker this cycle:** Mitchell Starc (37 wickets)
+```
+
+### Sample ESPN/Cricbuzz Content (Plain Text)
+
+```text
+Rob Key has pledged to investigate England players' conduct during their mid-Ashes break in Noosa and described drinking heavily as "completely unacceptable" for an international cricket team.
+
+England travelled to Noosa, the affluent resort town on the Queensland coast, after their eight-wicket defeat...
 ```
 
 ---
@@ -513,13 +525,28 @@ export const getServerSideProps: GetServerSideProps = async ({ params }) => {
 
 ## Summary
 
-| Field             | Type     | Note                               |
-| ----------------- | -------- | ---------------------------------- |
-| `content`         | Markdown | Use `react-markdown` to render     |
-| `imageUrl`        | URL      | High-res, use for detail page      |
-| `thumbnailUrl`    | URL      | Low-res, use for cards             |
-| `publishedTime`   | ISO 8601 | Format with `toLocaleDateString()` |
-| `tags`            | string[] | Array of tag strings               |
-| `relatedArticles` | JSON     | Array of `{title, link}` objects   |
+| Field             | Type     | Note                                                        |
+| ----------------- | -------- | ----------------------------------------------------------- |
+| `content`         | String   | Use `react-markdown` (works for both plain text & markdown) |
+| `imageUrl`        | URL      | High-res, use for detail page                               |
+| `thumbnailUrl`    | URL      | Low-res, use for cards                                      |
+| `publishedTime`   | ISO 8601 | Format with `toLocaleDateString()`                          |
+| `tags`            | string[] | Array of tag strings (may be empty)                         |
+| `relatedArticles` | JSON     | Array of `{title, link}` objects (may be empty)             |
+| `author`          | string   | ESPN has author, ICC/Cricbuzz may not                       |
+| `keywords`        | string[] | ESPN provides keywords                                      |
 
-**Key Takeaway:** Always use a markdown renderer for `content` to preserve formatting, especially for ICC Cricket articles which contain rich formatting.
+### Key Takeaways:
+
+1. **Always use `react-markdown`** - It renders both plain text and markdown correctly
+2. **ICC Cricket has rich content** - Bold stats, headings, clickable links
+3. **ESPN/Cricbuzz have plain text** - Quality content but no formatting
+4. **Handle missing fields** - `author`, `tags`, `relatedArticles` may be null/empty
+
+### Data Quality by Source:
+
+| Source            | Content               | Metadata | Author     | Tags                          |
+| ----------------- | --------------------- | -------- | ---------- | ----------------------------- |
+| **ICC Cricket**   | ✅ Rich (1300+ words) | ✅ Full  | ⚠️ Missing | ⚠️ Empty                      |
+| **ESPN Cricinfo** | ✅ Good (1000+ words) | ✅ Full  | ✅ Yes     | ⚠️ Empty (keywords available) |
+| **Cricbuzz**      | ✅ Good               | ✅ Full  | ⚠️ Missing | ⚠️ Empty                      |
