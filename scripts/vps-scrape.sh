@@ -1,14 +1,14 @@
 #!/bin/bash
 # VPS Cricket News Scraper
-# Runs both Cricbuzz and ESPN scrapers with Discord notifications
+# Runs Cricbuzz, ESPN, and ICC Cricket scrapers with Discord notifications
 #
 # RECOMMENDED CRON SETUP (with timeout and lock to prevent overlapping/stuck runs):
 # crontab -e
-# 30 0,6,12,18 * * * flock -n /tmp/cricket-scraper.lock timeout 600 /home/ubuntu/app/projects/api_pro/api-manager/scripts/vps-scrape.sh >> /var/log/cricket-scraper.log 2>&1
+# 30 0,6,12,18 * * * flock -n /tmp/cricket-scraper.lock timeout 900 /home/ubuntu/app/projects/api_pro/api-manager/scripts/vps-scrape.sh >> /var/log/cricket-scraper.log 2>&1
 #
 # This ensures:
 # - flock -n: Only one instance runs at a time (non-blocking)
-# - timeout 600: Kill if running longer than 10 minutes
+# - timeout 900: Kill if running longer than 15 minutes (increased for 3 scrapers)
 
 set -o pipefail
 
@@ -58,12 +58,16 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 # Track results
 CRICBUZZ_STATUS="❌ Failed"
 ESPN_STATUS="❌ Failed"
+ICC_STATUS="❌ Failed"
 CRICBUZZ_NEW=0
 CRICBUZZ_UPDATED=0
 CRICBUZZ_SKIPPED=0
 ESPN_NEW=0
 ESPN_UPDATED=0
 ESPN_SKIPPED=0
+ICC_NEW=0
+ICC_UPDATED=0
+ICC_SKIPPED=0
 DB_TOTAL=0
 ERRORS=""
 
@@ -75,8 +79,9 @@ timeout 30 node scripts/cleanup-stale.js 2>&1 || echo "⚠️ Cleanup skipped or
 echo "📰 Running Cricbuzz scraper..."
 if CRICBUZZ_OUTPUT=$(timeout $SCRAPER_TIMEOUT node scrapers/run-scraper.js 2>&1); then
   CRICBUZZ_STATUS="✅ Success"
-  CRICBUZZ_NEW=$(echo "$CRICBUZZ_OUTPUT" | grep -oP "New articles saved:\s*\K\d+" || echo "0")
-  CRICBUZZ_UPDATED=$(echo "$CRICBUZZ_OUTPUT" | grep -oP "Updated articles:\s*\K\d+" || echo "0")
+  # Note: Cricbuzz outputs "New articles:" not "New articles saved:"
+  CRICBUZZ_NEW=$(echo "$CRICBUZZ_OUTPUT" | grep -oP "New articles:\s*\K\d+" || echo "0")
+  CRICBUZZ_UPDATED=$(echo "$CRICBUZZ_OUTPUT" | grep -oP "Updated:\s*\K\d+" || echo "0")
   CRICBUZZ_SKIPPED=$(echo "$CRICBUZZ_OUTPUT" | grep -oP "Skipped.*:\s*\K\d+" | tail -1 || echo "0")
 else
   exit_code=$?
@@ -96,7 +101,6 @@ if ESPN_OUTPUT=$(timeout $SCRAPER_TIMEOUT node scrapers/run-espncricinfo-scraper
   ESPN_NEW=$(echo "$ESPN_OUTPUT" | grep -oP "New articles saved:\s*\K\d+" || echo "0")
   ESPN_UPDATED=$(echo "$ESPN_OUTPUT" | grep -oP "Updated articles:\s*\K\d+" || echo "0")
   ESPN_SKIPPED=$(echo "$ESPN_OUTPUT" | grep -oP "Skipped.*duplicate.*:\s*\K\d+" || echo "0")
-  DB_TOTAL=$(echo "$ESPN_OUTPUT" | grep -oP "Total articles:\s*\K\d+" || echo "?")
 else
   exit_code=$?
   if [ $exit_code -eq 124 ]; then
@@ -107,6 +111,25 @@ else
   fi
 fi
 echo "$ESPN_OUTPUT"
+
+# Run ICC Cricket scraper (Puppeteer - with timeout)
+echo "📰 Running ICC Cricket scraper..."
+if ICC_OUTPUT=$(timeout $SCRAPER_TIMEOUT node scrapers/run-icc-scraper.js 2>&1); then
+  ICC_STATUS="✅ Success"
+  ICC_NEW=$(echo "$ICC_OUTPUT" | grep -oP "New articles saved:\s*\K\d+" || echo "0")
+  ICC_UPDATED=$(echo "$ICC_OUTPUT" | grep -oP "Updated articles:\s*\K\d+" || echo "0")
+  ICC_SKIPPED=$(echo "$ICC_OUTPUT" | grep -oP "Skipped.*duplicate.*:\s*\K\d+" || echo "0")
+  DB_TOTAL=$(echo "$ICC_OUTPUT" | grep -oP "Total articles:\s*\K\d+" || echo "?")
+else
+  exit_code=$?
+  if [ $exit_code -eq 124 ]; then
+    ERRORS="${ERRORS}ICC timed out (>${SCRAPER_TIMEOUT}s)\\n"
+    echo "⚠️ ICC scraper timed out after ${SCRAPER_TIMEOUT}s"
+  else
+    ERRORS="${ERRORS}ICC failed (exit: $exit_code)\\n"
+  fi
+fi
+echo "$ICC_OUTPUT"
 
 # Prune old articles (with timeout)
 echo "🗑️ Pruning articles older than 90 days..."
@@ -120,15 +143,16 @@ echo "✅ Scraping completed at $(date) (${DURATION}s)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Send Discord notification
-TOTAL_NEW=$((CRICBUZZ_NEW + ESPN_NEW))
-TOTAL_UPDATED=$((CRICBUZZ_UPDATED + ESPN_UPDATED))
+TOTAL_NEW=$((CRICBUZZ_NEW + ESPN_NEW + ICC_NEW))
+TOTAL_UPDATED=$((CRICBUZZ_UPDATED + ESPN_UPDATED + ICC_UPDATED))
 
 if [ -z "$ERRORS" ]; then
-  DESC="📰 **New Articles:** ${TOTAL_NEW}\\n🔄 **Updated:** ${TOTAL_UPDATED}\\n\\n**Cricbuzz:** ${CRICBUZZ_NEW} new, ${CRICBUZZ_UPDATED} updated, ${CRICBUZZ_SKIPPED} skipped\\n**ESPN:** ${ESPN_NEW} new, ${ESPN_UPDATED} updated, ${ESPN_SKIPPED} skipped\\n\\n📊 **Total in DB:** ${DB_TOTAL}\\n⏱️ **Duration:** ${DURATION}s"
+  DESC="📰 **New Articles:** ${TOTAL_NEW}\\n🔄 **Updated:** ${TOTAL_UPDATED}\\n\\n**Cricbuzz:** ${CRICBUZZ_NEW} new, ${CRICBUZZ_UPDATED} updated\\n**ESPN:** ${ESPN_NEW} new, ${ESPN_UPDATED} updated\\n**ICC:** ${ICC_NEW} new, ${ICC_UPDATED} updated\\n\\n📊 **Total in DB:** ${DB_TOTAL}\\n⏱️ **Duration:** ${DURATION}s"
   send_discord "🏏 Cricket Scraper Success" "$DESC" "3066993"
 else
-  DESC="⚠️ **Errors occurred**\\n\\n**Cricbuzz:** ${CRICBUZZ_STATUS}\\n**ESPN:** ${ESPN_STATUS}\\n\\n${ERRORS}\\n⏱️ **Duration:** ${DURATION}s\\n📋 Check logs for details"
+  DESC="⚠️ **Errors occurred**\\n\\n**Cricbuzz:** ${CRICBUZZ_STATUS}\\n**ESPN:** ${ESPN_STATUS}\\n**ICC:** ${ICC_STATUS}\\n\\n${ERRORS}\\n⏱️ **Duration:** ${DURATION}s\\n📋 Check logs for details"
   send_discord "⚠️ Cricket Scraper Issues" "$DESC" "15158332"
 fi
 
 NOTIFICATION_SENT="true"
+
