@@ -399,7 +399,7 @@ class ICCNewsScraper {
 
         if (article) {
           const elements = article.querySelectorAll(
-            "h1, h2, h3, h4, p, ul, ol"
+            "h1, h2, h3, h4, p, ul, ol, table"
           );
           const skipPatterns = [
             /follow us/i,
@@ -459,6 +459,36 @@ class ICCNewsScraper {
                 if (itemText) listItems.push(idx + 1 + ". " + itemText);
               });
               text = listItems.join("\n");
+            } else if (el.tagName === "TABLE") {
+              // Convert HTML tables to markdown tables
+              const rows = el.querySelectorAll("tr");
+              if (rows.length === 0) return;
+
+              const tableRows = [];
+              rows.forEach((row, rowIdx) => {
+                const cells = row.querySelectorAll("td, th");
+                const cellTexts = [];
+                cells.forEach((cell) => {
+                  // Clean cell text (remove newlines, trim)
+                  const cellText = cell.textContent.trim().replace(/\n/g, " ");
+                  cellTexts.push(cellText);
+                });
+
+                if (cellTexts.length > 0) {
+                  tableRows.push("| " + cellTexts.join(" | ") + " |");
+
+                  // Add header separator after first row
+                  if (rowIdx === 0) {
+                    tableRows.push(
+                      "| " + cellTexts.map(() => "---").join(" | ") + " |"
+                    );
+                  }
+                }
+              });
+
+              if (tableRows.length > 1) {
+                text = "\n" + tableRows.join("\n") + "\n";
+              }
             }
 
             text = text.trim();
