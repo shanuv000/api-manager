@@ -1,8 +1,8 @@
 # Frontend Blog/News Data Handling Guide
 
-**Report Date:** December 23, 2025  
+**Report Date:** December 24, 2025  
 **API Version:** v1  
-**Last Updated:** December 23, 2025
+**Last Updated:** December 24, 2025
 
 ---
 
@@ -22,14 +22,14 @@ GET /api/cricket/news/:id
 
 ### Query Parameters
 
-| Parameter | Type   | Description                                        | Example                            |
-| --------- | ------ | -------------------------------------------------- | ---------------------------------- |
-| `limit`   | number | Max articles to return (default: 10, max: 50)      | `?limit=10`                        |
-| `offset`  | number | Skip articles for pagination                       | `?offset=20`                       |
-| `source`  | string | Filter by source: `cricbuzz`, `espn`, `icc`, `all` | `?source=icc`                      |
-| `search`  | string | Search in title/description/content                | `?search=ashes`                    |
-| `tag`     | string | Filter by tag                                      | `?tag=ICC World Test Championship` |
-| `sort`    | string | Sort order: `newest` (default) or `oldest`         | `?sort=oldest`                     |
+| Parameter | Type   | Description                                               | Example                            |
+| --------- | ------ | --------------------------------------------------------- | ---------------------------------- |
+| `limit`   | number | Max articles to return (default: 10, max: 50)             | `?limit=10`                        |
+| `offset`  | number | Skip articles for pagination                              | `?offset=20`                       |
+| `source`  | string | Filter by source: `cricbuzz`, `espn`, `icc`, `bbc`, `all` | `?source=bbc`                      |
+| `search`  | string | Search in title/description/content                       | `?search=ashes`                    |
+| `tag`     | string | Filter by tag                                             | `?tag=ICC World Test Championship` |
+| `sort`    | string | Sort order: `newest` (default) or `oldest`                | `?sort=oldest`                     |
 
 ---
 
@@ -56,7 +56,7 @@ interface NewsArticle {
   // Metadata
   sport: string; // Always "cricket"
   category: string | null; // e.g., "ICC World Test Championship", "News"
-  sourceName: string; // "Cricbuzz" | "ESPN Cricinfo" | "ICC Cricket"
+  sourceName: string; // "Cricbuzz" | "ESPN Cricinfo" | "ICC Cricket" | "BBC Sport"
   sourceUrl: string; // Original article URL
 
   // SEO
@@ -67,7 +67,7 @@ interface NewsArticle {
   // Related Content
   relatedArticles: RelatedArticle[] | null;
 
-  // Embedded Tweets (ICC Cricket only)
+  // Embedded Tweets (ICC Cricket & BBC Sport)
   embeddedTweets: string[]; // Array of Twitter/X tweet IDs
 
   // Timestamps
@@ -95,11 +95,12 @@ The `content` field format depends on the news source. Use `react-markdown` for 
 
 | Source            | Bold          | Headings     | Links            | Tables      | Tweets       |
 | ----------------- | ------------- | ------------ | ---------------- | ----------- | ------------ |
+| **BBC Sport**     | ✅ `**text**` | ✅ `#`, `##` | ✅ `[text](url)` | ❌          | ✅ IDs array |
 | **ICC Cricket**   | ✅ `**text**` | ✅ `#`, `##` | ✅ `[text](url)` | ✅ Markdown | ✅ IDs array |
 | **ESPN Cricinfo** | ❌ Plain text | ❌           | ❌               | ❌          | ❌           |
 | **Cricbuzz**      | ❌ Plain text | ❌           | ❌               | ❌          | ❌           |
 
-> **Why ESPN/Cricbuzz are plain text:** These sources use JSON-LD structured data for content, which strips HTML formatting. ICC embeds rich HTML in their article pages.
+> **Why ESPN/Cricbuzz are plain text:** These sources use JSON-LD structured data for content, which strips HTML formatting. ICC and BBC embed rich HTML in their article pages.
 
 ### Sample ICC Content (Markdown - Rich Formatting)
 
@@ -126,6 +127,29 @@ Defending champions South Africa have made a leap following a [historic 2-0 seri
 | Trent Boult    | West Indies | 2013 | 20            |
 | Richard Hadlee | West Indies | 1979 | 19            |
 ```
+
+### Sample BBC Sport Content (Markdown - Rich Formatting)
+
+```markdown
+England unable to hold out as Australia retain the Ashes
+
+- Published: 21 December 2025
+- 1109 Comments
+
+**Australia have **[beaten England by 82 runs](https://www.bbc.com/sport/cricket/articles/c4g4yznemkxo)** in the third Test to go 3-0 up and secure the Ashes at the earliest opportunity.**
+
+Here are our player ratings for the Adelaide contest:
+
+## 'It's frustrating' - Smith out for 60 after poor shot
+
+Steve Smith's dismissal was a turning point in the match. The former captain was looking in control before playing a loose drive that found the edge.
+
+> "I thought I was in good touch, but that shot selection let me down," Smith admitted post-match.
+
+**Related Topics:** [England Men's Cricket Team](https://www.bbc.com/...), [The Ashes](https://www.bbc.com/...), [Australia](https://www.bbc.com/...)
+```
+
+> **BBC Sport Content Quality:** BBC articles are typically longer (1,000-1,800 words) with rich markdown formatting, embedded links to related BBC content, and extracted topic tags.
 
 ### Sample ESPN/Cricbuzz Content (Plain Text)
 
@@ -293,6 +317,7 @@ function ArticleCard({ article }) {
 module.exports = {
   images: {
     domains: [
+      "ichef.bbci.co.uk", // BBC Sport
       "images.icc-cricket.com",
       "img1.hscicdn.com", // ESPN Cricinfo
       "static.cricbuzz.com",
@@ -396,6 +421,7 @@ function ArticlePage({ article }) {
 
 | Source        | `sourceName` Value |
 | ------------- | ------------------ |
+| BBC Sport     | `"BBC Sport"`      |
 | Cricbuzz      | `"Cricbuzz"`       |
 | ESPN Cricinfo | `"ESPN Cricinfo"`  |
 | ICC Cricket   | `"ICC Cricket"`    |
@@ -404,7 +430,13 @@ function ArticlePage({ article }) {
 
 ```jsx
 function SourceFilter({ selected, onChange }) {
-  const sources = ["All", "Cricbuzz", "ESPN Cricinfo", "ICC Cricket"];
+  const sources = [
+    "All",
+    "BBC Sport",
+    "Cricbuzz",
+    "ESPN Cricinfo",
+    "ICC Cricket",
+  ];
 
   return (
     <div className="flex gap-2">
@@ -449,7 +481,7 @@ function ArticleCard({ article }) {
 
 ## 10. Rendering Embedded Tweets (ICC Cricket)
 
-ICC Cricket articles may contain embedded tweets. The `embeddedTweets` field contains an array of tweet IDs.
+ICC Cricket and BBC Sport articles may contain embedded tweets. The `embeddedTweets` field contains an array of tweet IDs.
 
 ### Install Package
 
@@ -516,7 +548,7 @@ function TweetEmbed({ tweetId }) {
 }
 ```
 
-> **Note:** Only ICC Cricket articles have embedded tweets. ESPN and Cricbuzz articles will have an empty array.
+> **Note:** Only ICC Cricket and BBC Sport articles have embedded tweets. ESPN and Cricbuzz articles will have an empty array.
 
 ---
 
@@ -631,8 +663,9 @@ export const getServerSideProps: GetServerSideProps = async ({ params }) => {
 
 ### Data Quality by Source:
 
-| Source            | Content               | Metadata | Author     | Tags                          |
-| ----------------- | --------------------- | -------- | ---------- | ----------------------------- |
-| **ICC Cricket**   | ✅ Rich (1300+ words) | ✅ Full  | ⚠️ Missing | ⚠️ Empty                      |
-| **ESPN Cricinfo** | ✅ Good (1000+ words) | ✅ Full  | ✅ Yes     | ⚠️ Empty (keywords available) |
-| **Cricbuzz**      | ✅ Good               | ✅ Full  | ⚠️ Missing | ⚠️ Empty                      |
+| Source            | Content                   | Metadata | Author     | Tags                          | Tweets       |
+| ----------------- | ------------------------- | -------- | ---------- | ----------------------------- | ------------ |
+| **BBC Sport**     | ✅ Rich (1000-1800 words) | ✅ Full  | ✅ Yes     | ✅ 3-5 topic tags             | ✅ Extracted |
+| **ICC Cricket**   | ✅ Rich (1300+ words)     | ✅ Full  | ⚠️ Missing | ⚠️ Empty                      | ✅ Extracted |
+| **ESPN Cricinfo** | ✅ Good (1000+ words)     | ✅ Full  | ✅ Yes     | ⚠️ Empty (keywords available) | ❌           |
+| **Cricbuzz**      | ✅ Good                   | ✅ Full  | ⚠️ Missing | ⚠️ Empty                      | ❌           |
