@@ -495,6 +495,9 @@ class BBCCricketScraper {
           /read more$/i,
           /back to top/i,
           /share this/i,
+          /^Published\d/i, // "Published21 December 2025" metadata
+          /^\d+\s*Comments/i, // "886 Comments" metadata
+          /^\d+\s*(hours?|days?|mins?)\s*ago$/i, // Relative time metadata
         ];
 
         if (article) {
@@ -514,9 +517,17 @@ class BBCCricketScraper {
                   node.nodeName === "STRONG" ||
                   node.nodeName === "B"
                 ) {
-                  text += "**" + node.textContent + "**";
+                  // Trim content inside bold markers to prevent malformed markdown
+                  const boldText = node.textContent.trim();
+                  if (boldText) {
+                    text += "**" + boldText + "**";
+                  }
                 } else if (node.nodeName === "EM" || node.nodeName === "I") {
-                  text += "_" + node.textContent + "_";
+                  // Trim content inside italic markers
+                  const italicText = node.textContent.trim();
+                  if (italicText) {
+                    text += "_" + italicText + "_";
+                  }
                 } else if (node.nodeName === "A") {
                   const href = node.getAttribute("href");
                   if (href && !href.startsWith("#")) {
@@ -571,10 +582,18 @@ class BBCCricketScraper {
                 }
                 // Skip if already seen or empty
                 const itemKey = itemText.substring(0, 60).toLowerCase();
+
+                // Skip metadata items (Published date, Comments count)
+                const isMetadata =
+                  /^Published\d/i.test(itemText) ||
+                  /^\d+\s*Comments$/i.test(itemText) ||
+                  /^\d+\s*(hours?|days?|mins?)\s*ago$/i.test(itemText);
+
                 if (
                   itemText &&
                   itemText.length > 5 &&
-                  !seenItems.has(itemKey)
+                  !seenItems.has(itemKey) &&
+                  !isMetadata
                 ) {
                   seenItems.add(itemKey);
                   listItems.push("- " + itemText);
@@ -638,6 +657,12 @@ class BBCCricketScraper {
             // Avoid duplicate content
             if (contentParts.some((p) => p.includes(text) || text.includes(p)))
               return;
+
+            // Clean up metadata prefixes that might slip through
+            text = text
+              .replace(/^Published\d{1,2}\s*\w+\s*\d{4}\s*/i, "") // "Published21 December 2025"
+              .replace(/^\d+\s*Comments\s*/i, "") // "886 Comments"
+              .trim();
 
             contentParts.push(text);
           });
