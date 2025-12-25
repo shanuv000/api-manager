@@ -147,7 +147,10 @@ function generateSourceId(article) {
  */
 function extractTagsFromTopics(topics) {
   if (!topics || !Array.isArray(topics)) return [];
-  return topics.map((t) => t.name || t).filter((t) => t && t.length > 0);
+  return topics
+    .map((t) => t.name || t)
+    .filter((t) => t && t.length > 0)
+    .slice(0, 8); // Limit to 8 tags max
 }
 
 /**

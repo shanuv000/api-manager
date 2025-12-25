@@ -1,0 +1,103 @@
+# 'Test career over for now?' - Ashes player ratings
+
+**Author:** Stephan Shemilt
+**Published:** 2025-12-21T04:03:45.599Z
+**Comments:** 1109
+**Source:** [BBC Sport](https://www.bbc.com/sport/cricket/articles/cp34p04dzd3o)
+
+> Chief cricket reporter Stephan Shemilt marks the performances of the Australia and England teams after the third Test in Adelaide.
+
+![Article Image](https://ichef.bbci.co.uk/ace/branded_sport/1200/cpsprodpb/b1e8/live/46ac1410-dd50-11f0-a8dc-93c15fe68710.jpg)
+
+---
+
+England unable to hold out as Australia retain the Ashes
+
+**Australia have**[beaten England by 82 runs](https://www.bbc.com/sport/cricket/articles/c4g4yznemkxo)**in the third Test to go 3-0 up and secure the Ashes at the earliest opportunity.**
+
+Here are our player ratings for the Adelaide contest:
+
+'It's frustrating' - Smith out for 60 after poor shot
+
+**Ben Duckett – 2 –**Arrived with a reputation as one of the best openers in the world, only to suffer a collapse in form and presence. Failures of others were predictable, Duckett's was not and is a huge concern.
+
+**Zak Crawley – 6 –**Showed admirable fight and adaptability in England's second innings, but probably needs a hundred to be immune from a post-series clearout.
+
+**Ollie Pope – 2 –**Test career over for now? Averages 17.6 in Ashes Tests. Since 1900, only England's Dennis Amiss has had as many as Pope's 16 innings in the top six in Ashes Tests and averaged less.
+
+**Joe Root – 4 –** Two starts, without making a telling contribution. Twice dismissed by Cummins, for whom Root is a bunny. The Yorkshireman must be pleased the Australia captain missed the first two Tests of the series.
+
+**Harry Brook – 5 –** Largely stayed true to his promise to "rein it in", but the second-innings dismissal reverse-sweeping Lyon was ugly. Would be a huge waste if Australia does not see his best on this tour.
+
+**Ben Stokes – 6 –**Battled bravely in England's first innings, even if his resistance never seemed likely to turn into a trademark miracle. Did not bowl when England needed him on day three.
+
+Archer takes five wickets as Australia bowled out for 371
+
+**Jamie Smith – 6 –**Finally got into the series with a counter-attacking 60 in the second innings, now has to kick on in Melbourne and Sydney.
+
+**Will Jacks – 6 –**A part-time spinner unfairly asked to do the job of a veteran. Resisted admirably with the bat, making himself harder to leave out.
+
+**Brydon Carse – 5 –** Continuing a bizarre tour of picking up wickets despite not bowling well. England have a decision to make over the Durham man in Melbourne.
+
+**Jofra Archer – 8 –** Emerging as England's player of the tour. A maiden Test half-century and first five-wicket haul in six years. Demonstrating it was more than worth the wait for him to return to full fitness.
+
+**Josh Tongue – 6 –**Encouraging return after being overlooked for the first two Tests. Was the unfortunate bowler for the Khawaja drop and Carey Snicko shocker. Should get another go in Melbourne.
+
+Head's 'wonderful' 170-run innings puts Australia firmly in control
+
+**Jake Weatherald - 2 -**Quiet game after a promising start to his Test career. Would be a potential Australian weakness for England to exploit had the Ashes not already been lost.
+
+**Travis Head – 8 –**Any flicker of hope England might have had was snuffed out by a century from South Australia's favourite son in the second innings. Head's promotion to open the batting is a defining moment in the outcome of the series.
+
+**Marnus Labuschagne – 5 –** No real contribution with the bat, but gets an extra mark apiece for two sensational catches at second slip. Still a nagging doubt he has a big score in him before the end of the series.
+
+**Usman Khawaja – 7 –**Took his chance after Steve Smith's illness, albeit via a life from Harry Brook. Should keep his place for Sydney.
+
+**Cameron Green – 4 –** Could not produce a performance to match his huge Indian Premier League pricetag and batting two places too high. Took the important wicket of Brook in the first innings.
+
+**Alex Carey – 8 –** Challenging Mitchell Starc as player of the series. Loses a point because he should have been given out in the first innings.
+
+**Josh Inglis – 4 –**An important 32 when England sensed momentum on the first day, but hasn't fully taken his chance. Could be squeezed out when Smith returns.
+
+**Pat Cummins – 7 –** How has this man not bowled since July? Immediately into the groove with relentless accuracy. Once again an Ashes-winning captain.
+
+**Mitchell Starc – 6 –**Not touching the heights of the first two Tests, though bowled with high pace in the first innings and took the key wickets of Jamie Smith and Will Jacks on the final day.
+
+**Nathan Lyon – 6 –** Broke England's resistance with a triple-wicket burst on the fourth evening, only to hobble off with a hamstring injury on the final day. [Could be out for the series.](https://www.bbc.com/sport/cricket/articles/ckgz4321ww7o)
+
+**Scott Boland – 6 –**Unsung hero of Australia's attack, keeping up the pressure when the superstars rest. Will be in the conversation to rest in Melbourne, the venue where he destroyed England four years ago.
+
+'Terrific' Carey makes first Test century against England
+
+## Related topics
+
+- England Men's Cricket Team
+- Australia
+- The Ashes
+- Cricket
+
+## More on this story
+
+- 'Bazball as we knew it is in the skip - but McCullum has England future'Published2 days ago
+- Booze, beach, beaten – how England lost the AshesPublished2 days ago
+- The 10 moments that decided the AshesPublished2 days ago
+- Stokes wants to remain captain despite Ashes defeatPublished2 days ago
+
+---
+
+## Related Topics
+
+- [England Men's Cricket Team](https://www.bbc.com/sport/cricket/teams/england)
+- [Australia](https://www.bbc.com/sport/cricket/teams/australia)
+- [The Ashes](https://www.bbc.com/sport/cricket/ashes)
+- [Cricket](https://www.bbc.com/sport/cricket)
+
+## More on this Story
+
+- ['Bazball as we knew it is in the skip - but McCullum has England future'](https://www.bbc.com/sport/cricket/articles/c0edyzwv5pwo)
+- [Booze, beach, beaten – how England lost the Ashes](https://www.bbc.com/sport/cricket/articles/c79xynw7e39o)
+- [The 10 moments that decided the Ashes](https://www.bbc.com/sport/cricket/articles/cx25jx75lpxo)
+- [Stokes wants to remain captain despite Ashes defeat](https://www.bbc.com/sport/cricket/articles/cpwkekjy8wgo)
+
+---
+*Scraped at: 2025-12-24T03:09:45.134Z*

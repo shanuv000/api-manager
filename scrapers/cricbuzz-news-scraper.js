@@ -720,7 +720,7 @@ class CricbuzzNewsScraper {
           mainImage,
           content: fullContent,
           contentParagraphs,
-          tags: [...new Set(tags)],
+          tags: [...new Set(tags)].slice(0, 8),
           relatedArticles: relatedArticles.slice(0, 5),
           scrapedAt: new Date().toISOString(),
         };

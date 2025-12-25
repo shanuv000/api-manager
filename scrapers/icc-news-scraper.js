@@ -607,7 +607,7 @@ class ICCNewsScraper {
           content: fullContent,
           contentParagraphs: contentParts,
           wordCount: fullContent.split(/\s+/).filter((w) => w).length,
-          tags: [...new Set(tags)],
+          tags: [...new Set(tags)].slice(0, 8),
           relatedArticles: relatedArticles.slice(0, 5),
           embeddedTweets: embeddedTweets.slice(0, 10), // Max 10 tweets per article
           scrapedAt: new Date().toISOString(),

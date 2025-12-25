@@ -835,7 +835,10 @@ class BBCCricketScraper {
           content: fullContent,
           contentParagraphs: contentParts,
           wordCount: fullContent.split(/\s+/).filter((w) => w).length,
-          topics: [...new Map(topics.map((t) => [t.name, t])).values()],
+          topics: [...new Map(topics.map((t) => [t.name, t])).values()].slice(
+            0,
+            8
+          ),
           relatedArticles: relatedArticles.slice(0, 5),
           commentsCount,
           embeddedMedia: embeddedMedia.slice(0, 10),

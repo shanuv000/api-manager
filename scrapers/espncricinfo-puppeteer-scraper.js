@@ -526,7 +526,7 @@ class ESPNCricinfoPuppeteerScraper {
             const tag = el.content;
             if (tag && !tags.includes(tag)) tags.push(tag);
           });
-        result.tags = tags;
+        result.tags = tags.slice(0, 8); // Limit to 8 tags max
 
         // ========== KEYWORDS ==========
         const kw =
