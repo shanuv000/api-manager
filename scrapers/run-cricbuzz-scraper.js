@@ -1,32 +1,27 @@
-// Run ESPN Cricinfo scraper directly and save to database
-// Used by GitHub Actions workflow
-// Only saves articles that have actual content (skips empty/minimal content)
+// Run Cricbuzz Cricket scraper and save to database
+// Used by GitHub Actions workflow or manual execution
+// Only saves articles that have actual content
 
-const ESPNCricinfoScraper = require("./espncricinfo-puppeteer-scraper");
+const CricbuzzNewsScraper = require("./cricbuzz-news-scraper");
 const { PrismaClient } = require("@prisma/client");
 const { PrismaPg } = require("@prisma/adapter-pg");
 const { Pool } = require("pg");
 const { parsePublishTime } = require("../utils/timeParser");
 const { generateTags } = require("../utils/perplexityTagger");
 
-// Use DATABASE_URL (pooler) for all environments
-// DIRECT_URL uses IPv6 which may not work on all VPS environments
 const connectionString = process.env.DATABASE_URL;
 
-// Minimum content requirements to save an article
-const MIN_CONTENT_LENGTH = 100; // Minimum characters for content
-const MIN_WORD_COUNT = 20; // Minimum words for content
+// Minimum content requirements
+const MIN_CONTENT_LENGTH = 100;
+const MIN_WORD_COUNT = 20;
 
 /**
- * Validate if article has sufficient content to be saved
- * @param {Object} article - Article object with details
- * @returns {Object} - { valid: boolean, reason: string }
+ * Validate if article has sufficient content
  */
 function validateContent(article) {
   const content = article.details?.content || "";
-  const wordCount = article.details?.wordCount || 0;
+  const wordCount = content.split(/\s+/).filter((w) => w).length || 0;
 
-  // Check if content exists and is substantial
   if (!content || content.trim().length < MIN_CONTENT_LENGTH) {
     return {
       valid: false,
@@ -41,15 +36,12 @@ function validateContent(article) {
     };
   }
 
-  // Check for boilerplate/cookie consent content
   const boilerplatePatterns = [
     "cookie",
     "privacy policy",
     "terms of use",
-    "accept cookies",
     "consent",
     "gdpr",
-    "personal information",
   ];
 
   const lowerContent = content.toLowerCase();
@@ -66,7 +58,7 @@ function validateContent(article) {
 }
 
 /**
- * Generate a unique SEO meta description
+ * Generate SEO meta description
  */
 function generateMetaDescription(title, content, description) {
   if (content && content.length > 160) {
@@ -85,82 +77,66 @@ function generateMetaDescription(title, content, description) {
 }
 
 /**
- * Extract publishedTime from ESPN's concatenated title format
- * Example: "TitleDescription14-Dec-2025 • 22 mins ago•Author"
- * Returns ISO date string or null
+ * Parse Cricbuzz date formats
+ * Handles: "Sun, Dec 14, 2025 • 9:09 AM", relative times, etc.
  */
-function extractPublishedTimeFromTitle(rawTitle) {
-  if (!rawTitle) return null;
+function parseCricbuzzPublishTime(timeString) {
+  if (!timeString) return null;
 
-  // Try to extract "14-Dec-2025" format
-  const dateMatch = rawTitle.match(/(\d{1,2}-\w{3}-\d{4})/);
-  if (dateMatch) {
+  const trimmed = timeString.trim();
+
+  // Try standard parsePublishTime first
+  const standardParse = parsePublishTime(trimmed);
+  if (standardParse) return standardParse;
+
+  // Handle Cricbuzz format: "Sun, Dec 14, 2025 • 9:09 AM"
+  const cricbuzzMatch = trimmed.match(
+    /(\w{3}),\s+(\w{3})\s+(\d{1,2}),\s+(\d{4})/
+  );
+  if (cricbuzzMatch) {
     try {
-      const dateObj = new Date(dateMatch[1]);
+      const dateStr = `${cricbuzzMatch[2]} ${cricbuzzMatch[3]}, ${cricbuzzMatch[4]}`;
+      const dateObj = new Date(dateStr);
       if (!isNaN(dateObj.getTime())) {
         return dateObj.toISOString();
       }
     } catch (e) {}
   }
 
-  // Try to extract relative time like "22 mins ago" or "5 hrs ago"
-  const relativeTimeMatch = rawTitle.match(
-    /(\d+)\s*(mins?|hrs?|hours?|minutes?)\s*ago/i
-  );
-  if (relativeTimeMatch) {
-    const value = parseInt(relativeTimeMatch[1], 10);
-    const unit = relativeTimeMatch[2].toLowerCase();
+  // Handle relative format: "5h ago", "2d ago"
+  const relMatch = trimmed.match(/^(\d+)\s*(h|d|hr|hrs|day|days)\s*ago?$/i);
+  if (relMatch) {
+    const value = parseInt(relMatch[1], 10);
+    const unit = relMatch[2].toLowerCase();
     const now = new Date();
 
-    if (unit.startsWith("hr") || unit.startsWith("hour")) {
+    if (unit.startsWith("h")) {
       now.setHours(now.getHours() - value);
-    } else {
-      now.setMinutes(now.getMinutes() - value);
+    } else if (unit.startsWith("d")) {
+      now.setDate(now.getDate() - value);
     }
     return now.toISOString();
   }
+
+  // Final fallback
+  try {
+    const dateObj = new Date(trimmed);
+    if (!isNaN(dateObj.getTime())) {
+      return dateObj.toISOString();
+    }
+  } catch (e) {}
 
   return null;
 }
 
 /**
- * Clean and normalize title (remove extra metadata from ESPN format)
- */
-function cleanTitle(rawTitle) {
-  // ESPN Cricinfo concatenates title with description, time, and author
-  // Example: "TitleDescriptionDate • Time•Author"
-  // We need to extract just the title
-
-  // Split by common patterns and take first meaningful part
-  const patterns = [
-    /\d{1,2}-\w{3}-\d{4}/, // Date pattern: "14-Dec-2025"
-    /\d+ hrs? ago/i, // "12 hrs ago"
-    /\d+ mins? ago/i, // "35 mins ago"
-    /•/, // Bullet separator
-  ];
-
-  let cleanedTitle = rawTitle;
-
-  for (const pattern of patterns) {
-    const match = cleanedTitle.match(pattern);
-    if (match && match.index) {
-      cleanedTitle = cleanedTitle.substring(0, match.index).trim();
-      break;
-    }
-  }
-
-  return cleanedTitle || rawTitle;
-}
-
-/**
- * Generate ESPN Cricinfo specific sourceId
+ * Generate Cricbuzz specific sourceId
  */
 function generateSourceId(article) {
-  // Use the ID from URL slug, prefixed with source
-  return `espncricinfo-${article.id}`;
+  return `cricbuzz-${article.id}`;
 }
 
-async function runESPNCricinfoScraper() {
+async function runCricbuzzScraper() {
   const pool = new Pool({
     connectionString: connectionString,
     max: 3,
@@ -172,16 +148,27 @@ async function runESPNCricinfoScraper() {
     adapter: new PrismaPg(pool),
   });
 
-  const scraper = new ESPNCricinfoScraper();
+  const scraper = new CricbuzzNewsScraper({
+    VERBOSE_LOGGING: true,
+  });
+
   const useAutoTagging = !!process.env.PERPLEXITY_API_KEY;
 
   try {
-    console.log("🏏 ESPN Cricinfo News Scraper - Database Integration");
+    console.log("🌐 Cricbuzz News Scraper - Database Integration");
     console.log("━".repeat(60));
+
+    if (useAutoTagging) {
+      console.log("🏷️  Perplexity AI tagging: ENABLED");
+    } else {
+      console.log(
+        "⚠️  Perplexity AI tagging: DISABLED (set PERPLEXITY_API_KEY to enable)"
+      );
+    }
 
     // STEP 1: Fetch articles with details
     console.log("\n📡 Fetching news with detailed content...");
-    const limit = 15; // Fetch top 15 articles
+    const limit = 15;
     const articlesWithDetails = await scraper.fetchLatestNewsWithDetails(limit);
     console.log(
       `   Fetched ${articlesWithDetails.length} articles with details\n`
@@ -192,7 +179,7 @@ async function runESPNCricinfoScraper() {
     const existingArticles = await prisma.newsArticle.findMany({
       where: {
         sourceId: { in: sourceIds },
-        sourceName: "ESPN Cricinfo", // Optimize: only scan ESPN articles
+        sourceName: "Cricbuzz",
       },
       select: { sourceId: true, title: true, tags: true },
     });
@@ -206,7 +193,7 @@ async function runESPNCricinfoScraper() {
     }
     console.log(`   Found ${existingMap.size} existing articles in DB\n`);
 
-    // STEP 3: Process articles with content validation
+    // STEP 3: Process articles
     let savedCount = 0;
     let skippedNoContent = 0;
     let skippedDuplicate = 0;
@@ -218,16 +205,13 @@ async function runESPNCricinfoScraper() {
     for (let i = 0; i < articlesWithDetails.length; i++) {
       const article = articlesWithDetails[i];
       const sourceId = generateSourceId(article);
-      const cleanedTitle = cleanTitle(article.title);
+      const title = article.details?.title || article.title;
 
       console.log(
-        `${i + 1}/${articlesWithDetails.length} - ${cleanedTitle.substring(
-          0,
-          50
-        )}...`
+        `${i + 1}/${articlesWithDetails.length} - ${title.substring(0, 50)}...`
       );
 
-      // VALIDATION: Check if content is available
+      // Validate content
       const validation = validateContent(article);
       if (!validation.valid) {
         console.log(`   ⏭️  Skipped: ${validation.reason}`);
@@ -239,7 +223,7 @@ async function runESPNCricinfoScraper() {
         const existing = existingMap.get(sourceId);
 
         // Check for unchanged duplicates
-        if (existing && existing.title === cleanedTitle) {
+        if (existing && existing.title === title) {
           console.log(`   ⏭️  Skipped: Already exists (unchanged)`);
           skippedDuplicate++;
           continue;
@@ -248,11 +232,16 @@ async function runESPNCricinfoScraper() {
         // Prepare data
         const details = article.details || {};
         const content = details.content || "";
-        const description = details.description || article.description || "";
+        const description = details.seoDescription || article.description || "";
         const metaDescription = generateMetaDescription(
-          cleanedTitle,
+          title,
           content,
           description
+        );
+
+        // Parse published time
+        const publishedTime = parseCricbuzzPublishTime(
+          details.publishedTime || article.publishedTime
         );
 
         // Generate or preserve tags - ALWAYS use Perplexity AI for new articles
@@ -262,31 +251,34 @@ async function runESPNCricinfoScraper() {
           tags = existing.tags;
         } else if (useAutoTagging) {
           // Always generate with AI for consistent SEO tags
-          tags = await generateTags(cleanedTitle, content || description);
+          tags = await generateTags(title, content || description);
           if (tags.length > 0) {
             console.log(`   🏷️  AI tags: ${tags.join(", ")}`);
           }
         }
 
+        // Prepare related articles JSON
+        const relatedArticles =
+          details.relatedArticles && details.relatedArticles.length > 0
+            ? details.relatedArticles
+            : null;
+
         if (existing) {
-          // UPDATE existing article (title changed)
+          // UPDATE existing article
           await prisma.newsArticle.update({
             where: { sourceId: sourceId },
             data: {
-              title: cleanedTitle,
+              title: title,
               description: description.substring(0, 500),
               content: content,
               imageUrl: details.mainImage || article.imageUrl,
               thumbnailUrl: article.thumbnailUrl || details.mainImage,
-              publishedTime:
-                parsePublishTime(
-                  details.publishedTime || article.publishedTime
-                ) || extractPublishedTimeFromTitle(article.title),
+              publishedTime: publishedTime,
               ...(tags.length > 0 &&
               (!existing.tags || existing.tags.length === 0)
                 ? { tags }
                 : {}),
-              relatedArticles: details.relatedArticles || null,
+              relatedArticles: relatedArticles,
               updatedAt: new Date(),
             },
           });
@@ -297,24 +289,21 @@ async function runESPNCricinfoScraper() {
           await prisma.newsArticle.create({
             data: {
               sourceId: sourceId,
-              slug: article.id, // Use ESPN slug as our slug
+              slug: article.id,
               sport: "cricket",
               category: "news",
-              sourceName: "ESPN Cricinfo",
-              title: cleanedTitle,
+              sourceName: "Cricbuzz",
+              title: title,
               description: description.substring(0, 500),
               content: content,
               imageUrl: details.mainImage || article.imageUrl,
               thumbnailUrl: article.thumbnailUrl || details.mainImage,
-              sourceUrl: article.url,
-              publishedTime:
-                parsePublishTime(
-                  details.publishedTime || article.publishedTime
-                ) || extractPublishedTimeFromTitle(article.title),
-              metaTitle: cleanedTitle,
+              sourceUrl: article.link,
+              publishedTime: publishedTime,
+              metaTitle: title,
               metaDesc: metaDescription,
               tags: tags,
-              relatedArticles: details.relatedArticles || null,
+              relatedArticles: relatedArticles,
               scrapedAt: new Date(),
             },
           });
@@ -332,7 +321,7 @@ async function runESPNCricinfoScraper() {
 
     // STEP 4: Summary
     console.log("\n" + "━".repeat(60));
-    console.log("📊 ESPN CRICINFO SCRAPER SUMMARY:");
+    console.log("📊 CRICBUZZ SCRAPER SUMMARY:");
     console.log("━".repeat(60));
     console.log(`   ✅ New articles saved:      ${savedCount}`);
     console.log(`   🔄 Updated articles:        ${updatedCount}`);
@@ -340,9 +329,15 @@ async function runESPNCricinfoScraper() {
     console.log(`   ⏭️  Skipped (duplicate):    ${skippedDuplicate}`);
     console.log(`   ❌ Errors:                  ${errorCount}`);
 
-    // Verify total
+    // Verify totals by source
     const cricbuzzCount = await prisma.newsArticle.count({
       where: { sourceName: "Cricbuzz" },
+    });
+    const iccCount = await prisma.newsArticle.count({
+      where: { sourceName: "ICC Cricket" },
+    });
+    const bbcCount = await prisma.newsArticle.count({
+      where: { sourceName: "BBC Sport" },
     });
     const espnCount = await prisma.newsArticle.count({
       where: { sourceName: "ESPN Cricinfo" },
@@ -352,17 +347,19 @@ async function runESPNCricinfoScraper() {
     console.log("━".repeat(60));
     console.log("📚 DATABASE TOTALS:");
     console.log(`   Cricbuzz articles:      ${cricbuzzCount}`);
+    console.log(`   ICC Cricket articles:   ${iccCount}`);
+    console.log(`   BBC Sport articles:     ${bbcCount}`);
     console.log(`   ESPN Cricinfo articles: ${espnCount}`);
     console.log(`   Total articles:         ${totalCount}`);
     console.log("━".repeat(60));
   } catch (error) {
-    console.error("❌ Error running ESPN Cricinfo scraper:", error);
+    console.error("❌ Error running Cricbuzz scraper:", error);
     process.exit(1);
   } finally {
-    await scraper.close(); // Close Puppeteer browser
+    await scraper.closeBrowser();
     await prisma.$disconnect();
     await pool.end();
   }
 }
 
-runESPNCricinfoScraper();
+runCricbuzzScraper();

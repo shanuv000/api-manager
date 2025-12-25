@@ -271,28 +271,16 @@ async function runBBCScraper() {
           details.publishedTime || article.publishedTime
         );
 
-        // Generate or preserve tags
+        // Generate or preserve tags - ALWAYS use Perplexity AI for new articles
         let tags = [];
         if (existing?.tags && existing.tags.length > 0) {
-          // Preserve existing tags
+          // Preserve existing tags from DB
           tags = existing.tags;
-        } else {
-          // Try to extract from topics first
-          const topicTags = extractTagsFromTopics(details.topics);
-          if (topicTags.length > 0) {
-            tags = topicTags;
-          } else if (article.category) {
-            tags = [article.category];
-          }
-
-          // If still no tags and Perplexity is enabled, generate with AI
-          if (tags.length === 0 && useAutoTagging) {
-            tags = await generateTags(title, content || description);
-            if (tags.length > 0) {
-              console.log(`   🏷️  AI-generated tags: ${tags.join(", ")}`);
-            }
-          } else if (tags.length > 0) {
-            console.log(`   🏷️  Tags from topics: ${tags.join(", ")}`);
+        } else if (useAutoTagging) {
+          // Always generate with AI for consistent SEO tags
+          tags = await generateTags(title, content || description);
+          if (tags.length > 0) {
+            console.log(`   🏷️  AI tags: ${tags.join(", ")}`);
           }
         }
 

@@ -235,18 +235,16 @@ async function runICCScraper() {
           details.publishedTime || article.publishedTime
         );
 
-        // Generate or preserve tags
+        // Generate or preserve tags - ALWAYS use Perplexity AI for new articles
         let tags = [];
         if (existing?.tags && existing.tags.length > 0) {
+          // Preserve existing tags from DB
           tags = existing.tags;
-        } else if (details.tags && details.tags.length > 0) {
-          tags = details.tags;
-        } else if (article.category) {
-          tags = [article.category];
         } else if (useAutoTagging) {
+          // Always generate with AI for consistent SEO tags
           tags = await generateTags(title, content || description);
           if (tags.length > 0) {
-            console.log(`   🏷️  Generated tags: ${tags.join(", ")}`);
+            console.log(`   🏷️  AI tags: ${tags.join(", ")}`);
           }
         }
 

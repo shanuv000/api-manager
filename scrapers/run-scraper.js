@@ -147,20 +147,19 @@ async function runScraper() {
           // Check if exists (for update vs create)
           const existingData = existingMap.get(article.id);
 
-          // Preserve existing tags if they exist, otherwise generate new ones
+          // Generate or preserve tags - ALWAYS use Perplexity AI for new articles
           let tags = [];
           if (existingData?.tags && existingData.tags.length > 0) {
-            tags = existingData.tags; // Keep existing tags
-          } else if (details?.tags && details.tags.length > 0) {
-            tags = details.tags; // Use scraped tags
+            // Preserve existing tags from DB
+            tags = existingData.tags;
           } else if (useAutoTagging) {
-            // Generate new tags only if none exist
+            // Always generate with AI for consistent SEO tags
             tags = await generateTags(
               article.title,
               fullContent || listingDescription
             );
             if (tags.length > 0) {
-              console.log(`  🏷️  Generated tags: ${tags.join(", ")}`);
+              console.log(`  🏷️  AI tags: ${tags.join(", ")}`);
             }
           }
 
