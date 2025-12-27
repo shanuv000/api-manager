@@ -13,8 +13,10 @@ const PERPLEXITY_API_URL = "https://api.perplexity.ai/chat/completions";
  * @param {string} content - Article content (first 500 chars is enough)
  * @returns {Promise<string[]>} Array of tags
  */
-async function generateTags(title, content) {
+async function generateTags(title, content, retryCount = 0) {
   const apiKey = process.env.PERPLEXITY_API_KEY;
+  const MAX_RETRIES = 1;
+  const TIMEOUT_MS = 30000; // 30 seconds
 
   if (!apiKey) {
     console.warn("⚠️ PERPLEXITY_API_KEY not set, skipping tag generation");
@@ -65,7 +67,7 @@ Example: ["Virat Kohli", "India vs Australia", "Border-Gavaskar Trophy 2025", "M
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
-        timeout: 10000,
+        timeout: TIMEOUT_MS,
       }
     );
 
@@ -87,6 +89,18 @@ Example: ["Virat Kohli", "India vs Australia", "Border-Gavaskar Trophy 2025", "M
 
     return [];
   } catch (error) {
+    const isTimeout =
+      error.code === "ECONNABORTED" || error.message.includes("timeout");
+
+    // Retry once on timeout
+    if (isTimeout && retryCount < MAX_RETRIES) {
+      console.warn(
+        `Perplexity timeout, retrying (attempt ${retryCount + 2})...`
+      );
+      await new Promise((r) => setTimeout(r, 2000)); // Wait 2s before retry
+      return generateTags(title, content, retryCount + 1);
+    }
+
     console.error("Perplexity API error:", error.message);
     return [];
   }

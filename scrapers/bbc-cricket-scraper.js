@@ -498,7 +498,30 @@ class BBCCricketScraper {
           /^Published\d/i, // "Published21 December 2025" metadata
           /^\d+\s*Comments/i, // "886 Comments" metadata
           /^\d+\s*(hours?|days?|mins?)\s*ago$/i, // Relative time metadata
+          /^related\s*topics?$/i, // "Related topics" heading
+          /^more\s*on\s*this\s*story$/i, // "More on this story" heading
+          /^get\s.*news\s*sent/i, // "Get cricket news sent straight to your phone"
+          /^around\s*the\s*bbc$/i, // "Around the BBC" section
+          /^top\s*stories$/i, // "Top stories" section
+          /^elsewhere\s*on/i, // "Elsewhere on BBC" etc
         ];
+
+        // Headings that indicate we should stop extracting main content
+        const stopExtractionHeadings = [
+          /^related\s*topics?$/i,
+          /^more\s*on\s*this\s*story$/i,
+          /^get\s.*news/i,
+          /^around\s*the\s*bbc$/i,
+          /^top\s*stories$/i,
+          /^elsewhere\s*on/i,
+          /^you\s*may\s*also\s*like$/i,
+          /^recommended$/i,
+          /^more\s*sport$/i,
+          /^latest\s*news$/i,
+        ];
+
+        // Flag to track if we've hit boilerplate sections
+        let hitBoilerplateSection = false;
 
         if (article) {
           const elements = article.querySelectorAll(
@@ -506,6 +529,9 @@ class BBCCricketScraper {
           );
 
           elements.forEach((el) => {
+            // Once we hit a boilerplate section, skip all remaining elements
+            if (hitBoilerplateSection) return;
+
             let text = "";
 
             if (el.tagName === "P") {
@@ -520,13 +546,15 @@ class BBCCricketScraper {
                   // Trim content inside bold markers to prevent malformed markdown
                   const boldText = node.textContent.trim();
                   if (boldText) {
-                    text += "**" + boldText + "**";
+                    // Add trailing space to ensure proper markdown parsing when followed by text
+                    text += "**" + boldText + "** ";
                   }
                 } else if (node.nodeName === "EM" || node.nodeName === "I") {
                   // Trim content inside italic markers
                   const italicText = node.textContent.trim();
                   if (italicText) {
-                    text += "_" + italicText + "_";
+                    // Add trailing space to ensure proper markdown parsing when followed by text
+                    text += "_" + italicText + "_ ";
                   }
                 } else if (node.nodeName === "A") {
                   const href = node.getAttribute("href");
@@ -546,8 +574,18 @@ class BBCCricketScraper {
               // Skip the main title (H1) since we extract it separately
               if (el.tagName === "H1" && el.textContent.trim() === title)
                 return;
+
+              // Check if this heading indicates a boilerplate section
+              const headingText = el.textContent.trim();
+              for (const pattern of stopExtractionHeadings) {
+                if (pattern.test(headingText)) {
+                  hitBoilerplateSection = true;
+                  return; // Stop processing this and all subsequent elements
+                }
+              }
+
               const level = parseInt(el.tagName[1]);
-              text = "#".repeat(level) + " " + el.textContent.trim();
+              text = "#".repeat(level) + " " + headingText;
             } else if (el.tagName === "BLOCKQUOTE") {
               // Convert blockquote to markdown
               const quoteText = el.textContent.trim();

@@ -60,6 +60,7 @@ CRICBUZZ_STATUS="❌ Failed"
 ESPN_STATUS="❌ Failed"
 ICC_STATUS="❌ Failed"
 BBC_STATUS="❌ Failed"
+IPL_STATUS="❌ Failed"
 CRICBUZZ_NEW=0
 CRICBUZZ_UPDATED=0
 CRICBUZZ_SKIPPED=0
@@ -72,6 +73,9 @@ ICC_SKIPPED=0
 BBC_NEW=0
 BBC_UPDATED=0
 BBC_SKIPPED=0
+IPL_NEW=0
+IPL_UPDATED=0
+IPL_SKIPPED=0
 DB_TOTAL=0
 ERRORS=""
 
@@ -154,6 +158,25 @@ else
 fi
 echo "$BBC_OUTPUT"
 
+# Run IPL T20 scraper (Puppeteer - with timeout)
+echo "📰 Running IPL T20 scraper..."
+if IPL_OUTPUT=$(timeout $SCRAPER_TIMEOUT node scrapers/run-iplt20-scraper.js 2>&1); then
+  IPL_STATUS="✅ Success"
+  IPL_NEW=$(echo "$IPL_OUTPUT" | grep -oP "New articles saved:\s*\K\d+" || echo "0")
+  IPL_UPDATED=$(echo "$IPL_OUTPUT" | grep -oP "Updated articles:\s*\K\d+" || echo "0")
+  IPL_SKIPPED=$(echo "$IPL_OUTPUT" | grep -oP "Skipped.*duplicate.*:\s*\K\d+" || echo "0")
+  DB_TOTAL=$(echo "$IPL_OUTPUT" | grep -oP "Total articles:\s*\K\d+" || echo "$DB_TOTAL")
+else
+  exit_code=$?
+  if [ $exit_code -eq 124 ]; then
+    ERRORS="${ERRORS}IPL timed out (>${SCRAPER_TIMEOUT}s)\\n"
+    echo "⚠️ IPL scraper timed out after ${SCRAPER_TIMEOUT}s"
+  else
+    ERRORS="${ERRORS}IPL failed (exit: $exit_code)\\n"
+  fi
+fi
+echo "$IPL_OUTPUT"
+
 # Prune old articles (with timeout)
 echo "🗑️ Pruning articles older than 90 days..."
 timeout 30 node scripts/prune-news.js 2>&1 || echo "⚠️ Prune skipped or failed"
@@ -166,14 +189,14 @@ echo "✅ Scraping completed at $(date) (${DURATION}s)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Send Discord notification
-TOTAL_NEW=$((CRICBUZZ_NEW + ESPN_NEW + ICC_NEW + BBC_NEW))
-TOTAL_UPDATED=$((CRICBUZZ_UPDATED + ESPN_UPDATED + ICC_UPDATED + BBC_UPDATED))
+TOTAL_NEW=$((CRICBUZZ_NEW + ESPN_NEW + ICC_NEW + BBC_NEW + IPL_NEW))
+TOTAL_UPDATED=$((CRICBUZZ_UPDATED + ESPN_UPDATED + ICC_UPDATED + BBC_UPDATED + IPL_UPDATED))
 
 if [ -z "$ERRORS" ]; then
-  DESC="📰 **New Articles:** ${TOTAL_NEW}\\n🔄 **Updated:** ${TOTAL_UPDATED}\\n\\n**Cricbuzz:** ${CRICBUZZ_NEW} new, ${CRICBUZZ_UPDATED} updated\\n**ESPN:** ${ESPN_NEW} new, ${ESPN_UPDATED} updated\\n**ICC:** ${ICC_NEW} new, ${ICC_UPDATED} updated\\n**BBC:** ${BBC_NEW} new, ${BBC_UPDATED} updated\\n\\n📊 **Total in DB:** ${DB_TOTAL}\\n⏱️ **Duration:** ${DURATION}s"
+  DESC="📰 **New Articles:** ${TOTAL_NEW}\\n🔄 **Updated:** ${TOTAL_UPDATED}\\n\\n**Cricbuzz:** ${CRICBUZZ_NEW} new, ${CRICBUZZ_UPDATED} updated\\n**ESPN:** ${ESPN_NEW} new, ${ESPN_UPDATED} updated\\n**ICC:** ${ICC_NEW} new, ${ICC_UPDATED} updated\\n**BBC:** ${BBC_NEW} new, ${BBC_UPDATED} updated\\n**IPL T20:** ${IPL_NEW} new, ${IPL_UPDATED} updated\\n\\n📊 **Total in DB:** ${DB_TOTAL}\\n⏱️ **Duration:** ${DURATION}s"
   send_discord "🏏 Cricket Scraper Success" "$DESC" "3066993"
 else
-  DESC="⚠️ **Errors occurred**\\n\\n**Cricbuzz:** ${CRICBUZZ_STATUS}\\n**ESPN:** ${ESPN_STATUS}\\n**ICC:** ${ICC_STATUS}\\n**BBC:** ${BBC_STATUS}\\n\\n${ERRORS}\\n⏱️ **Duration:** ${DURATION}s\\n📋 Check logs for details"
+  DESC="⚠️ **Errors occurred**\\n\\n**Cricbuzz:** ${CRICBUZZ_STATUS}\\n**ESPN:** ${ESPN_STATUS}\\n**ICC:** ${ICC_STATUS}\\n**BBC:** ${BBC_STATUS}\\n**IPL T20:** ${IPL_STATUS}\\n\\n${ERRORS}\\n⏱️ **Duration:** ${DURATION}s\\n📋 Check logs for details"
   send_discord "⚠️ Cricket Scraper Issues" "$DESC" "15158332"
 fi
 

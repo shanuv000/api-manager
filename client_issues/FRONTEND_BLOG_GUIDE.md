@@ -2,7 +2,7 @@
 
 **Report Date:** December 24, 2025  
 **API Version:** v1  
-**Last Updated:** December 24, 2025
+**Last Updated:** December 26, 2025
 
 ---
 
@@ -22,14 +22,14 @@ GET /api/cricket/news/:id
 
 ### Query Parameters
 
-| Parameter | Type   | Description                                               | Example                            |
-| --------- | ------ | --------------------------------------------------------- | ---------------------------------- |
-| `limit`   | number | Max articles to return (default: 10, max: 50)             | `?limit=10`                        |
-| `offset`  | number | Skip articles for pagination                              | `?offset=20`                       |
-| `source`  | string | Filter by source: `cricbuzz`, `espn`, `icc`, `bbc`, `all` | `?source=bbc`                      |
-| `search`  | string | Search in title/description/content                       | `?search=ashes`                    |
-| `tag`     | string | Filter by tag                                             | `?tag=ICC World Test Championship` |
-| `sort`    | string | Sort order: `newest` (default) or `oldest`                | `?sort=oldest`                     |
+| Parameter | Type   | Description                                                      | Example                            |
+| --------- | ------ | ---------------------------------------------------------------- | ---------------------------------- |
+| `limit`   | number | Max articles to return (default: 10, max: 50)                    | `?limit=10`                        |
+| `offset`  | number | Skip articles for pagination                                     | `?offset=20`                       |
+| `source`  | string | Filter by source: `cricbuzz`, `espn`, `icc`, `bbc`, `ipl`, `all` | `?source=ipl`                      |
+| `search`  | string | Search in title/description/content                              | `?search=ashes`                    |
+| `tag`     | string | Filter by tag                                                    | `?tag=ICC World Test Championship` |
+| `sort`    | string | Sort order: `newest` (default) or `oldest`                       | `?sort=oldest`                     |
 
 ---
 
@@ -56,7 +56,7 @@ interface NewsArticle {
   // Metadata
   sport: string; // Always "cricket"
   category: string | null; // e.g., "ICC World Test Championship", "News"
-  sourceName: string; // "Cricbuzz" | "ESPN Cricinfo" | "ICC Cricket" | "BBC Sport"
+  sourceName: string; // "Cricbuzz" | "ESPN Cricinfo" | "ICC Cricket" | "BBC Sport" | "IPL T20"
   sourceUrl: string; // Original article URL
 
   // SEO
@@ -67,8 +67,8 @@ interface NewsArticle {
   // Related Content
   relatedArticles: RelatedArticle[] | null;
 
-  // Embedded Tweets (ICC Cricket & BBC Sport)
-  embeddedTweets: string[]; // Array of Twitter/X tweet IDs
+  // Embedded Tweets (ICC Cricket & BBC Sport) / Instagram (IPL T20)
+  embeddedTweets: string[]; // Array of Twitter/X tweet IDs or Instagram post IDs
 
   // Timestamps
   publishedTime: string | null; // ISO 8601 format
@@ -99,6 +99,7 @@ The `content` field format depends on the news source. Use `react-markdown` for 
 | **ICC Cricket**   | ✅ `**text**` | ✅ `#`, `##` | ✅ `[text](url)` | ✅ Markdown | ✅ IDs array |
 | **ESPN Cricinfo** | ❌ Plain text | ❌           | ❌               | ❌          | ❌           |
 | **Cricbuzz**      | ❌ Plain text | ❌           | ❌               | ❌          | ❌           |
+| **IPL T20**       | ✅ `**text**` | ✅ `#`, `##` | ✅ `[text](url)` | ✅ Markdown | ✅ IG IDs    |
 
 > **Why ESPN/Cricbuzz are plain text:** These sources use JSON-LD structured data for content, which strips HTML formatting. ICC and BBC embed rich HTML in their article pages.
 
@@ -158,6 +159,26 @@ Rob Key has pledged to investigate England players' conduct during their mid-Ash
 
 England travelled to Noosa, the affluent resort town on the Queensland coast, after their eight-wicket defeat...
 ```
+
+### Sample IPL T20 Content (Markdown - Rich Formatting)
+
+```markdown
+**TATA IPL 2026 Player Auction List Announced**
+
+The TATA Indian Premier League (IPL) Player Auction list for the 2026 season has been finalised, featuring 350 players.
+
+**Complete breakdown of capped and uncapped players**
+
+| Sr. No | Category        | No. of players |
+| ------ | --------------- | -------------- |
+| 1      | Capped Indians  | 16             |
+| 2      | Capped Overseas | 96             |
+| 3      | Uncapped Indian | 224            |
+
+**[CLICK HERE](https://documents.iplt20.com/.../auction-list.pdf)** to check the complete list.
+```
+
+> **IPL T20 Content Features:** Rich markdown with bold text, tables (player stats, auction data), PDF document links, scorecard links, and **Instagram embeds** in match reports (stored in `embeddedTweets` field).
 
 ---
 
@@ -322,6 +343,8 @@ module.exports = {
       "img1.hscicdn.com", // ESPN Cricinfo
       "static.cricbuzz.com",
       "www.cricbuzz.com",
+      "documents.iplt20.com", // IPL T20
+      "www.iplt20.com",
     ],
   },
 };
@@ -425,6 +448,7 @@ function ArticlePage({ article }) {
 | Cricbuzz      | `"Cricbuzz"`       |
 | ESPN Cricinfo | `"ESPN Cricinfo"`  |
 | ICC Cricket   | `"ICC Cricket"`    |
+| IPL T20       | `"IPL T20"`        |
 
 ### Filter Component
 
@@ -436,6 +460,7 @@ function SourceFilter({ selected, onChange }) {
     "Cricbuzz",
     "ESPN Cricinfo",
     "ICC Cricket",
+    "IPL T20",
   ];
 
   return (
@@ -548,7 +573,48 @@ function TweetEmbed({ tweetId }) {
 }
 ```
 
-> **Note:** Only ICC Cricket and BBC Sport articles have embedded tweets. ESPN and Cricbuzz articles will have an empty array.
+> **Note:** ICC Cricket and BBC Sport articles have embedded **Twitter/X** tweets. **IPL T20** articles have embedded **Instagram** posts/reels (same `embeddedTweets` field). ESPN and Cricbuzz articles will have an empty array.
+
+### Rendering Instagram Embeds (IPL T20)
+
+For IPL T20 match reports, use the Instagram embed widget:
+
+```jsx
+// For IPL T20 articles - Instagram embeds
+function InstagramEmbed({ postId }) {
+  return (
+    <iframe
+      src={`https://www.instagram.com/p/${postId}/embed`}
+      width="400"
+      height="500"
+      frameBorder="0"
+      scrolling="no"
+      allowTransparency="true"
+    />
+  );
+}
+
+// Check source to determine embed type
+function SocialEmbeds({ article }) {
+  if (!article.embeddedTweets?.length) return null;
+
+  const isIPL = article.sourceName === "IPL T20";
+
+  return (
+    <div className="social-embeds">
+      {isIPL
+        ? // Instagram embeds for IPL T20
+          article.embeddedTweets.map((id) => (
+            <InstagramEmbed key={id} postId={id} />
+          ))
+        : // Twitter embeds for ICC/BBC
+          article.embeddedTweets.map((id) => (
+            <TwitterTweetEmbed key={id} tweetId={id} />
+          ))}
+    </div>
+  );
+}
+```
 
 ---
 
@@ -669,3 +735,4 @@ export const getServerSideProps: GetServerSideProps = async ({ params }) => {
 | **ICC Cricket**   | ✅ Rich (1300+ words)     | ✅ Full  | ⚠️ Missing | ⚠️ Empty                      | ✅ Extracted |
 | **ESPN Cricinfo** | ✅ Good (1000+ words)     | ✅ Full  | ✅ Yes     | ⚠️ Empty (keywords available) | ❌           |
 | **Cricbuzz**      | ✅ Good                   | ✅ Full  | ⚠️ Missing | ⚠️ Empty                      | ❌           |
+| **IPL T20**       | ✅ Rich (300-900 words)   | ✅ Full  | ⚠️ Missing | ✅ AI-generated               | ✅ Instagram |
