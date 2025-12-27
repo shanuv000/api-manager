@@ -1319,6 +1319,53 @@ router.get("/live-scores", async (req, res) => {
   }
 });
 
+// Live Scores Worker Status endpoint (for monitoring)
+router.get("/live-scores/worker-status", async (req, res) => {
+  try {
+    // Import redis-client dynamically to avoid breaking if not configured
+    let redisClient;
+    try {
+      redisClient = require("../../utils/redis-client");
+    } catch (e) {
+      return res.json({
+        success: true,
+        worker: {
+          status: "not-configured",
+          message: "Redis client not available",
+        },
+        cache: { available: false },
+      });
+    }
+
+    const status = await redisClient.getWorkerStatus();
+    const cache = await redisClient.getLiveScores();
+
+    res.json({
+      success: true,
+      worker: status || {
+        status: "unknown",
+        message: "No worker status found - worker may not be running",
+      },
+      cache: cache
+        ? {
+            available: true,
+            matchCount: cache.count,
+            ageSeconds: Math.round((Date.now() - cache.timestamp) / 1000),
+          }
+        : {
+            available: false,
+            message: "No cached data - worker may not be running",
+          },
+    });
+  } catch (error) {
+    console.error("Error fetching worker status:", error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 // Upcoming Matches endpoint
 router.get("/upcoming-matches", async (req, res) => {
   try {
