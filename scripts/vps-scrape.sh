@@ -4,7 +4,7 @@
 #
 # RECOMMENDED CRON SETUP (with timeout and lock to prevent overlapping/stuck runs):
 # crontab -e
-# 30 0,6,12,18 * * * flock -n /tmp/cricket-scraper.lock timeout 1200 /home/ubuntu/app/projects/api_pro/api-manager/scripts/vps-scrape.sh >> /var/log/cricket-scraper.log 2>&1
+# 30 0,6,9,12,15,18,21 * * * flock -n /tmp/cricket-scraper.lock timeout 1200 /home/ubuntu/app/projects/api_pro/api-manager/scripts/vps-scrape.sh >> /var/log/cricket-scraper.log 2>&1
 #
 # This ensures:
 # - flock -n: Only one instance runs at a time (non-blocking)

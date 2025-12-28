@@ -133,7 +133,7 @@ router.get("/news/:slug", async (req, res) => {
 **Explanation:**
 
 - Actual scraping happens via VPS cron job (`scripts/vps-scrape.sh`)
-- VPS runs every 6 hours (0:30, 6:30, 12:30, 18:30 IST)
+- VPS runs every 3 hours (0:30, 3:30, 6:30, 9:30, 12:30, 15:30, 18:30, 21:30 IST)
 - Scrapers save directly to Supabase PostgreSQL
 - Frontend's cron just clears its local Redis cache
 

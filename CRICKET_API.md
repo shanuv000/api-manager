@@ -337,11 +337,11 @@ Get health status of all scrapers.
 
 ## News Scraper (Cron Job)
 
-News articles are scraped every 6 hours via cron:
+News articles are scraped every 3 hours via cron:
 
 ```bash
-# Cron schedule (0:30, 6:30, 12:30, 18:30 IST)
-30 0,6,12,18 * * * /path/to/scripts/vps-scrape.sh
+# Cron schedule (every 3 hours at :30)
+30 0,3,6,9,12,15,18,21 * * * /path/to/scripts/vps-scrape.sh
 ```
 
 ### Sources

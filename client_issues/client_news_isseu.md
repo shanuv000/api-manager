@@ -137,7 +137,7 @@ Client Request
 
 **File:** `src/app/api/cron/refresh-news/route.ts`
 
-**Purpose:** Scheduled cache refresh (every 6 hours)
+**Purpose:** Scheduled cache refresh (every 3 hours)
 
 **Authentication:** Requires `CRON_SECRET` query parameter
 

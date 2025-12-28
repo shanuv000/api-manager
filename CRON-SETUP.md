@@ -1,11 +1,16 @@
 # Cricket News Auto-Fetch Setup
 
 ## Overview
-Automated cron job to fetch and store cricket news articles every 6 hours using GitHub Actions.
+
+Automated cron job to fetch and store cricket news articles using VPS cron.
+Uses a **hybrid schedule**: 3-hour intervals during peak hours, 6-hour gap overnight.
 
 ## Schedule
-- **Frequency:** Every 6 hours (00:00, 06:00, 12:00, 18:00 UTC)
-- **Manual Trigger:** Available via GitHub Actions UI
+
+- **Peak Hours (6 AM - 12 AM IST):** Every 3 hours
+- **Off-Peak (12 AM - 6 AM IST):** 6-hour gap (skips 3:30 AM run)
+- **Total Runs:** 7 per day
+- **Manual Trigger:** Available via running the script directly
 
 ## How It Works
 
@@ -18,35 +23,46 @@ Automated cron job to fetch and store cricket news articles every 6 hours using 
 ## Duplicate Prevention
 
 ✅ **Already implemented** via upsert logic:
+
 ```javascript
 await prisma.newsArticle.upsert({
-  where: { cricbuzzId: article.id },  // Unique constraint
-  update: { /* update fields */ },
-  create: { /* create new */ }
+  where: { cricbuzzId: article.id }, // Unique constraint
+  update: {
+    /* update fields */
+  },
+  create: {
+    /* create new */
+  },
 });
 ```
 
 **Unique fields preventing duplicates:**
+
 - `cricbuzzId` - Unique constraint in database
-- `cricbuzzUrl` - Unique constraint in database  
+- `cricbuzzUrl` - Unique constraint in database
 - `slug` - Unique constraint in database
 
 ## Setup Instructions
 
 ### 1. Deploy Your API
+
 First, make sure your API is deployed (e.g., on Vercel):
+
 ```bash
 vercel --prod
 ```
 
 ### 2. Update Workflow File
+
 Edit `.github/workflows/fetch-cricket-news.yml`:
+
 ```yaml
 # Replace this URL with your actual deployed API URL
 curl -s "https://your-actual-api.vercel.app/api/cricket/news?limit=20"
 ```
 
 ### 3. Push to GitHub
+
 ```bash
 git add .github/workflows/fetch-cricket-news.yml
 git commit -m "Add automated cricket news fetching"
@@ -54,6 +70,7 @@ git push origin main
 ```
 
 ### 4. Verify in GitHub
+
 1. Go to your repo on GitHub
 2. Click **Actions** tab
 3. See "Fetch Cricket News" workflow
@@ -71,29 +88,32 @@ You can manually trigger the workflow anytime:
 ## Monitoring
 
 View workflow runs:
+
 - **GitHub Actions tab** shows all runs
 - **Green checkmark** = Success
 - **Red X** = Failed (check logs)
 
 Each run shows:
+
 - Number of articles fetched
 - Source (database vs scraped)
 - Article titles
 
 ## Schedule Explanation
 
-```yaml
-cron: '0 */6 * * *'
+```bash
+30 0,6,9,12,15,18,21 * * *
 ```
 
 Breakdown:
-- `0` - At minute 0
-- `*/6` - Every 6 hours
+
+- `30` - At minute 30
+- `0,6,9,12,15,18,21` - Hybrid schedule (skips 3 AM)
 - `*` - Every day
 - `*` - Every month
 - `*` - Every day of week
 
-**Runs at:** 00:00, 06:00, 12:00, 18:00 UTC daily
+**Runs at (IST):** 00:30, 06:30, 09:30, 12:30, 15:30, 18:30, 21:30 (7 times daily)
 
 ## Benefits
 
@@ -108,23 +128,27 @@ Breakdown:
 ### Change Frequency
 
 **Every 12 hours:**
+
 ```yaml
-cron: '0 */12 * * *'
+cron: "0 */12 * * *"
 ```
 
 **Every 3 hours:**
+
 ```yaml
-cron: '0 */3 * * *'
+cron: "0 */3 * * *"
 ```
 
 **Daily at midnight:**
+
 ```yaml
-cron: '0 0 * * *'
+cron: "0 0 * * *"
 ```
 
 ### Change Article Limit
 
 Modify the URL parameter:
+
 ```bash
 # Fetch 30 articles instead of 20
 /api/cricket/news?limit=30
@@ -133,16 +157,19 @@ Modify the URL parameter:
 ## Troubleshooting
 
 ### Workflow Not Running
+
 - Check if GitHub Actions is enabled in repo settings
 - Verify cron syntax is correct
 - Check if default branch is `main` or `master`
 
 ### API Errors
+
 - Verify API URL is correct and deployed
 - Check API logs in Vercel dashboard
 - Test endpoint manually: `curl https://your-api.com/api/cricket/news?limit=1`
 
 ### Database Issues
+
 - Check Supabase connection
 - Verify DATABASE_URL is set in Vercel environment variables
 - Check Prisma schema is migrated
@@ -150,12 +177,14 @@ Modify the URL parameter:
 ## Cost Estimate
 
 **GitHub Actions:**
+
 - Free tier: 2,000 minutes/month
 - This workflow: ~2 minutes per run
 - 4 runs/day × 30 days = 120 runs/month
 - **Total:** ~240 minutes/month (well within free tier)
 
 **API/Scraping:**
+
 - Vercel Hobby: 100GB bandwidth free
 - Supabase Free: 500MB database free
 - Should handle thousands of articles easily
@@ -163,6 +192,7 @@ Modify the URL parameter:
 ## Next Steps
 
 After setup:
+
 1. ✅ Monitor first few runs in GitHub Actions
 2. ✅ Verify articles appear in database
 3. ✅ Check no duplicates are created

@@ -3,10 +3,12 @@
 ## ⚠️ Challenge: Vercel Hobby Timeout Limits
 
 **Vercel Hobby Plan Limits:**
+
 - ⏱️ **10-second execution timeout** for serverless functions
 - 📦 **50MB deployment size limit**
 
 **Our Scraper Reality:**
+
 - 🕐 Takes 30-60 seconds to scrape 20 articles with Puppeteer
 - ❌ Will timeout on every request on Vercel
 
@@ -31,7 +33,7 @@
                         ▲
 ┌─────────────────────────────────────────────────────┐
 │         GitHub Actions Cron Job                     │
-│  - Runs every 6 hours                               │
+│  - Runs every 3 hours                               │
 │  - No timeout limits                                │
 │  - Can take 60+ seconds to scrape                  │
 │  - Directly updates database                        │
@@ -58,6 +60,7 @@ if (isVercel) {
 ```
 
 **Result:**
+
 - ✅ Vercel API responds in <1 second
 - ✅ No timeouts
 - ✅ Always serves fresh data from database
@@ -67,12 +70,13 @@ if (isVercel) {
 **Current Workflow:** `.github/workflows/fetch-cricket-news.yml`
 
 ```yaml
-# Runs every 6 hours
+# Runs every 3 hours
 schedule:
-  - cron: '0 */6 * * *'
+  - cron: "30 0,3,6,9,12,15,18,21 * * *"
 ```
 
 **How it works:**
+
 1. GitHub runner calls API endpoint
 2. API returns database data (if available)
 3. Database gets populated by separate scraping process
@@ -86,10 +90,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-      
+
       - name: Install dependencies
         run: npm install
-      
+
       - name: Run scraper directly
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -97,6 +101,7 @@ jobs:
 ```
 
 **Benefits:**
+
 - ✅ No timeout (GitHub Actions allows 6 hours)
 - ✅ Direct database update
 - ✅ Doesn't call Vercel API
@@ -105,6 +110,7 @@ jobs:
 ### Deployment Size
 
 **With our setup:**
+
 ```
 puppeteer-core: ~2MB
 @sparticuz/chromium: ~50MB (downloaded at runtime)
@@ -115,15 +121,16 @@ Chromium is downloaded at first function call, not bundled in deployment.
 
 ## 📊 Performance Comparison
 
-| Approach | Response Time | Timeout Risk | Cost |
-|----------|---------------|--------------|------|
-| ❌ Scrape on Vercel | 30-60s | HIGH (always fails) | Free |
-| ✅ **Database-only on Vercel** | **<1s** | **NONE** | **Free** |
-| ✅ GitHub Actions cron | N/A | NONE | Free |
+| Approach                       | Response Time | Timeout Risk        | Cost     |
+| ------------------------------ | ------------- | ------------------- | -------- |
+| ❌ Scrape on Vercel            | 30-60s        | HIGH (always fails) | Free     |
+| ✅ **Database-only on Vercel** | **<1s**       | **NONE**            | **Free** |
+| ✅ GitHub Actions cron         | N/A           | NONE                | Free     |
 
 ## 🚀 Current Implementation
 
 **Status:**
+
 - ✅ API detects Vercel environment
 - ✅ Disables scraping on Vercel production
 - ✅ Returns database data only (fast)
@@ -131,6 +138,7 @@ Chromium is downloaded at first function call, not bundled in deployment.
 - ✅ GitHub Actions cron ready to populate database
 
 **API Response on Vercel:**
+
 ```json
 {
   "success": true,
@@ -146,15 +154,18 @@ Chromium is downloaded at first function call, not bundled in deployment.
 If GitHub Actions isn't ideal, you can use:
 
 **Option 1: Railway**
+
 - Free tier: 500 hours/month
 - No timeout limits
 - Can run cron jobs
 
 **Option 2: Render.com**
+
 - Free tier with cron jobs
 - No timeout limits
 
 **Option 3: Vercel Cron (Pro)**
+
 - Upgrade to Pro plan
 - 5-minute timeouts (still might not be enough)
 - $20/month

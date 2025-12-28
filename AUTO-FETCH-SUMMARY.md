@@ -3,11 +3,13 @@
 ## What Was Set Up
 
 ### 1. GitHub Actions Cron Job
+
 **File:** `.github/workflows/fetch-cricket-news.yml`
 
-**Schedule:** Every 6 hours (00:00, 06:00, 12:00, 18:00 UTC)
+**Schedule:** Every 3 hours (00:30, 03:30, 06:30, 09:30, 12:30, 15:30, 18:30, 21:30 IST)
 
 **What it does:**
+
 - Automatically calls `/api/cricket/news?limit=20`
 - Scrapes 20 latest articles from Cricbuzz
 - Stores in Supabase database
@@ -18,6 +20,7 @@
 ✅ **Three-level protection:**
 
 1. **Database Unique Constraints:**
+
    ```sql
    - cricbuzzId (UNIQUE)
    - cricbuzzUrl (UNIQUE)
@@ -25,11 +28,16 @@
    ```
 
 2. **Upsert Logic in API:**
+
    ```javascript
    await prisma.newsArticle.upsert({
-     where: { cricbuzzId: article.id },  // Find by unique ID
-     update: { /* updates existing */ },
-     create: { /* creates new */ }
+     where: { cricbuzzId: article.id }, // Find by unique ID
+     update: {
+       /* updates existing */
+     },
+     create: {
+       /* creates new */
+     },
    });
    ```
 
@@ -46,7 +54,7 @@
 │                    AUTOMATED FLOW                           │
 └─────────────────────────────────────────────────────────────┘
 
-Every 6 hours:
+Every 3 hours:
 
 1. ⏰ GitHub Actions triggers workflow
 2. 🌐 Calls: https://api-sync.vercel.app/api/cricket/news?limit=20
@@ -78,6 +86,7 @@ git push origin main
 ### 3. Monitor First Run
 
 The workflow will show:
+
 ```
 🏏 Fetching latest cricket news from Cricbuzz...
 ✅ Success! Fetched 20 articles (source: scraped)
@@ -92,32 +101,41 @@ Latest articles:
 ## Testing
 
 ### Manual Test
+
 You can trigger anytime from GitHub:
+
 1. Actions tab → Fetch Cricket News
 2. Click "Run workflow"
 3. Watch it run live
 
 ### Check Database
+
 After each run, verify:
+
 ```bash
 curl https://api-sync.vercel.app/api/cricket/news?limit=5
 ```
 
 Should show articles with:
+
 - Unique descriptions (from first paragraph)
 - No duplicates by `cricbuzzId`
 - Fresh timestamps
 
 ## Schedule
 
-| Time (UTC) | Time (IST) | Action |
-|------------|------------|--------|
-| 00:00      | 05:30      | Fetch news |
-| 06:00      | 11:30      | Fetch news |
-| 12:00      | 17:30      | Fetch news |
-| 18:00      | 23:30      | Fetch news |
+| Time (IST) | Cron     | Action     |
+| ---------- | -------- | ---------- |
+| 00:30      | 0,3,6... | Fetch news |
+| 03:30      | 0,3,6... | Fetch news |
+| 06:30      | 0,3,6... | Fetch news |
+| 09:30      | 0,3,6... | Fetch news |
+| 12:30      | 0,3,6... | Fetch news |
+| 15:30      | 0,3,6... | Fetch news |
+| 18:30      | 0,3,6... | Fetch news |
+| 21:30      | 0,3,6... | Fetch news |
 
-**4 times per day** = ~120 articles/day (with duplicates removed)
+**8 times per day** = ~160 articles/day (with duplicates removed)
 
 ## Cost
 
@@ -130,7 +148,7 @@ Should show articles with:
 
 ## Features
 
-✅ Automatic scraping every 6 hours
+✅ Automatic scraping every 3 hours
 ✅ Duplicate prevention (3 levels)
 ✅ SEO-optimized descriptions
 ✅ Database persistence
@@ -145,23 +163,27 @@ Should show articles with:
 Edit `.github/workflows/fetch-cricket-news.yml`:
 
 **Every 3 hours:**
+
 ```yaml
-cron: '0 */3 * * *'
+cron: "0 */3 * * *"
 ```
 
 **Every 12 hours:**
+
 ```yaml
-cron: '0 */12 * * *'
+cron: "0 */12 * * *"
 ```
 
 **Daily at midnight:**
+
 ```yaml
-cron: '0 0 * * *'
+cron: "0 0 * * *"
 ```
 
 ### Change Article Count
 
 Modify the URL:
+
 ```yaml
 # Fetch 30 articles instead of 20
 https://api-sync.vercel.app/api/cricket/news?limit=30
@@ -170,23 +192,26 @@ https://api-sync.vercel.app/api/cricket/news?limit=30
 ## Troubleshooting
 
 ### Workflow not running?
+
 - Push workflow file to GitHub
 - Check Actions tab is enabled
 - Verify default branch name (main vs master)
 
 ### Getting old data?
+
 - Database caches for 24 hours
 - Articles older than 24h trigger new scrape
 - Force scrape: manually trigger workflow
 
 ### Duplicates appearing?
+
 - Check database constraints exist
 - Run: `npx prisma db push` to ensure schema updated
 - Database prevents duplicates automatically
 
 ## What Happens Now
 
-1. **Every 6 hours:** Fresh articles automatically added
+1. **Every 3 hours:** Fresh articles automatically added
 2. **No action needed:** Runs in background
 3. **Database grows:** Archive builds over time
 4. **SEO improves:** More indexed pages
@@ -202,7 +227,7 @@ https://api-sync.vercel.app/api/cricket/news?limit=30
 
 🎉 **You're all set!**
 
-- ✅ Automated fetching every 6 hours
+- ✅ Automated fetching every 3 hours
 - ✅ Duplicate prevention guaranteed
 - ✅ SEO-optimized descriptions
 - ✅ Database persistence
