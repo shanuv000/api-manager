@@ -813,9 +813,9 @@ class ESPNCricinfoPuppeteerScraper {
           document.querySelector("article") || document.querySelector("main");
 
         if (article) {
-          // Get all relevant elements in document order
+          // Get all relevant elements in document order (including Datawrapper iframes for inline tables)
           const elements = article.querySelectorAll(
-            "h1, h2, h3, h4, p, ul, ol, table, blockquote.twitter-tweet, blockquote[class*='twitter'], div[class*='twitter'], iframe[src*='twitter'], iframe[src*='platform.twitter'], blockquote.instagram-media, blockquote[class*='instagram'], iframe[src*='instagram']"
+            "h1, h2, h3, h4, p, ul, ol, table, blockquote.twitter-tweet, blockquote[class*='twitter'], div[class*='twitter'], iframe[src*='twitter'], iframe[src*='platform.twitter'], blockquote.instagram-media, blockquote[class*='instagram'], iframe[src*='instagram'], iframe[src*='datawrapper']"
           );
 
           elements.forEach((el) => {
@@ -842,6 +842,25 @@ class ESPNCricinfoPuppeteerScraper {
               });
               contentParts.push(`[INSTAGRAM:${instagramData.id}]`);
               return;
+            }
+
+            // Check for Datawrapper iframe (interactive tables)
+            if (el.tagName === "IFRAME") {
+              const src = el.src || "";
+              if (src.includes("datawrapper.dwcdn.net")) {
+                const match = src.match(/datawrapper\.dwcdn\.net\/([^/]+)/);
+                if (match && match[1]) {
+                  const dwId = match[1];
+                  // Add placeholder to be replaced with actual table during post-processing
+                  contentParts.push(`[DATAWRAPPER:${dwId}:${src}]`);
+                  // Also track for extraction
+                  result.datawrapperIframes.push({
+                    id: dwId,
+                    url: src,
+                  });
+                }
+                return;
+              }
             }
 
             // Skip if inside social embed container
@@ -1028,22 +1047,8 @@ class ESPNCricinfoPuppeteerScraper {
           });
         result.relatedArticles = related.slice(0, 5);
 
-        // ========== DATAWRAPPER IFRAMES (Interactive Tables) ==========
-        const datawrapperUrls = [];
-        document.querySelectorAll("iframe").forEach((iframe) => {
-          const src = iframe.src || "";
-          if (src.includes("datawrapper.dwcdn.net")) {
-            // Extract the ID from the URL
-            const match = src.match(/datawrapper\.dwcdn\.net\/([^/]+)/);
-            if (match) {
-              datawrapperUrls.push({
-                id: match[1],
-                url: src,
-              });
-            }
-          }
-        });
-        result.datawrapperIframes = datawrapperUrls;
+        // NOTE: Datawrapper iframes are now detected inline during content extraction
+        // and populated in result.datawrapperIframes with [DATAWRAPPER:ID:URL] placeholders in content
 
         return result;
       });
@@ -1069,52 +1074,66 @@ class ESPNCricinfoPuppeteerScraper {
         scrapedAt: new Date().toISOString(),
       };
 
-      // ========== DATAWRAPPER TABLE EXTRACTION ==========
-      // Extract tables from Datawrapper iframes (limit to 5 for performance)
-      const datawrapperIframes = rawData.datawrapperIframes || [];
-      if (datawrapperIframes.length > 0) {
+      // ========== DATAWRAPPER TABLE EXTRACTION (INLINE REPLACEMENT) ==========
+      // Find all [DATAWRAPPER:ID:URL] placeholders and replace with actual tables
+      const datawrapperPlaceholders =
+        details.content.match(/\[DATAWRAPPER:([^:]+):([^\]]+)\]/g) || [];
+
+      if (datawrapperPlaceholders.length > 0) {
         console.log(
-          `   📊 Found ${datawrapperIframes.length} Datawrapper tables, extracting...`
+          `   📊 Found ${datawrapperPlaceholders.length} Datawrapper tables, extracting...`
         );
 
-        const extractedTables = [];
-        const tablesToExtract = datawrapperIframes.slice(0, 5); // Limit for performance
+        const maxTables = 5; // Limit for performance
+        let extractedCount = 0;
 
-        for (let i = 0; i < tablesToExtract.length; i++) {
-          const iframe = tablesToExtract[i];
+        for (const placeholder of datawrapperPlaceholders) {
+          if (extractedCount >= maxTables) {
+            // Remove remaining placeholders without extracting
+            details.content = details.content.replace(
+              placeholder,
+              "[Table data not available]"
+            );
+            continue;
+          }
+
+          // Parse the placeholder: [DATAWRAPPER:ID:URL]
+          const match = placeholder.match(/\[DATAWRAPPER:([^:]+):([^\]]+)\]/);
+          if (!match) continue;
+
+          const [, dwId, dwUrl] = match;
           console.log(
-            `   📊 Extracting table ${i + 1}/${tablesToExtract.length}: ${
-              iframe.id
-            }`
+            `   📊 Extracting table ${extractedCount + 1}/${Math.min(
+              datawrapperPlaceholders.length,
+              maxTables
+            )}: ${dwId}`
           );
-          const tableMarkdown = await this.extractDatawrapperTable(iframe.url);
+
+          const tableMarkdown = await this.extractDatawrapperTable(dwUrl);
+
           if (tableMarkdown) {
-            extractedTables.push({
-              id: iframe.id,
-              markdown: tableMarkdown,
-            });
+            // Replace placeholder with actual table (inline, no header)
+            details.content = details.content.replace(
+              placeholder,
+              tableMarkdown
+            );
+            extractedCount++;
+          } else {
+            // Remove placeholder if extraction failed
+            details.content = details.content.replace(
+              placeholder,
+              "[Table data not available]"
+            );
           }
         }
 
-        // Prepend extracted tables to the content with headers
-        if (extractedTables.length > 0) {
-          const tableSection = extractedTables
-            .map((t, idx) => `### Table ${idx + 1}\n\n${t.markdown}`)
-            .join("\n\n---\n\n");
+        // Update content stats
+        details.contentLength = details.content.length;
+        details.wordCount = details.content
+          .split(/\s+/)
+          .filter((w) => w).length;
 
-          // Add tables section at the start of content (after title)
-          const contentParts = details.content.split("\n\n");
-          const titlePart = contentParts[0]; // Usually the # Title
-          const restOfContent = contentParts.slice(1).join("\n\n");
-
-          details.content = `${titlePart}\n\n${tableSection}\n\n---\n\n${restOfContent}`;
-          details.contentLength = details.content.length;
-          details.wordCount = details.content
-            .split(/\s+/)
-            .filter((w) => w).length;
-
-          console.log(`   ✅ Extracted ${extractedTables.length} tables`);
-        }
+        console.log(`   ✅ Extracted ${extractedCount} tables inline`);
       }
 
       // Log summary
