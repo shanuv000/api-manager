@@ -39,6 +39,7 @@ model NewsArticle {
   tags            String[]
   relatedArticles Json?
   embeddedTweets  String[]  // Twitter/X tweet IDs embedded in article
+  embeddedInstagram String[] // Instagram post/reel IDs embedded in article
   
   // Timestamps
   scrapedAt       DateTime @default(now())

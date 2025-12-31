@@ -392,111 +392,286 @@ class ICCNewsScraper {
           author = authorEl.textContent.trim();
         }
 
-        // Enhanced content extraction with markdown formatting
+        // ========== ENHANCED CONTENT EXTRACTION WITH INLINE TWEET/INSTAGRAM PLACEHOLDERS ==========
         const contentParts = [];
+        const embeddedTweets = [];
+        const embeddedInstagram = [];
+        const seenTweetIds = new Set();
+        const seenInstagramIds = new Set();
         const article =
           document.querySelector("article") || document.querySelector("main");
 
-        if (article) {
-          const elements = article.querySelectorAll(
-            "h1, h2, h3, h4, p, ul, ol, table"
+        // Patterns to skip boilerplate content
+        const skipPatterns = [
+          /follow us/i,
+          /subscribe/i,
+          /cookie/i,
+          /privacy/i,
+          /terms of/i,
+          /©/,
+          /copyright/i,
+        ];
+
+        // Patterns to detect tweet/instagram text fragments (to filter them out)
+        const socialTextPatterns = [
+          /pic\.twitter\.com\//i,
+          /t\.co\//i,
+          /twitter\.com\/.*\/status\//i,
+          /instagram\.com\/p\//i,
+          /instagram\.com\/reel\//i,
+          /View this post on Instagram/i,
+          /^(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}$/i, // Tweet date
+        ];
+
+        // Helper: Check if element is or contains a tweet embed
+        function getTweetIdFromElement(el) {
+          // Check for twitter-tweet blockquote
+          if (
+            el.classList?.contains("twitter-tweet") ||
+            el.tagName === "BLOCKQUOTE"
+          ) {
+            const link = el.querySelector(
+              'a[href*="twitter.com"][href*="status"]'
+            );
+            if (link) {
+              const match = link.href.match(/status\/(\d{15,20})/);
+              if (match && match[1]) return match[1];
+            }
+          }
+
+          // Check for Twitter iframe
+          if (el.tagName === "IFRAME") {
+            const src = el.src || "";
+            const patterns = [
+              /id=(\d{15,20})/,
+              /status%2F(\d{15,20})/,
+              /status\/(\d{15,20})/,
+            ];
+            for (const pattern of patterns) {
+              const match = src.match(pattern);
+              if (match && match[1]) return match[1];
+            }
+          }
+
+          // Check if element contains a tweet embed
+          const tweetBlockquote = el.querySelector("blockquote.twitter-tweet");
+          if (tweetBlockquote) {
+            const link = tweetBlockquote.querySelector(
+              'a[href*="twitter.com"][href*="status"]'
+            );
+            if (link) {
+              const match = link.href.match(/status\/(\d{15,20})/);
+              if (match && match[1]) return match[1];
+            }
+          }
+
+          const tweetIframe = el.querySelector(
+            'iframe[src*="twitter.com"], iframe[src*="platform.twitter"]'
           );
-          const skipPatterns = [
-            /follow us/i,
-            /subscribe/i,
-            /cookie/i,
-            /privacy/i,
-            /terms of/i,
-            /©/,
-            /copyright/i,
-          ];
+          if (tweetIframe) {
+            const src = tweetIframe.src || "";
+            const patterns = [
+              /id=(\d{15,20})/,
+              /status%2F(\d{15,20})/,
+              /status\/(\d{15,20})/,
+            ];
+            for (const pattern of patterns) {
+              const match = src.match(pattern);
+              if (match && match[1]) return match[1];
+            }
+          }
+
+          return null;
+        }
+
+        // Helper: Check if element is or contains an Instagram embed
+        function getInstagramIdFromElement(el) {
+          // Check for instagram-media blockquote
+          if (
+            el.classList?.contains("instagram-media") ||
+            el.tagName === "BLOCKQUOTE"
+          ) {
+            const link = el.querySelector(
+              'a[href*="instagram.com/p/"], a[href*="instagram.com/reel/"]'
+            );
+            if (link) {
+              // Extract ID from URLs like /p/ABC123/ or /reel/ABC123/
+              const match = link.href.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+              if (match && match[2]) return { id: match[2], type: match[1] };
+            }
+          }
+
+          // Check for Instagram iframe
+          if (el.tagName === "IFRAME") {
+            const src = el.src || "";
+            const match = src.match(
+              /instagram\.com\/(p|reel)\/([A-Za-z0-9_-]+)/
+            );
+            if (match && match[2]) return { id: match[2], type: match[1] };
+          }
+
+          // Check if element contains an Instagram embed
+          const igBlockquote = el.querySelector("blockquote.instagram-media");
+          if (igBlockquote) {
+            const link = igBlockquote.querySelector(
+              'a[href*="instagram.com/p/"], a[href*="instagram.com/reel/"]'
+            );
+            if (link) {
+              const match = link.href.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+              if (match && match[2]) return { id: match[2], type: match[1] };
+            }
+          }
+
+          const igIframe = el.querySelector('iframe[src*="instagram.com"]');
+          if (igIframe) {
+            const src = igIframe.src || "";
+            const match = src.match(
+              /instagram\.com\/(p|reel)\/([A-Za-z0-9_-]+)/
+            );
+            if (match && match[2]) return { id: match[2], type: match[1] };
+          }
+
+          return null;
+        }
+
+        // Helper: Check if text looks like social media content (to filter out)
+        function isSocialTextFragment(text) {
+          return socialTextPatterns.some((pat) => pat.test(text));
+        }
+
+        // Helper: Convert paragraph element to markdown
+        function paragraphToMarkdown(el) {
+          let text = "";
+          el.childNodes.forEach((node) => {
+            if (node.nodeType === Node.TEXT_NODE) {
+              text += node.textContent;
+            } else if (node.nodeName === "STRONG" || node.nodeName === "B") {
+              text += "**" + node.textContent + "**";
+            } else if (node.nodeName === "EM" || node.nodeName === "I") {
+              text += "_" + node.textContent + "_";
+            } else if (node.nodeName === "A") {
+              const href = node.getAttribute("href");
+              if (href && !href.startsWith("#")) {
+                text += "[" + node.textContent + "](" + href + ")";
+              } else {
+                text += node.textContent;
+              }
+            } else {
+              text += node.textContent || "";
+            }
+          });
+          return text;
+        }
+
+        // Helper: Convert list to markdown
+        function listToMarkdown(el, ordered) {
+          const items = el.querySelectorAll("li");
+          const listItems = [];
+          items.forEach((li, idx) => {
+            const itemText = li.textContent.trim();
+            if (itemText) {
+              listItems.push(
+                ordered ? idx + 1 + ". " + itemText : "- " + itemText
+              );
+            }
+          });
+          return listItems.join("\n");
+        }
+
+        // Helper: Convert table to markdown
+        function tableToMarkdown(el) {
+          const rows = el.querySelectorAll("tr");
+          if (rows.length === 0) return "";
+
+          const tableRows = [];
+          rows.forEach((row, rowIdx) => {
+            const cells = row.querySelectorAll("td, th");
+            const cellTexts = [];
+            cells.forEach((cell) => {
+              const cellText = cell.textContent.trim().replace(/\n/g, " ");
+              cellTexts.push(cellText);
+            });
+
+            if (cellTexts.length > 0) {
+              tableRows.push("| " + cellTexts.join(" | ") + " |");
+              if (rowIdx === 0) {
+                tableRows.push(
+                  "| " + cellTexts.map(() => "---").join(" | ") + " |"
+                );
+              }
+            }
+          });
+
+          return tableRows.length > 1 ? "\n" + tableRows.join("\n") + "\n" : "";
+        }
+
+        if (article) {
+          // Get all relevant elements including tweet/instagram containers, in document order
+          const elements = article.querySelectorAll(
+            "h1, h2, h3, h4, p, ul, ol, table, blockquote.twitter-tweet, blockquote[class*='twitter'], div[class*='twitter'], iframe[src*='twitter'], iframe[src*='platform.twitter'], blockquote.instagram-media, blockquote[class*='instagram'], iframe[src*='instagram']"
+          );
 
           elements.forEach((el) => {
+            // First, check if this is a tweet embed
+            const tweetId = getTweetIdFromElement(el);
+            if (tweetId && !seenTweetIds.has(tweetId)) {
+              seenTweetIds.add(tweetId);
+              embeddedTweets.push({
+                id: tweetId,
+                url: `https://twitter.com/i/status/${tweetId}`,
+              });
+              // Insert placeholder marker in content
+              contentParts.push(`[TWEET:${tweetId}]`);
+              return; // Don't process this element as content
+            }
+
+            // Check if this is an Instagram embed
+            const instagramData = getInstagramIdFromElement(el);
+            if (instagramData && !seenInstagramIds.has(instagramData.id)) {
+              seenInstagramIds.add(instagramData.id);
+              embeddedInstagram.push({
+                id: instagramData.id,
+                type: instagramData.type, // 'p' for post, 'reel' for reel
+                url: `https://www.instagram.com/${instagramData.type}/${instagramData.id}/`,
+              });
+              // Insert placeholder marker in content
+              contentParts.push(`[INSTAGRAM:${instagramData.id}]`);
+              return; // Don't process this element as content
+            }
+
+            // Skip if this element is inside a tweet or instagram container
+            if (
+              el.closest(
+                "blockquote.twitter-tweet, [class*='twitter-tweet'], blockquote.instagram-media, [class*='instagram']"
+              )
+            ) {
+              return;
+            }
+
             let text = "";
 
             if (el.tagName === "P") {
-              // Convert paragraph with bold/links to markdown
-              el.childNodes.forEach((node) => {
-                if (node.nodeType === Node.TEXT_NODE) {
-                  text += node.textContent;
-                } else if (
-                  node.nodeName === "STRONG" ||
-                  node.nodeName === "B"
-                ) {
-                  text += "**" + node.textContent + "**";
-                } else if (node.nodeName === "EM" || node.nodeName === "I") {
-                  text += "_" + node.textContent + "_";
-                } else if (node.nodeName === "A") {
-                  const href = node.getAttribute("href");
-                  if (href && !href.startsWith("#")) {
-                    text += "[" + node.textContent + "](" + href + ")";
-                  } else {
-                    text += node.textContent;
-                  }
-                } else {
-                  text += node.textContent || "";
-                }
-              });
+              text = paragraphToMarkdown(el);
             } else if (el.tagName.match(/^H[1-4]$/)) {
-              // Convert headings to markdown
               const level = parseInt(el.tagName[1]);
               text = "#".repeat(level) + " " + el.textContent.trim();
             } else if (el.tagName === "UL") {
-              // Convert unordered lists to markdown
-              const items = el.querySelectorAll("li");
-              const listItems = [];
-              items.forEach((li) => {
-                const itemText = li.textContent.trim();
-                if (itemText) listItems.push("- " + itemText);
-              });
-              text = listItems.join("\n");
+              text = listToMarkdown(el, false);
             } else if (el.tagName === "OL") {
-              // Convert ordered lists to markdown
-              const items = el.querySelectorAll("li");
-              const listItems = [];
-              items.forEach((li, idx) => {
-                const itemText = li.textContent.trim();
-                if (itemText) listItems.push(idx + 1 + ". " + itemText);
-              });
-              text = listItems.join("\n");
+              text = listToMarkdown(el, true);
             } else if (el.tagName === "TABLE") {
-              // Convert HTML tables to markdown tables
-              const rows = el.querySelectorAll("tr");
-              if (rows.length === 0) return;
-
-              const tableRows = [];
-              rows.forEach((row, rowIdx) => {
-                const cells = row.querySelectorAll("td, th");
-                const cellTexts = [];
-                cells.forEach((cell) => {
-                  // Clean cell text (remove newlines, trim)
-                  const cellText = cell.textContent.trim().replace(/\n/g, " ");
-                  cellTexts.push(cellText);
-                });
-
-                if (cellTexts.length > 0) {
-                  tableRows.push("| " + cellTexts.join(" | ") + " |");
-
-                  // Add header separator after first row
-                  if (rowIdx === 0) {
-                    tableRows.push(
-                      "| " + cellTexts.map(() => "---").join(" | ") + " |"
-                    );
-                  }
-                }
-              });
-
-              if (tableRows.length > 1) {
-                text = "\n" + tableRows.join("\n") + "\n";
-              }
+              text = tableToMarkdown(el);
             }
 
             text = text.trim();
 
-            // Skip if empty, too short, or contains boilerplate
+            // Skip if empty, too short, or is boilerplate
             if (!text || text.length < 20) return;
             const isBoilerplate = skipPatterns.some((pat) => pat.test(text));
             if (isBoilerplate && text.length < 150) return;
+
+            // Skip if this looks like social media text fragment
+            if (isSocialTextFragment(text)) return;
 
             // Avoid duplicate content
             if (contentParts.some((p) => p.includes(text) || text.includes(p)))
@@ -513,11 +688,119 @@ class ICCNewsScraper {
           );
           paragraphs.forEach((p) => {
             const text = p.textContent.trim();
-            if (text && text.length > 50) {
+            if (text && text.length > 50 && !isSocialTextFragment(text)) {
               contentParts.push(text);
             }
           });
         }
+
+        // Also scan for any tweets we might have missed (iframes loaded later)
+        document
+          .querySelectorAll(
+            'iframe[src*="twitter.com"], iframe[src*="platform.twitter"]'
+          )
+          .forEach((iframe) => {
+            const src = iframe.src || "";
+            const patterns = [
+              /id=(\d{15,20})/,
+              /status%2F(\d{15,20})/,
+              /status\/(\d{15,20})/,
+            ];
+
+            for (const pattern of patterns) {
+              const match = src.match(pattern);
+              if (match && match[1] && !seenTweetIds.has(match[1])) {
+                seenTweetIds.add(match[1]);
+                embeddedTweets.push({
+                  id: match[1],
+                  url: `https://twitter.com/i/status/${match[1]}`,
+                });
+                // Append placeholder at end if not already in content
+                if (
+                  !contentParts.some((p) => p.includes(`[TWEET:${match[1]}]`))
+                ) {
+                  contentParts.push(`[TWEET:${match[1]}]`);
+                }
+                break;
+              }
+            }
+          });
+
+        // Also check for twitter-tweet blockquotes we might have missed
+        document
+          .querySelectorAll(
+            'blockquote.twitter-tweet, [class*="twitter-tweet"]'
+          )
+          .forEach((el) => {
+            const link = el.querySelector(
+              'a[href*="twitter.com"][href*="status"]'
+            );
+            if (link) {
+              const match = link.href.match(/status\/(\d{15,20})/);
+              if (match && match[1] && !seenTweetIds.has(match[1])) {
+                seenTweetIds.add(match[1]);
+                embeddedTweets.push({
+                  id: match[1],
+                  url: link.href,
+                });
+                // Append placeholder at end if not already in content
+                if (
+                  !contentParts.some((p) => p.includes(`[TWEET:${match[1]}]`))
+                ) {
+                  contentParts.push(`[TWEET:${match[1]}]`);
+                }
+              }
+            }
+          });
+
+        // Also scan for Instagram embeds we might have missed
+        document
+          .querySelectorAll(
+            'blockquote.instagram-media, [class*="instagram-media"], iframe[src*="instagram.com"]'
+          )
+          .forEach((el) => {
+            let igId = null;
+            let igType = "p";
+
+            // Check for link in blockquote
+            const link = el.querySelector(
+              'a[href*="instagram.com/p/"], a[href*="instagram.com/reel/"]'
+            );
+            if (link) {
+              const match = link.href.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+              if (match && match[2]) {
+                igId = match[2];
+                igType = match[1];
+              }
+            }
+
+            // Check iframe src
+            if (!igId && el.tagName === "IFRAME") {
+              const src = el.src || "";
+              const match = src.match(
+                /instagram\.com\/(p|reel)\/([A-Za-z0-9_-]+)/
+              );
+              if (match && match[2]) {
+                igId = match[2];
+                igType = match[1];
+              }
+            }
+
+            if (igId && !seenInstagramIds.has(igId)) {
+              seenInstagramIds.add(igId);
+              embeddedInstagram.push({
+                id: igId,
+                type: igType,
+                url: `https://www.instagram.com/${igType}/${igId}/`,
+              });
+              // Append placeholder at end if not already in content
+              if (
+                !contentParts.some((p) => p.includes(`[INSTAGRAM:${igId}]`))
+              ) {
+                contentParts.push(`[INSTAGRAM:${igId}]`);
+              }
+            }
+          });
 
         const tags = [];
         const tagElements = document.querySelectorAll(
@@ -544,58 +827,6 @@ class ICCNewsScraper {
           }
         });
 
-        // ========== EMBEDDED TWEETS EXTRACTION ==========
-        const embeddedTweets = [];
-        const seenTweetIds = new Set();
-
-        // Extract tweet IDs from Twitter iframes
-        document
-          .querySelectorAll(
-            'iframe[src*="twitter.com"], iframe[src*="platform.twitter"]'
-          )
-          .forEach((iframe) => {
-            const src = iframe.src || "";
-            // Tweet IDs can be in different URL patterns
-            const patterns = [
-              /id=(\d{15,20})/, // id=123456789
-              /status%2F(\d{15,20})/, // status%2F123456789
-              /status\/(\d{15,20})/, // status/123456789
-            ];
-
-            for (const pattern of patterns) {
-              const match = src.match(pattern);
-              if (match && match[1] && !seenTweetIds.has(match[1])) {
-                seenTweetIds.add(match[1]);
-                embeddedTweets.push({
-                  id: match[1],
-                  url: `https://twitter.com/i/status/${match[1]}`,
-                });
-                break;
-              }
-            }
-          });
-
-        // Also check for twitter-tweet blockquotes (fallback)
-        document
-          .querySelectorAll(
-            'blockquote.twitter-tweet, [class*="twitter-tweet"]'
-          )
-          .forEach((el) => {
-            const link = el.querySelector(
-              'a[href*="twitter.com"][href*="status"]'
-            );
-            if (link) {
-              const match = link.href.match(/status\/(\d{15,20})/);
-              if (match && match[1] && !seenTweetIds.has(match[1])) {
-                seenTweetIds.add(match[1]);
-                embeddedTweets.push({
-                  id: match[1],
-                  url: link.href,
-                });
-              }
-            }
-          });
-
         const fullContent = contentParts.join("\n\n");
 
         return {
@@ -610,6 +841,7 @@ class ICCNewsScraper {
           tags: [...new Set(tags)].slice(0, 8),
           relatedArticles: relatedArticles.slice(0, 5),
           embeddedTweets: embeddedTweets.slice(0, 10), // Max 10 tweets per article
+          embeddedInstagram: embeddedInstagram.slice(0, 10), // Max 10 Instagram posts per article
           scrapedAt: new Date().toISOString(),
         };
       });

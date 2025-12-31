@@ -191,6 +191,138 @@ class ESPNCricinfoPuppeteerScraper {
   }
 
   /**
+   * Create a page that allows social embeds (Twitter/Instagram) to load
+   */
+  async createPageForEmbeds() {
+    const page = await this.browser.newPage();
+
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    );
+
+    // Allow social media resources but block ads and analytics
+    await page.setRequestInterception(true);
+    page.on("request", (req) => {
+      const url = req.url();
+
+      // Allow Twitter and Instagram resources
+      if (
+        url.includes("twitter.com") ||
+        url.includes("platform.twitter") ||
+        url.includes("instagram.com") ||
+        url.includes("cdninstagram.com")
+      ) {
+        req.continue();
+        return;
+      }
+
+      // Block ads and analytics
+      if (
+        url.includes("google-analytics") ||
+        url.includes("googletagmanager") ||
+        url.includes("facebook.net") ||
+        url.includes("doubleclick") ||
+        url.includes("adsystem") ||
+        url.includes("taboola") ||
+        url.includes("outbrain")
+      ) {
+        req.abort();
+        return;
+      }
+
+      // Allow everything else
+      req.continue();
+    });
+
+    return page;
+  }
+
+  /**
+   * Extract table data from a Datawrapper iframe URL
+   * ESPN Cricinfo uses Datawrapper for interactive statistical tables
+   */
+  async extractDatawrapperTable(iframeUrl) {
+    let page;
+    try {
+      page = await this.browser.newPage();
+      await page.setUserAgent(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+      );
+
+      // Navigate to the Datawrapper iframe
+      await page.goto(iframeUrl, {
+        waitUntil: "networkidle2",
+        timeout: 15000,
+      });
+
+      // Wait for JS to render the table
+      await this.delay(2000);
+
+      // Extract table data
+      const tableData = await page.evaluate(() => {
+        const table = document.querySelector("table");
+        if (!table) return null;
+
+        const rows = [];
+        table.querySelectorAll("tr").forEach((tr) => {
+          const cells = [];
+          tr.querySelectorAll("th, td").forEach((cell) => {
+            // Clean the cell text
+            let text = cell.textContent.trim();
+            // Remove multiple spaces
+            text = text.replace(/\s+/g, " ");
+            cells.push(text);
+          });
+          if (cells.length > 0) {
+            rows.push(cells);
+          }
+        });
+
+        // Also get the title if present
+        const title =
+          document.querySelector("h1, .dw-chart-header")?.textContent?.trim() ||
+          null;
+
+        return { rows, title };
+      });
+
+      if (!tableData || !tableData.rows || tableData.rows.length === 0) {
+        return null;
+      }
+
+      // Convert to markdown table
+      const { rows, title } = tableData;
+      const lines = [];
+
+      // Add title if present
+      if (title) {
+        lines.push(`**${title}**`);
+        lines.push("");
+      }
+
+      // Header row
+      lines.push("| " + rows[0].join(" | ") + " |");
+      // Separator row
+      lines.push("| " + rows[0].map(() => "---").join(" | ") + " |");
+      // Data rows
+      for (let i = 1; i < rows.length; i++) {
+        lines.push("| " + rows[i].join(" | ") + " |");
+      }
+
+      return lines.join("\n");
+    } catch (error) {
+      console.log(
+        `   ⚠️ Failed to extract Datawrapper table: ${error.message}`
+      );
+      return null;
+    } finally {
+      if (page) {
+        await page.close();
+      }
+    }
+  }
+
+  /**
    * Navigate with fallback strategies
    */
   async navigateSafe(page, url) {
@@ -296,19 +428,24 @@ class ESPNCricinfoPuppeteerScraper {
 
   /**
    * Fetch detailed content from an article page - THE KEY METHOD
+   * Enhanced with inline Twitter/Instagram embeds and markdown formatting
    */
   async fetchArticleDetails(articleUrl) {
     await this.init();
 
     console.log(`📰 Scraping: ${articleUrl.split("/").pop()}`);
 
-    const page = await this.createOptimizedPage();
+    // Use page that allows social embeds to load
+    const page = await this.createPageForEmbeds();
 
     try {
       const navSuccess = await this.navigateSafe(page, articleUrl);
       if (!navSuccess) {
         throw new Error("Navigation failed");
       }
+
+      // Wait longer for embeds to load
+      await this.delay(4000);
 
       // Extract all data in one evaluate call for efficiency
       const rawData = await page.evaluate(() => {
@@ -325,7 +462,14 @@ class ESPNCricinfoPuppeteerScraper {
           keywords: [],
           relatedArticles: [],
           jsonLd: null,
+          embeddedTweets: [],
+          embeddedInstagram: [],
+          datawrapperIframes: [],
         };
+
+        // Track extracted social IDs
+        const seenTweetIds = new Set();
+        const seenInstagramIds = new Set();
 
         // ========== JSON-LD (MOST RELIABLE FOR DATES) ==========
         const jsonLdScripts = document.querySelectorAll(
@@ -415,20 +559,9 @@ class ESPNCricinfoPuppeteerScraper {
           document.querySelector('meta[name="description"]')?.content ||
           "";
 
-        // ========== CONTENT PARAGRAPHS ==========
-        const contentParagraphs = [];
-        const seenText = new Set();
+        // ========== HELPER FUNCTIONS ==========
 
-        // Content selectors in order of priority
-        const contentSelectors = [
-          '[class*="article-body"] p',
-          '[class*="story-body"] p',
-          "article p",
-          "main p",
-          '[class*="content"] p',
-        ];
-
-        // Boilerplate patterns
+        // Boilerplate patterns to skip
         const skipPatterns = [
           /follow us/i,
           /subscribe/i,
@@ -447,76 +580,413 @@ class ESPNCricinfoPuppeteerScraper {
           /sponsored/i,
         ];
 
-        for (const sel of contentSelectors) {
-          const paras = document.querySelectorAll(sel);
-          for (const p of paras) {
-            const plainText = p.textContent?.trim();
-            if (!plainText || plainText.length < 40 || seenText.has(plainText))
-              continue;
+        // Social text patterns (to filter out from content)
+        const socialTextPatterns = [
+          /pic\.twitter\.com\//i,
+          /t\.co\//i,
+          /twitter\.com\/.*\/status\//i,
+          /instagram\.com\/p\//i,
+          /instagram\.com\/reel\//i,
+          /View this post on Instagram/i,
+          /^(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}$/i,
+        ];
 
-            const isBoilerplate = skipPatterns.some((pat) =>
-              pat.test(plainText)
-            );
-            if (isBoilerplate && plainText.length < 200) continue;
-
-            seenText.add(plainText);
-
-            // Convert to markdown preserving formatting
-            let markdownText = "";
-            p.childNodes.forEach((node) => {
-              if (node.nodeType === Node.TEXT_NODE) {
-                markdownText += node.textContent;
-              } else if (node.nodeName === "STRONG" || node.nodeName === "B") {
-                markdownText += "**" + node.textContent + "**";
-              } else if (node.nodeName === "EM" || node.nodeName === "I") {
-                markdownText += "_" + node.textContent + "_";
-              } else if (node.nodeName === "A") {
-                const href = node.getAttribute("href");
-                const linkText = node.textContent?.trim();
-                if (href && linkText && !href.startsWith("#")) {
-                  // Make relative URLs absolute
-                  const fullUrl = href.startsWith("http")
-                    ? href
-                    : "https://www.espncricinfo.com" + href;
-                  markdownText += "[" + linkText + "](" + fullUrl + ")";
-                } else {
-                  markdownText += node.textContent || "";
-                }
-              } else if (node.nodeName === "DIV" || node.nodeName === "SPAN") {
-                // Handle nested content
-                markdownText += node.textContent || "";
-              } else {
-                markdownText += node.textContent || "";
-              }
-            });
-
-            contentParagraphs.push(markdownText.trim());
-          }
-
-          // Stop if we found enough content
-          if (contentParagraphs.length >= 5) break;
+        function isSocialTextFragment(text) {
+          return socialTextPatterns.some((pat) => pat.test(text));
         }
 
-        // Also try to get headings
-        const headings = [];
-        document
-          .querySelectorAll("article h2, article h3, main h2, main h3")
-          .forEach((h) => {
-            const text = h.textContent?.trim();
-            if (text && text.length > 5) {
-              const level = h.tagName === "H2" ? 2 : 3;
-              headings.push({ level, text });
+        // Extract tweet ID from various formats
+        function getTweetIdFromElement(el) {
+          // Check for twitter-tweet blockquote
+          if (
+            el.classList?.contains("twitter-tweet") ||
+            el.tagName === "BLOCKQUOTE"
+          ) {
+            const link = el.querySelector(
+              'a[href*="twitter.com"][href*="status"]'
+            );
+            if (link) {
+              const match = link.href.match(/status\/(\d{15,20})/);
+              if (match && match[1]) return match[1];
+            }
+          }
+
+          // Check for Twitter iframe
+          if (el.tagName === "IFRAME") {
+            const src = el.src || "";
+            const patterns = [
+              /id=(\d{15,20})/,
+              /status%2F(\d{15,20})/,
+              /status\/(\d{15,20})/,
+            ];
+            for (const pattern of patterns) {
+              const match = src.match(pattern);
+              if (match && match[1]) return match[1];
+            }
+          }
+
+          // Check if element contains a tweet embed
+          const tweetBlockquote = el.querySelector("blockquote.twitter-tweet");
+          if (tweetBlockquote) {
+            const link = tweetBlockquote.querySelector(
+              'a[href*="twitter.com"][href*="status"]'
+            );
+            if (link) {
+              const match = link.href.match(/status\/(\d{15,20})/);
+              if (match && match[1]) return match[1];
+            }
+          }
+
+          const tweetIframe = el.querySelector(
+            'iframe[src*="twitter.com"], iframe[src*="platform.twitter"]'
+          );
+          if (tweetIframe) {
+            const src = tweetIframe.src || "";
+            const patterns = [
+              /id=(\d{15,20})/,
+              /status%2F(\d{15,20})/,
+              /status\/(\d{15,20})/,
+            ];
+            for (const pattern of patterns) {
+              const match = src.match(pattern);
+              if (match && match[1]) return match[1];
+            }
+          }
+
+          return null;
+        }
+
+        // Extract Instagram ID from element
+        function getInstagramIdFromElement(el) {
+          // Check for instagram-media blockquote
+          if (
+            el.classList?.contains("instagram-media") ||
+            el.tagName === "BLOCKQUOTE"
+          ) {
+            const link = el.querySelector(
+              'a[href*="instagram.com/p/"], a[href*="instagram.com/reel/"]'
+            );
+            if (link) {
+              const match = link.href.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+              if (match && match[2]) return { id: match[2], type: match[1] };
+            }
+          }
+
+          // Check for Instagram iframe
+          if (el.tagName === "IFRAME") {
+            const src = el.src || "";
+            const match = src.match(
+              /instagram\.com\/(p|reel)\/([A-Za-z0-9_-]+)/
+            );
+            if (match && match[2]) return { id: match[2], type: match[1] };
+          }
+
+          // Check if element contains an Instagram embed
+          const igBlockquote = el.querySelector("blockquote.instagram-media");
+          if (igBlockquote) {
+            const link = igBlockquote.querySelector(
+              'a[href*="instagram.com/p/"], a[href*="instagram.com/reel/"]'
+            );
+            if (link) {
+              const match = link.href.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+              if (match && match[2]) return { id: match[2], type: match[1] };
+            }
+          }
+
+          const igIframe = el.querySelector('iframe[src*="instagram.com"]');
+          if (igIframe) {
+            const src = igIframe.src || "";
+            const match = src.match(
+              /instagram\.com\/(p|reel)\/([A-Za-z0-9_-]+)/
+            );
+            if (match && match[2]) return { id: match[2], type: match[1] };
+          }
+
+          return null;
+        }
+
+        // Convert paragraph to markdown with formatting
+        function paragraphToMarkdown(el) {
+          let text = "";
+          el.childNodes.forEach((node) => {
+            if (node.nodeType === Node.TEXT_NODE) {
+              text += node.textContent;
+            } else if (node.nodeName === "STRONG" || node.nodeName === "B") {
+              text += "**" + node.textContent + "**";
+            } else if (node.nodeName === "EM" || node.nodeName === "I") {
+              text += "_" + node.textContent + "_";
+            } else if (node.nodeName === "A") {
+              const href = node.getAttribute("href");
+              const linkText = node.textContent?.trim();
+              if (href && linkText && !href.startsWith("#")) {
+                const fullUrl = href.startsWith("http")
+                  ? href
+                  : "https://www.espncricinfo.com" + href;
+                text += "[" + linkText + "](" + fullUrl + ")";
+              } else {
+                text += node.textContent || "";
+              }
+            } else if (node.nodeName === "DIV" || node.nodeName === "SPAN") {
+              // Recursively process nested content
+              node.childNodes.forEach((nestedNode) => {
+                if (nestedNode.nodeType === Node.TEXT_NODE) {
+                  text += nestedNode.textContent;
+                } else if (nestedNode.nodeName === "A") {
+                  const href = nestedNode.getAttribute("href");
+                  const linkText = nestedNode.textContent?.trim();
+                  if (href && linkText && !href.startsWith("#")) {
+                    const fullUrl = href.startsWith("http")
+                      ? href
+                      : "https://www.espncricinfo.com" + href;
+                    text += "[" + linkText + "](" + fullUrl + ")";
+                  } else {
+                    text += nestedNode.textContent || "";
+                  }
+                } else if (
+                  nestedNode.nodeName === "STRONG" ||
+                  nestedNode.nodeName === "B"
+                ) {
+                  text += "**" + nestedNode.textContent + "**";
+                } else if (
+                  nestedNode.nodeName === "EM" ||
+                  nestedNode.nodeName === "I"
+                ) {
+                  text += "_" + nestedNode.textContent + "_";
+                } else {
+                  text += nestedNode.textContent || "";
+                }
+              });
+            } else {
+              text += node.textContent || "";
+            }
+          });
+          return text;
+        }
+
+        // Convert list to markdown
+        function listToMarkdown(el, ordered) {
+          const items = el.querySelectorAll("li");
+          const listItems = [];
+          items.forEach((li, idx) => {
+            const itemText = li.textContent.trim();
+            if (itemText) {
+              listItems.push(
+                ordered ? idx + 1 + ". " + itemText : "- " + itemText
+              );
+            }
+          });
+          return listItems.join("\n");
+        }
+
+        // Convert table to markdown
+        function tableToMarkdown(el) {
+          const rows = el.querySelectorAll("tr");
+          if (rows.length === 0) return "";
+
+          const tableRows = [];
+          rows.forEach((row, rowIdx) => {
+            const cells = row.querySelectorAll("td, th");
+            const cellTexts = [];
+            cells.forEach((cell) => {
+              const cellText = cell.textContent.trim().replace(/\n/g, " ");
+              cellTexts.push(cellText);
+            });
+
+            if (cellTexts.length > 0) {
+              tableRows.push("| " + cellTexts.join(" | ") + " |");
+              if (rowIdx === 0) {
+                tableRows.push(
+                  "| " + cellTexts.map(() => "---").join(" | ") + " |"
+                );
+              }
             }
           });
 
-        // Use JSON-LD articleBody as fallback if no paragraphs found
-        if (contentParagraphs.length === 0 && result.jsonLd?.articleBody) {
-          contentParagraphs.push(result.jsonLd.articleBody);
+          return tableRows.length > 1 ? "\n" + tableRows.join("\n") + "\n" : "";
         }
 
-        result.contentParagraphs = contentParagraphs;
-        result.headings = headings;
-        result.content = contentParagraphs.join("\n\n");
+        // ========== ENHANCED CONTENT EXTRACTION WITH INLINE EMBEDS ==========
+        const contentParts = [];
+        const seenText = new Set();
+
+        const article =
+          document.querySelector("article") || document.querySelector("main");
+
+        if (article) {
+          // Get all relevant elements in document order
+          const elements = article.querySelectorAll(
+            "h1, h2, h3, h4, p, ul, ol, table, blockquote.twitter-tweet, blockquote[class*='twitter'], div[class*='twitter'], iframe[src*='twitter'], iframe[src*='platform.twitter'], blockquote.instagram-media, blockquote[class*='instagram'], iframe[src*='instagram']"
+          );
+
+          elements.forEach((el) => {
+            // Check for tweet embed
+            const tweetId = getTweetIdFromElement(el);
+            if (tweetId && !seenTweetIds.has(tweetId)) {
+              seenTweetIds.add(tweetId);
+              result.embeddedTweets.push({
+                id: tweetId,
+                url: `https://twitter.com/i/status/${tweetId}`,
+              });
+              contentParts.push(`[TWEET:${tweetId}]`);
+              return;
+            }
+
+            // Check for Instagram embed
+            const instagramData = getInstagramIdFromElement(el);
+            if (instagramData && !seenInstagramIds.has(instagramData.id)) {
+              seenInstagramIds.add(instagramData.id);
+              result.embeddedInstagram.push({
+                id: instagramData.id,
+                type: instagramData.type,
+                url: `https://www.instagram.com/${instagramData.type}/${instagramData.id}/`,
+              });
+              contentParts.push(`[INSTAGRAM:${instagramData.id}]`);
+              return;
+            }
+
+            // Skip if inside social embed container
+            if (
+              el.closest(
+                "blockquote.twitter-tweet, [class*='twitter-tweet'], blockquote.instagram-media, [class*='instagram-media']"
+              )
+            ) {
+              return;
+            }
+
+            let text = "";
+
+            if (el.tagName === "P") {
+              text = paragraphToMarkdown(el);
+            } else if (el.tagName.match(/^H[1-4]$/)) {
+              const level = parseInt(el.tagName[1]);
+              text = "#".repeat(level) + " " + el.textContent.trim();
+            } else if (el.tagName === "UL") {
+              text = listToMarkdown(el, false);
+            } else if (el.tagName === "OL") {
+              text = listToMarkdown(el, true);
+            } else if (el.tagName === "TABLE") {
+              text = tableToMarkdown(el);
+            }
+
+            text = text.trim();
+
+            // Skip if empty, too short, or boilerplate
+            if (!text || text.length < 20) return;
+            const isBoilerplate = skipPatterns.some((pat) => pat.test(text));
+            if (isBoilerplate && text.length < 150) return;
+
+            // Skip social text fragments
+            if (isSocialTextFragment(text)) return;
+
+            // Avoid duplicate content
+            if (
+              seenText.has(text) ||
+              contentParts.some((p) => p.includes(text) || text.includes(p))
+            )
+              return;
+            seenText.add(text);
+
+            contentParts.push(text);
+          });
+        }
+
+        // Fallback: scan for any missed social embeds
+        document
+          .querySelectorAll(
+            'iframe[src*="twitter.com"], iframe[src*="platform.twitter"]'
+          )
+          .forEach((iframe) => {
+            const src = iframe.src || "";
+            const patterns = [
+              /id=(\d{15,20})/,
+              /status%2F(\d{15,20})/,
+              /status\/(\d{15,20})/,
+            ];
+
+            for (const pattern of patterns) {
+              const match = src.match(pattern);
+              if (match && match[1] && !seenTweetIds.has(match[1])) {
+                seenTweetIds.add(match[1]);
+                result.embeddedTweets.push({
+                  id: match[1],
+                  url: `https://twitter.com/i/status/${match[1]}`,
+                });
+                if (
+                  !contentParts.some((p) => p.includes(`[TWEET:${match[1]}]`))
+                ) {
+                  contentParts.push(`[TWEET:${match[1]}]`);
+                }
+                break;
+              }
+            }
+          });
+
+        // Scan for missed Instagram embeds
+        document
+          .querySelectorAll(
+            'blockquote.instagram-media, [class*="instagram-media"], iframe[src*="instagram.com"]'
+          )
+          .forEach((el) => {
+            let igId = null;
+            let igType = "p";
+
+            const link = el.querySelector(
+              'a[href*="instagram.com/p/"], a[href*="instagram.com/reel/"]'
+            );
+            if (link) {
+              const match = link.href.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
+              if (match && match[2]) {
+                igId = match[2];
+                igType = match[1];
+              }
+            }
+
+            if (!igId && el.tagName === "IFRAME") {
+              const src = el.src || "";
+              const match = src.match(
+                /instagram\.com\/(p|reel)\/([A-Za-z0-9_-]+)/
+              );
+              if (match && match[2]) {
+                igId = match[2];
+                igType = match[1];
+              }
+            }
+
+            if (igId && !seenInstagramIds.has(igId)) {
+              seenInstagramIds.add(igId);
+              result.embeddedInstagram.push({
+                id: igId,
+                type: igType,
+                url: `https://www.instagram.com/${igType}/${igId}/`,
+              });
+              if (
+                !contentParts.some((p) => p.includes(`[INSTAGRAM:${igId}]`))
+              ) {
+                contentParts.push(`[INSTAGRAM:${igId}]`);
+              }
+            }
+          });
+
+        // Fallback to plain paragraph extraction if no content found
+        if (contentParts.length === 0) {
+          const paragraphs = document.querySelectorAll(
+            "article p, [class*='content'] p, main p"
+          );
+          paragraphs.forEach((p) => {
+            const text = p.textContent.trim();
+            if (text && text.length > 50 && !isSocialTextFragment(text)) {
+              contentParts.push(text);
+            }
+          });
+        }
+
+        // Use JSON-LD articleBody as last fallback
+        if (contentParts.length === 0 && result.jsonLd?.articleBody) {
+          contentParts.push(result.jsonLd.articleBody);
+        }
+
+        result.contentParagraphs = contentParts;
+        result.content = contentParts.join("\n\n");
 
         // ========== TAGS ==========
         const tags = [];
@@ -526,7 +996,7 @@ class ESPNCricinfoPuppeteerScraper {
             const tag = el.content;
             if (tag && !tags.includes(tag)) tags.push(tag);
           });
-        result.tags = tags.slice(0, 8); // Limit to 8 tags max
+        result.tags = tags.slice(0, 8);
 
         // ========== KEYWORDS ==========
         const kw =
@@ -558,6 +1028,23 @@ class ESPNCricinfoPuppeteerScraper {
           });
         result.relatedArticles = related.slice(0, 5);
 
+        // ========== DATAWRAPPER IFRAMES (Interactive Tables) ==========
+        const datawrapperUrls = [];
+        document.querySelectorAll("iframe").forEach((iframe) => {
+          const src = iframe.src || "";
+          if (src.includes("datawrapper.dwcdn.net")) {
+            // Extract the ID from the URL
+            const match = src.match(/datawrapper\.dwcdn\.net\/([^/]+)/);
+            if (match) {
+              datawrapperUrls.push({
+                id: match[1],
+                url: src,
+              });
+            }
+          }
+        });
+        result.datawrapperIframes = datawrapperUrls;
+
         return result;
       });
 
@@ -576,14 +1063,71 @@ class ESPNCricinfoPuppeteerScraper {
         tags: rawData.tags,
         keywords: rawData.keywords,
         relatedArticles: rawData.relatedArticles,
+        embeddedTweets: rawData.embeddedTweets.slice(0, 10),
+        embeddedInstagram: rawData.embeddedInstagram.slice(0, 10),
         url: articleUrl,
         scrapedAt: new Date().toISOString(),
       };
 
+      // ========== DATAWRAPPER TABLE EXTRACTION ==========
+      // Extract tables from Datawrapper iframes (limit to 5 for performance)
+      const datawrapperIframes = rawData.datawrapperIframes || [];
+      if (datawrapperIframes.length > 0) {
+        console.log(
+          `   📊 Found ${datawrapperIframes.length} Datawrapper tables, extracting...`
+        );
+
+        const extractedTables = [];
+        const tablesToExtract = datawrapperIframes.slice(0, 5); // Limit for performance
+
+        for (let i = 0; i < tablesToExtract.length; i++) {
+          const iframe = tablesToExtract[i];
+          console.log(
+            `   📊 Extracting table ${i + 1}/${tablesToExtract.length}: ${
+              iframe.id
+            }`
+          );
+          const tableMarkdown = await this.extractDatawrapperTable(iframe.url);
+          if (tableMarkdown) {
+            extractedTables.push({
+              id: iframe.id,
+              markdown: tableMarkdown,
+            });
+          }
+        }
+
+        // Prepend extracted tables to the content with headers
+        if (extractedTables.length > 0) {
+          const tableSection = extractedTables
+            .map((t, idx) => `### Table ${idx + 1}\n\n${t.markdown}`)
+            .join("\n\n---\n\n");
+
+          // Add tables section at the start of content (after title)
+          const contentParts = details.content.split("\n\n");
+          const titlePart = contentParts[0]; // Usually the # Title
+          const restOfContent = contentParts.slice(1).join("\n\n");
+
+          details.content = `${titlePart}\n\n${tableSection}\n\n---\n\n${restOfContent}`;
+          details.contentLength = details.content.length;
+          details.wordCount = details.content
+            .split(/\s+/)
+            .filter((w) => w).length;
+
+          console.log(`   ✅ Extracted ${extractedTables.length} tables`);
+        }
+      }
+
+      // Log summary
+      const embedSummary = [];
+      if (details.embeddedTweets.length > 0)
+        embedSummary.push(`${details.embeddedTweets.length} tweets`);
+      if (details.embeddedInstagram.length > 0)
+        embedSummary.push(`${details.embeddedInstagram.length} IG`);
+
       console.log(
-        `   ✓ ${details.wordCount} words, published: ${
-          details.publishedTime || "unknown"
-        }`
+        `   ✓ ${details.wordCount} words${
+          embedSummary.length ? `, ${embedSummary.join(", ")}` : ""
+        }, published: ${details.publishedTime || "unknown"}`
       );
 
       return details;

@@ -506,7 +506,21 @@ function ArticleCard({ article }) {
 
 ## 10. Rendering Embedded Tweets (ICC Cricket)
 
-ICC Cricket and BBC Sport articles may contain embedded tweets. The `embeddedTweets` field contains an array of tweet IDs.
+ICC Cricket and BBC Sport articles contain embedded tweets. The `content` field now includes **inline placeholders** in the format `[TWEET:ID]` at the exact position where tweets should appear.
+
+> [!IMPORTANT] > **New Format (Dec 2025):** Tweets are now embedded inline within content using `[TWEET:ID]` placeholders. This allows you to render tweets exactly where the article author intended them, not just at the end.
+
+### Content Example
+
+```markdown
+Head has been a revelation for Australia since his move to the top of the order...
+
+[TWEET:2001941101725577225]
+
+While Head made his mark in the Australian side coming in at No.5, the 31-year-old suggested...
+
+[TWEET:2004817141909086592]
+```
 
 ### Install Package
 
@@ -514,19 +528,63 @@ ICC Cricket and BBC Sport articles may contain embedded tweets. The `embeddedTwe
 npm install react-twitter-embed
 ```
 
-### Basic Usage
+### Inline Tweet Rendering (Recommended)
+
+Parse the content to split by tweet placeholders and render tweets in their correct position:
+
+```jsx
+import ReactMarkdown from "react-markdown";
+import { TwitterTweetEmbed } from "react-twitter-embed";
+
+function ArticleWithInlineTweets({ article }) {
+  // Split content by tweet placeholders: [TWEET:ID]
+  const parts = article.content.split(/\[TWEET:(\d+)\]/);
+
+  return (
+    <article className="prose prose-lg max-w-none">
+      {parts.map((part, index) => {
+        // Odd indices are tweet IDs (captured group)
+        if (index % 2 === 1) {
+          return (
+            <div key={`tweet-${part}`} className="my-6 flex justify-center">
+              <TwitterTweetEmbed
+                tweetId={part}
+                placeholder={
+                  <div className="animate-pulse bg-gray-200 rounded-lg h-48 w-full max-w-lg flex items-center justify-center">
+                    Loading tweet...
+                  </div>
+                }
+              />
+            </div>
+          );
+        }
+        // Even indices are regular content
+        if (!part.trim()) return null;
+        return <ReactMarkdown key={`content-${index}`}>{part}</ReactMarkdown>;
+      })}
+    </article>
+  );
+}
+```
+
+### Fallback: Tweets at End (Legacy)
+
+If you prefer to render all tweets at the end (not recommended for UX):
 
 ```jsx
 import { TwitterTweetEmbed } from "react-twitter-embed";
 
-function ArticleWithTweets({ article }) {
+function ArticleWithTweetsAtEnd({ article }) {
+  // Remove tweet placeholders from content for display
+  const cleanContent = article.content.replace(/\[TWEET:\d+\]/g, "");
+
   return (
     <article>
-      <ReactMarkdown>{article.content}</ReactMarkdown>
+      <ReactMarkdown>{cleanContent}</ReactMarkdown>
 
-      {/* Render embedded tweets */}
+      {/* Render embedded tweets at end */}
       {article.embeddedTweets?.length > 0 && (
-        <div className="embedded-tweets mt-8">
+        <div className="embedded-tweets mt-8 border-t pt-6">
           <h3 className="text-lg font-semibold mb-4">Related Tweets</h3>
           {article.embeddedTweets.map((tweetId) => (
             <div key={tweetId} className="mb-4">

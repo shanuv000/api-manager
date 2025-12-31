@@ -287,6 +287,8 @@ async function runESPNCricinfoScraper() {
                 ? { tags }
                 : {}),
               relatedArticles: details.relatedArticles || null,
+              embeddedTweets: details.embeddedTweets?.map((t) => t.id) || [],
+              embeddedInstagram: details.embeddedInstagram || [],
               updatedAt: new Date(),
             },
           });
@@ -315,6 +317,8 @@ async function runESPNCricinfoScraper() {
               metaDesc: metaDescription,
               tags: tags,
               relatedArticles: details.relatedArticles || null,
+              embeddedTweets: details.embeddedTweets?.map((t) => t.id) || [],
+              embeddedInstagram: details.embeddedInstagram || [],
               scrapedAt: new Date(),
             },
           });

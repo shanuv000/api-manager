@@ -265,6 +265,8 @@ async function runICCScraper() {
                 : {}),
               relatedArticles: details.relatedArticles || null,
               embeddedTweets: details.embeddedTweets?.map((t) => t.id) || [],
+              embeddedInstagram:
+                details.embeddedInstagram?.map((ig) => ig.id) || [],
               updatedAt: new Date(),
             },
           });
@@ -291,6 +293,8 @@ async function runICCScraper() {
               tags: tags,
               relatedArticles: details.relatedArticles || null,
               embeddedTweets: details.embeddedTweets?.map((t) => t.id) || [],
+              embeddedInstagram:
+                details.embeddedInstagram?.map((ig) => ig.id) || [],
               scrapedAt: new Date(),
             },
           });
