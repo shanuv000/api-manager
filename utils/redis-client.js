@@ -9,7 +9,9 @@ const { Redis } = require("@upstash/redis");
 // Redis key constants
 const KEYS = {
   LIVE_SCORES: "live_scores_cache",
+  LIVE_SCORES_LITE: "live_scores_lite",
   WORKER_STATUS: "live_scores_worker_status",
+  SCORECARD_PREFIX: "scorecard:",
 };
 
 // TTL in seconds (90s to allow 60s refresh cycle + buffer)
@@ -135,12 +137,109 @@ async function getWorkerStatus() {
   }
 }
 
+/**
+ * Get individual match scorecard from Redis
+ * @param {string} matchId
+ * @returns {Promise<any|null>}
+ */
+async function getMatchScorecard(matchId) {
+  const client = getClient();
+  if (!client) return null;
+
+  try {
+    const key = `${KEYS.SCORECARD_PREFIX}${matchId}`;
+    const cached = await client.get(key);
+    if (cached) {
+      // console.log(`✅ Redis HIT: ${key}`);
+      return cached;
+    }
+    return null;
+  } catch (error) {
+    console.error(`Redis GET scorecard error (${matchId}):`, error.message);
+    return null;
+  }
+}
+
+/**
+ * Set individual match scorecard in Redis
+ * @param {string} matchId
+ * @param {Object} data
+ * @param {number} ttl
+ * @returns {Promise<boolean>}
+ */
+async function setMatchScorecard(matchId, data, ttl = DEFAULT_TTL) {
+  const client = getClient();
+  if (!client) return false;
+
+  try {
+    const key = `${KEYS.SCORECARD_PREFIX}${matchId}`;
+    await client.set(key, data, { ex: ttl });
+    return true;
+  } catch (error) {
+    console.error(`Redis SET scorecard error (${matchId}):`, error.message);
+    return false;
+  }
+}
+
+/**
+ * Get lite live scores from Redis cache (match list without scorecards)
+ * @returns {Promise<{data: any, timestamp: number}|null>}
+ */
+async function getLiteScores() {
+  const client = getClient();
+  if (!client) return null;
+
+  try {
+    const cached = await client.get(KEYS.LIVE_SCORES_LITE);
+    if (cached) {
+      console.log("✅ Redis HIT: live_scores_lite");
+      return cached;
+    }
+    console.log("❌ Redis MISS: live_scores_lite");
+    return null;
+  } catch (error) {
+    console.error("Redis GET lite error:", error.message);
+    return null;
+  }
+}
+
+/**
+ * Set lite live scores in Redis cache (match list without scorecards)
+ * @param {Array} matches - Array of match data (without scorecards)
+ * @param {number} ttl - TTL in seconds (default: 90)
+ * @returns {Promise<boolean>}
+ */
+async function setLiteScores(matches, ttl = DEFAULT_TTL) {
+  const client = getClient();
+  if (!client) return false;
+
+  try {
+    const payload = {
+      data: matches,
+      timestamp: Date.now(),
+      count: matches.length,
+    };
+    await client.set(KEYS.LIVE_SCORES_LITE, payload, { ex: ttl });
+    console.log(
+      `💾 Redis SET: live_scores_lite (${matches.length} matches, TTL: ${ttl}s)`
+    );
+    return true;
+  } catch (error) {
+    console.error("Redis SET lite error:", error.message);
+    return false;
+  }
+}
+
 module.exports = {
   getClient,
   getLiveScores,
   setLiveScores,
+  getLiteScores,
+  setLiteScores,
   setWorkerStatus,
   getWorkerStatus,
+  getMatchScorecard,
+  setMatchScorecard,
   KEYS,
   DEFAULT_TTL,
 };

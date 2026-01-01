@@ -200,25 +200,77 @@ async function fallbackScrape() {
 }
 
 // Define a GET route to scrape live scores
+// Supports ?full=true for full payload with embedded scorecards (backward compatible)
+// Default: returns lite data without scorecards (~10x smaller payload)
 router.get("/live-scores", async (req, res) => {
   const startTime = Date.now();
+  const wantsFull = req.query.full === "true";
 
   try {
-    // PRIORITY 1: Try Redis cache (populated by background worker)
-    const redisCached = await redisClient.getLiveScores();
-    if (redisCached && redisCached.data) {
-      const ageMs = Date.now() - redisCached.timestamp;
-      const ageSeconds = Math.round(ageMs / 1000);
+    if (wantsFull) {
+      // FULL MODE: Return complete data with embedded scorecards (backward compatible)
+      const redisCached = await redisClient.getLiveScores();
+      if (redisCached && redisCached.data) {
+        const ageMs = Date.now() - redisCached.timestamp;
+        const ageSeconds = Math.round(ageMs / 1000);
 
-      return res.json({
-        success: true,
-        count: redisCached.count,
-        data: redisCached.data,
-        fromCache: true,
-        cacheSource: "redis",
-        cacheAgeSeconds: ageSeconds,
-        responseTime: Date.now() - startTime,
-      });
+        return res.json({
+          success: true,
+          count: redisCached.count,
+          data: redisCached.data,
+          fromCache: true,
+          cacheSource: "redis-full",
+          cacheAgeSeconds: ageSeconds,
+          responseTime: Date.now() - startTime,
+        });
+      }
+    } else {
+      // LITE MODE (default): Return match list without scorecards
+      const liteCached = await redisClient.getLiteScores();
+      if (liteCached && liteCached.data) {
+        const ageMs = Date.now() - liteCached.timestamp;
+        const ageSeconds = Math.round(ageMs / 1000);
+
+        return res.json({
+          success: true,
+          count: liteCached.count,
+          data: liteCached.data,
+          fromCache: true,
+          cacheSource: "redis-lite",
+          cacheAgeSeconds: ageSeconds,
+          responseTime: Date.now() - startTime,
+          hint: "Use ?full=true for embedded scorecards, or fetch /scorecard/:matchId individually",
+        });
+      }
+
+      // Fallback to full data if lite is not available
+      const redisCached = await redisClient.getLiveScores();
+      if (redisCached && redisCached.data) {
+        // Strip scorecards from full data
+        const liteData = redisCached.data.map((match) => {
+          const { scorecard, ...liteMatch } = match;
+          if (match.matchId && scorecard) {
+            liteMatch.scorecardUrl = `/api/cricket/scorecard/${match.matchId}`;
+            liteMatch.hasScorecard = true;
+          } else {
+            liteMatch.hasScorecard = false;
+          }
+          return liteMatch;
+        });
+
+        return res.json({
+          success: true,
+          count: liteData.length,
+          data: liteData,
+          fromCache: true,
+          cacheSource: "redis-full-stripped",
+          cacheAgeSeconds: Math.round(
+            (Date.now() - redisCached.timestamp) / 1000
+          ),
+          responseTime: Date.now() - startTime,
+          hint: "Use ?full=true for embedded scorecards, or fetch /scorecard/:matchId individually",
+        });
+      }
     }
 
     // PRIORITY 2: Try in-memory cache (legacy fallback)
@@ -272,6 +324,7 @@ router.get("/live-scores/worker-status", async (req, res) => {
   try {
     const status = await redisClient.getWorkerStatus();
     const cache = await redisClient.getLiveScores();
+    const liteCache = await redisClient.getLiteScores();
 
     res.json({
       success: true,
@@ -279,18 +332,98 @@ router.get("/live-scores/worker-status", async (req, res) => {
         status: "unknown",
         message: "No worker status found",
       },
-      cache: cache
-        ? {
-            available: true,
-            matchCount: cache.count,
-            ageSeconds: Math.round((Date.now() - cache.timestamp) / 1000),
-          }
-        : { available: false },
+      cache: {
+        full: cache
+          ? {
+              available: true,
+              matchCount: cache.count,
+              ageSeconds: Math.round((Date.now() - cache.timestamp) / 1000),
+            }
+          : { available: false },
+        lite: liteCache
+          ? {
+              available: true,
+              matchCount: liteCache.count,
+              ageSeconds: Math.round((Date.now() - liteCache.timestamp) / 1000),
+            }
+          : { available: false },
+      },
     });
   } catch (error) {
     res.status(500).json({
       success: false,
       error: error.message,
+    });
+  }
+});
+
+// Individual scorecard endpoint - fetches scorecard for a single match
+// This allows clients to load scorecards on-demand instead of all at once
+router.get("/scorecard/:matchId", async (req, res) => {
+  const startTime = Date.now();
+  const { matchId } = req.params;
+
+  // Validate matchId
+  if (!matchId || !/^\d+$/.test(matchId)) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid matchId",
+      message: "matchId must be a numeric string",
+      responseTime: Date.now() - startTime,
+    });
+  }
+
+  try {
+    // Try Redis cache first
+    const cached = await redisClient.getMatchScorecard(matchId);
+    if (cached) {
+      return res.json({
+        success: true,
+        matchId,
+        data: cached,
+        fromCache: true,
+        cacheSource: "redis",
+        cacheAgeSeconds: Math.round((Date.now() - cached.timestamp) / 1000),
+        responseTime: Date.now() - startTime,
+      });
+    }
+
+    // Fallback: Try to find in full cache
+    const fullCache = await redisClient.getLiveScores();
+    if (fullCache && fullCache.data) {
+      const match = fullCache.data.find((m) => m.matchId === matchId);
+      if (match && match.scorecard) {
+        return res.json({
+          success: true,
+          matchId,
+          data: {
+            matchId,
+            title: match.title,
+            teams: match.teams,
+            innings: match.scorecard,
+            timestamp: fullCache.timestamp,
+          },
+          fromCache: true,
+          cacheSource: "redis-full-fallback",
+          responseTime: Date.now() - startTime,
+        });
+      }
+    }
+
+    // Scorecard not found
+    return res.status(404).json({
+      success: false,
+      error: "Scorecard not found",
+      message: `No scorecard available for matchId: ${matchId}`,
+      responseTime: Date.now() - startTime,
+    });
+  } catch (error) {
+    console.error(`Error fetching scorecard for ${matchId}:`, error.message);
+    res.status(500).json({
+      success: false,
+      error: "Error fetching scorecard",
+      message: error.message,
+      responseTime: Date.now() - startTime,
     });
   }
 });

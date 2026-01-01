@@ -324,9 +324,51 @@ async function scrapeAndCache() {
     const scorecardCount = enrichedMatches.filter((m) => m.scorecard).length;
     console.log(`✅ Fetched ${scorecardCount}/${matches.length} scorecards`);
 
-    // Step 3: Save to Redis
+    // Step 3: Save to Redis using tiered data structure
+    // Extract matchId from matchLink for each match
+    const matchesWithIds = enrichedMatches.map((match) => {
+      const idMatch = match.matchLink?.match(/\/(\d+)\//);
+      match.matchId = idMatch ? idMatch[1] : null;
+      return match;
+    });
+
+    // 3a: Save LITE data (without scorecards) for fast list endpoint
+    const liteMatches = matchesWithIds.map((match) => {
+      const { scorecard, ...liteMatch } = match;
+      // Add scorecardUrl for clients to fetch scorecard on-demand
+      if (match.matchId && match.scorecard) {
+        liteMatch.scorecardUrl = `/api/cricket/scorecard/${match.matchId}`;
+        liteMatch.hasScorecard = true;
+      } else {
+        liteMatch.hasScorecard = false;
+      }
+      return liteMatch;
+    });
+    await redisClient.setLiteScores(liteMatches, CONFIG.REDIS_TTL);
+
+    // 3b: Save individual scorecards for on-demand fetching
+    let savedScorecards = 0;
+    for (const match of matchesWithIds) {
+      if (match.matchId && match.scorecard) {
+        const scorecardSaved = await redisClient.setMatchScorecard(
+          match.matchId,
+          {
+            matchId: match.matchId,
+            title: match.title,
+            teams: match.teams,
+            innings: match.scorecard,
+            timestamp: Date.now(),
+          },
+          CONFIG.REDIS_TTL
+        );
+        if (scorecardSaved) savedScorecards++;
+      }
+    }
+    console.log(`💾 Saved ${savedScorecards} individual scorecards to Redis`);
+
+    // 3c: Save FULL data (backward compatible) for ?full=true requests
     const saved = await redisClient.setLiveScores(
-      enrichedMatches,
+      matchesWithIds,
       CONFIG.REDIS_TTL
     );
 
@@ -334,8 +376,9 @@ async function scrapeAndCache() {
       // Update worker status
       await redisClient.setWorkerStatus({
         iteration: iterationCount,
-        matchCount: enrichedMatches.length,
+        matchCount: matchesWithIds.length,
         scorecardCount,
+        savedScorecards,
         lastScrapeMs: Date.now() - startTime,
       });
     }
