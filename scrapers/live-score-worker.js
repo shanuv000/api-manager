@@ -125,11 +125,118 @@ async function sendDiscordRecovery(previousErrors, duration) {
 }
 
 /**
- * Extract match info from Cricbuzz page
+ * Extract match info from Cricbuzz page (comprehensive version)
+ * Includes: team icons, time/date from JSON-LD, matchStatus, matchStartTime
  */
-function parseMatches($) {
+function parseMatches($, html) {
   const matches = [];
   const processedLinks = new Set();
+
+  // Extract match times from JSON-LD SportsEvent data
+  const matchTimeMap = new Map();
+  try {
+    // Parse JSON-LD script tags
+    const scriptTags = $('script[type="application/ld+json"]');
+    scriptTags.each((i, script) => {
+      try {
+        const content = $(script).html();
+        if (content && content.includes("SportsEvent")) {
+          const jsonData = JSON.parse(content);
+
+          // Helper function to extract SportsEvent data
+          const extractSportsEvents = (items) => {
+            if (!Array.isArray(items)) return;
+            for (const item of items) {
+              if (item["@type"] === "SportsEvent") {
+                const name = item.name;
+                const startDate = item.startDate;
+                const status = item.eventStatus;
+                if (name && (startDate || status)) {
+                  matchTimeMap.set(name, { startDate, status });
+                }
+              }
+            }
+          };
+
+          // Handle WebPage with mainEntity.itemListElement
+          if (
+            jsonData["@type"] === "WebPage" &&
+            jsonData.mainEntity?.itemListElement
+          ) {
+            extractSportsEvents(jsonData.mainEntity.itemListElement);
+          }
+          // Handle ItemList containing SportsEvents
+          if (jsonData["@type"] === "ItemList" && jsonData.itemListElement) {
+            extractSportsEvents(jsonData.itemListElement);
+          }
+          // Handle direct SportsEvent
+          if (jsonData["@type"] === "SportsEvent") {
+            const name = jsonData.name;
+            const startDate = jsonData.startDate;
+            const status = jsonData.eventStatus;
+            if (name && (startDate || status)) {
+              matchTimeMap.set(name, { startDate, status });
+            }
+          }
+        }
+      } catch (e) {
+        // JSON parse error, skip
+      }
+    });
+
+    // Extract from embedded RSC payload with team names
+    const sportsEventPattern =
+      /"@type":"SportsEvent","name":"([^"]+)"[^]*?"competitor":\[([^\]]+)\][^]*?"startDate":"([^"]+)"[^]*?"eventStatus":"([^"]+)"/g;
+    let eventMatch;
+    while ((eventMatch = sportsEventPattern.exec(html)) !== null) {
+      const name = eventMatch[1];
+      const competitorBlock = eventMatch[2];
+      const startDate = eventMatch[3];
+      const status = eventMatch[4];
+
+      const teamNames = [];
+      const teamPattern = /"name":"([^"]+)"/g;
+      let teamMatch;
+      while ((teamMatch = teamPattern.exec(competitorBlock)) !== null) {
+        teamNames.push(teamMatch[1].toLowerCase());
+      }
+
+      if (name && (startDate || status)) {
+        matchTimeMap.set(name, {
+          startDate: startDate || null,
+          status: status || null,
+          teams: teamNames,
+        });
+      }
+    }
+
+    // Fallback: simpler pattern without competitors
+    const simpleSportsEvents = html.match(
+      /"@type":"SportsEvent","name":"([^"]+)"[^}]*?"startDate":"([^"]+)"[^}]*?"eventStatus":"([^"]+)"/g
+    );
+    if (simpleSportsEvents) {
+      for (const eventStr of simpleSportsEvents) {
+        const nameMatch = eventStr.match(/"name":"([^"]+)"/);
+        const dateMatch = eventStr.match(/"startDate":"([^"]+)"/);
+        const statusMatch = eventStr.match(/"eventStatus":"([^"]+)"/);
+        if (
+          nameMatch &&
+          (dateMatch || statusMatch) &&
+          !matchTimeMap.has(nameMatch[1])
+        ) {
+          matchTimeMap.set(nameMatch[1], {
+            startDate: dateMatch ? dateMatch[1] : null,
+            status: statusMatch ? statusMatch[1] : null,
+            teams: [],
+          });
+        }
+      }
+    }
+
+    console.log(`📅 Found ${matchTimeMap.size} match times from page data`);
+  } catch (e) {
+    console.log("Time extraction error (non-critical):", e.message);
+  }
 
   const matchElements = $("a.w-full.bg-cbWhite.flex.flex-col");
 
@@ -163,6 +270,7 @@ function parseMatches($) {
     const teams = [];
     const teamAbbr = [];
     const scores = [];
+    const teamIcons = [];
 
     $matchCard
       .find("div.flex.items-center.gap-4.justify-between")
@@ -185,6 +293,16 @@ function parseMatches($) {
           .text()
           .trim();
         if (score) scores.push(score);
+
+        // Extract team icon
+        const iconImg = $row.find("img").first();
+        const iconSrc = iconImg.attr("src");
+        if (iconSrc) {
+          const fullIconUrl = iconSrc.startsWith("http")
+            ? iconSrc
+            : `https://static.cricbuzz.com${iconSrc}`;
+          teamIcons.push(fullIconUrl);
+        }
       });
 
     if (teams.length >= 2) {
@@ -207,6 +325,19 @@ function parseMatches($) {
     }
     match.scores = scores;
 
+    // Add team icons
+    match.teamIcons = teamIcons;
+    if (teamIcons.length >= 2) {
+      match.team1Icon = teamIcons[0];
+      match.team2Icon = teamIcons[1];
+    } else if (teamIcons.length === 1) {
+      match.team1Icon = teamIcons[0];
+      match.team2Icon = null;
+    } else {
+      match.team1Icon = null;
+      match.team2Icon = null;
+    }
+
     const resultSpan = $matchCard
       .find(
         'span[class*="text-cbComplete"], span[class*="text-cbLive"], span[class*="text-cbPreview"]'
@@ -226,25 +357,6 @@ function parseMatches($) {
     match.matchNumber = locationParts[0] || null;
     match.venue = locationParts[1] || match.location;
 
-    // Match state
-    if (match.liveCommentary.toLowerCase().includes("won")) {
-      match.matchState = "completed";
-    } else if (
-      match.liveCommentary.toLowerCase().includes("preview") ||
-      match.liveCommentary.toLowerCase().includes("upcoming")
-    ) {
-      match.matchState = "upcoming";
-    } else if (
-      match.liveCommentary.toLowerCase().includes("stumps") ||
-      match.liveCommentary.toLowerCase().includes("lunch") ||
-      match.liveCommentary.toLowerCase().includes("tea") ||
-      match.liveCommentary.toLowerCase().includes("break")
-    ) {
-      match.matchState = "break";
-    } else {
-      match.matchState = "live";
-    }
-
     // Related links
     match.links = {};
     if (href) {
@@ -258,7 +370,179 @@ function parseMatches($) {
       ] = `https://www.cricbuzz.com/live-cricket-full-commentary/${basePath}`;
     }
 
-    match.time = "N/A";
+    // ========== TIME AND STATUS EXTRACTION ==========
+    // Helper functions
+    const isMatchResult = (str) => {
+      if (!str) return false;
+      const resultPatterns = [
+        /won by/i,
+        /\bdrawn?\b/i,
+        /\btied?\b/i,
+        /no result/i,
+        /abandoned/i,
+        /cancelled/i,
+        /innings (and|&)/i,
+        /\d+\s*(wkts?|wickets?|runs?)/i,
+      ];
+      return resultPatterns.some((pattern) => pattern.test(str));
+    };
+
+    const isLiveStatus = (str) => {
+      if (!str) return false;
+      const livePatterns = [
+        /\blive\b/i,
+        /day \d+/i,
+        /session/i,
+        /innings break/i,
+        /tea\b|lunch\b|stumps/i,
+        /at (bat|crease)/i,
+        /opt to (bat|bowl)/i,
+        /trail by|lead by/i,
+        /\bneed\s+\d+\s+runs?\b/i,
+      ];
+      return livePatterns.some((pattern) => pattern.test(str));
+    };
+
+    const teamsMatch = (scrapedTeams, jsonLdTeams) => {
+      if (!jsonLdTeams || jsonLdTeams.length === 0) return false;
+      if (!scrapedTeams || scrapedTeams.length === 0) return false;
+      const scrapedLower = scrapedTeams.map((t) => t.toLowerCase());
+      return jsonLdTeams.some((jsonTeam) =>
+        scrapedLower.some(
+          (scraped) => scraped.includes(jsonTeam) || jsonTeam.includes(scraped)
+        )
+      );
+    };
+
+    // Try to match with JSON-LD data
+    let timeInfo = null;
+    const matchDescParts = match.matchDetails?.split(",") || [];
+    const matchNumber2 = matchDescParts
+      .find((part) =>
+        /\d+(st|nd|rd|th)\s+(match|test|odi|t20)/i.test(part.trim())
+      )
+      ?.trim();
+
+    for (const [eventName, value] of matchTimeMap) {
+      const descriptionMatches =
+        matchNumber2 &&
+        eventName.toLowerCase().includes(matchNumber2.toLowerCase());
+      const eventParts = eventName.split(",");
+      const eventPartMatches =
+        eventParts.length > 0 &&
+        match.matchDetails?.includes(eventParts[0].trim());
+
+      if (descriptionMatches || eventPartMatches) {
+        if (teamsMatch(match.teams, value.teams)) {
+          timeInfo = value;
+          break;
+        }
+      }
+    }
+
+    // Set time and matchStatus based on extracted info
+    if (timeInfo && timeInfo.status) {
+      const statusStr = timeInfo.status;
+
+      if (isLiveStatus(statusStr)) {
+        match.matchStatus = "live";
+        match.result = statusStr;
+        match.time = "LIVE";
+        match.matchStartTime = {
+          startDateISO: timeInfo.startDate || null,
+          status: statusStr,
+        };
+      } else if (isMatchResult(statusStr)) {
+        match.result = statusStr;
+        match.matchStatus = "completed";
+        if (timeInfo.startDate) {
+          match.matchStartTime = {
+            startDateISO: timeInfo.startDate,
+            note: "Match completed",
+          };
+          try {
+            const startDate = new Date(timeInfo.startDate);
+            match.time = startDate.toLocaleString("en-US", {
+              month: "short",
+              day: "numeric",
+              hour: "numeric",
+              minute: "2-digit",
+              hour12: true,
+            });
+          } catch (e) {
+            match.time = "Completed";
+          }
+        } else {
+          match.time = "Completed";
+          match.matchStartTime = { note: "Match completed" };
+        }
+      } else {
+        // Parse "Match starts at" format
+        const matchStartsMatch = statusStr.match(
+          /Match starts at\s+(?:([A-Za-z]+\s+\d{1,2}),?\s+)?(\d{1,2}:\d{2})\s*(GMT|IST|Local)?/i
+        );
+        if (matchStartsMatch) {
+          const datePart = matchStartsMatch[1] || "";
+          const timePart = matchStartsMatch[2];
+          const tzPart = matchStartsMatch[3] || "GMT";
+          match.time = datePart
+            ? `${datePart}, ${timePart} ${tzPart}`
+            : `${timePart} ${tzPart}`;
+          match.matchStatus = "upcoming";
+          match.matchStartTime = {
+            date: datePart || null,
+            time: timePart,
+            timezone: tzPart,
+            startDateISO: timeInfo.startDate,
+            raw: statusStr,
+          };
+        } else {
+          match.time = statusStr;
+          match.matchStartTime = {
+            startDateISO: timeInfo.startDate,
+            raw: statusStr,
+          };
+          match.matchStatus = "live";
+        }
+      }
+    } else if (match.liveCommentary) {
+      // Fallback: extract from liveCommentary
+      if (isLiveStatus(match.liveCommentary)) {
+        match.result = match.liveCommentary;
+        match.matchStatus = "live";
+        match.time = "LIVE";
+      } else if (isMatchResult(match.liveCommentary)) {
+        match.result = match.liveCommentary;
+        match.matchStatus = "completed";
+        match.time = "Completed";
+      } else {
+        const matchStartsMatch = match.liveCommentary.match(
+          /Match starts at\s+(?:([A-Za-z]+\s+\d{1,2}),?\s+)?(\d{1,2}:\d{2})\s*(GMT|IST|Local)?/i
+        );
+        if (matchStartsMatch) {
+          const datePart = matchStartsMatch[1] || "";
+          const timePart = matchStartsMatch[2];
+          const tzPart = matchStartsMatch[3] || "GMT";
+          match.time = datePart
+            ? `${datePart}, ${timePart} ${tzPart}`
+            : `${timePart} ${tzPart}`;
+          match.matchStatus = "upcoming";
+          match.matchStartTime = {
+            date: datePart || null,
+            time: timePart,
+            timezone: tzPart,
+            raw: match.liveCommentary,
+          };
+        } else {
+          match.time = "N/A";
+          match.matchStatus = "live";
+        }
+      }
+    } else {
+      match.time = "N/A";
+      match.matchStatus = "live";
+    }
+
     matches.push(match);
   });
 
@@ -291,8 +575,9 @@ async function scrapeAndCache() {
       { operationName: "Live Scores Page", maxRetries: 2 }
     );
 
-    const $ = cheerio.load(response.data);
-    const matches = parseMatches($);
+    const html = response.data;
+    const $ = cheerio.load(html);
+    const matches = parseMatches($, html);
     console.log(`📊 Found ${matches.length} matches`);
 
     // Step 2: Fetch scorecards in parallel (with limit)
