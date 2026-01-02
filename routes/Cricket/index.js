@@ -1752,19 +1752,33 @@ router.get("/news", async (req, res) => {
         embeddedTweets: true,
         createdAt: true,
         updatedAt: true,
+        // Include enhanced content to show which articles have AI-enhanced versions
+        enhancedContent: {
+          select: {
+            id: true,
+            title: true,
+          },
+        },
       },
     });
+
+    // Map articles to include hasEnhancedContent flag
+    const articlesWithEnhancedFlag = articles.map((article) => ({
+      ...article,
+      hasEnhancedContent: !!article.enhancedContent,
+      displayTitle: article.enhancedContent?.title || article.title,
+    }));
 
     // Build response with full pagination metadata
     const response = {
       success: true,
-      count: articles.length,
+      count: articlesWithEnhancedFlag.length,
       total: totalCount,
       page: Math.floor(offset / limit) + 1,
       totalPages: Math.ceil(totalCount / limit),
       offset,
       limit,
-      hasNext: offset + articles.length < totalCount,
+      hasNext: offset + articlesWithEnhancedFlag.length < totalCount,
       hasPrev: offset > 0,
       filters: {
         source: sourceFilter || "all",
@@ -1772,7 +1786,7 @@ router.get("/news", async (req, res) => {
         tag: tagFilter || null,
         sort: sortOrder,
       },
-      data: articles,
+      data: articlesWithEnhancedFlag,
       source: "database",
       timestamp: new Date().toISOString(),
     };
@@ -1788,6 +1802,7 @@ router.get("/news", async (req, res) => {
 });
 
 // Get single article by slug (SEO endpoint)
+// Returns enhanced content if available, otherwise original content
 router.get("/news/:slug", async (req, res) => {
   try {
     // Validate slug parameter
@@ -1806,10 +1821,14 @@ router.get("/news/:slug", async (req, res) => {
 
     const prisma = require("../../component/prismaClient");
 
+    // Fetch article with enhanced content if available
     const article = await prisma.newsArticle.findFirst({
       where: {
         slug: slug,
         sport: "cricket",
+      },
+      include: {
+        enhancedContent: true, // Include AI-enhanced content
       },
     });
 
@@ -1817,9 +1836,22 @@ router.get("/news/:slug", async (req, res) => {
       return sendError(res, new NotFoundError("Article"));
     }
 
+    // Build response with enhanced content priority
+    const enhanced = article.enhancedContent;
+
     res.json({
       success: true,
-      data: article,
+      data: {
+        ...article,
+        // If enhanced content exists, include it for frontend to use
+        hasEnhancedContent: !!enhanced,
+        // Provide enhanced fields at top level for easy access
+        displayTitle: enhanced?.title || article.title,
+        displayContent: enhanced?.content || article.content,
+        displayMetaDescription:
+          enhanced?.metaDescription || article.metaDesc || article.description,
+        keyTakeaways: enhanced?.keyTakeaways || [],
+      },
     });
   } catch (error) {
     console.error("Error fetching article:", error.message);

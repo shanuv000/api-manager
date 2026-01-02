@@ -177,6 +177,24 @@ else
 fi
 echo "$IPL_OUTPUT"
 
+# Run Perplexity Content Enhancer (AI enhancement with timeout)
+echo "🤖 Running Perplexity Content Enhancer..."
+ENHANCE_STATUS="❌ Failed"
+ENHANCE_COUNT=0
+if ENHANCE_OUTPUT=$(timeout 120 node scrapers/content-enhancer-perplexity.js 2>&1); then
+  ENHANCE_STATUS="✅ Success"
+  ENHANCE_COUNT=$(echo "$ENHANCE_OUTPUT" | grep -oP "Successfully enhanced:\s*\K\d+" || echo "0")
+else
+  exit_code=$?
+  if [ $exit_code -eq 124 ]; then
+    ERRORS="${ERRORS}Perplexity enhancer timed out\\n"
+    echo "⚠️ Perplexity enhancer timed out after 120s"
+  else
+    ERRORS="${ERRORS}Perplexity enhancer failed (exit: $exit_code)\\n"
+  fi
+fi
+echo "$ENHANCE_OUTPUT"
+
 # Prune old articles (with timeout)
 echo "🗑️ Pruning articles older than 90 days..."
 timeout 30 node scripts/prune-news.js 2>&1 || echo "⚠️ Prune skipped or failed"
@@ -193,10 +211,10 @@ TOTAL_NEW=$((CRICBUZZ_NEW + ESPN_NEW + ICC_NEW + BBC_NEW + IPL_NEW))
 TOTAL_UPDATED=$((CRICBUZZ_UPDATED + ESPN_UPDATED + ICC_UPDATED + BBC_UPDATED + IPL_UPDATED))
 
 if [ -z "$ERRORS" ]; then
-  DESC="📰 **New Articles:** ${TOTAL_NEW}\\n🔄 **Updated:** ${TOTAL_UPDATED}\\n\\n**Cricbuzz:** ${CRICBUZZ_NEW} new, ${CRICBUZZ_UPDATED} updated\\n**ESPN:** ${ESPN_NEW} new, ${ESPN_UPDATED} updated\\n**ICC:** ${ICC_NEW} new, ${ICC_UPDATED} updated\\n**BBC:** ${BBC_NEW} new, ${BBC_UPDATED} updated\\n**IPL T20:** ${IPL_NEW} new, ${IPL_UPDATED} updated\\n\\n📊 **Total in DB:** ${DB_TOTAL}\\n⏱️ **Duration:** ${DURATION}s"
+  DESC="📰 **New Articles:** ${TOTAL_NEW}\\n🔄 **Updated:** ${TOTAL_UPDATED}\\n🤖 **AI Enhanced:** ${ENHANCE_COUNT}\\n\\n**Cricbuzz:** ${CRICBUZZ_NEW} new, ${CRICBUZZ_UPDATED} updated\\n**ESPN:** ${ESPN_NEW} new, ${ESPN_UPDATED} updated\\n**ICC:** ${ICC_NEW} new, ${ICC_UPDATED} updated\\n**BBC:** ${BBC_NEW} new, ${BBC_UPDATED} updated\\n**IPL T20:** ${IPL_NEW} new, ${IPL_UPDATED} updated\\n\\n📊 **Total in DB:** ${DB_TOTAL}\\n⏱️ **Duration:** ${DURATION}s"
   send_discord "🏏 Cricket Scraper Success" "$DESC" "3066993"
 else
-  DESC="⚠️ **Errors occurred**\\n\\n**Cricbuzz:** ${CRICBUZZ_STATUS}\\n**ESPN:** ${ESPN_STATUS}\\n**ICC:** ${ICC_STATUS}\\n**BBC:** ${BBC_STATUS}\\n**IPL T20:** ${IPL_STATUS}\\n\\n${ERRORS}\\n⏱️ **Duration:** ${DURATION}s\\n📋 Check logs for details"
+  DESC="⚠️ **Errors occurred**\\n\\n**Cricbuzz:** ${CRICBUZZ_STATUS}\\n**ESPN:** ${ESPN_STATUS}\\n**ICC:** ${ICC_STATUS}\\n**BBC:** ${BBC_STATUS}\\n**IPL T20:** ${IPL_STATUS}\\n**AI Enhance:** ${ENHANCE_STATUS}\\n\\n${ERRORS}\\n⏱️ **Duration:** ${DURATION}s\\n📋 Check logs for details"
   send_discord "⚠️ Cricket Scraper Issues" "$DESC" "15158332"
 fi
 
