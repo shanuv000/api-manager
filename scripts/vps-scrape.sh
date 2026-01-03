@@ -260,7 +260,14 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 TOTAL_NEW=$((CRICBUZZ_NEW + ESPN_NEW + ICC_NEW + BBC_NEW + IPL_NEW))
 TOTAL_UPDATED=$((CRICBUZZ_UPDATED + ESPN_UPDATED + ICC_UPDATED + BBC_UPDATED + IPL_UPDATED))
 
+# Get enhancement coverage stats
+ENHANCE_STATS=""
+if STATS_OUTPUT=$(timeout 10 node utils/enhancement-stats.js 2>&1); then
+  ENHANCE_STATS="\\\\n\\\\n${STATS_OUTPUT}"
+fi
+
 # Build status line for each scraper
+
 SCRAPER_DETAILS="**Scrapers:**\\n"
 SCRAPER_DETAILS="${SCRAPER_DETAILS}• Cricbuzz: ${CRICBUZZ_STATUS} (${CRICBUZZ_NEW} new)\\n"
 SCRAPER_DETAILS="${SCRAPER_DETAILS}• ESPN: ${ESPN_STATUS} (${ESPN_NEW} new)\\n"

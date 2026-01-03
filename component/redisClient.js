@@ -99,6 +99,36 @@ async function invalidateNewsCache() {
   }
 }
 
+/**
+ * Get cached article by slug
+ * @param {string} slug - Article slug
+ * @returns {Promise<any|null>} - Cached article or null
+ */
+async function getArticleCache(slug) {
+  const key = `article:${slug}`;
+  return getCache(key);
+}
+
+/**
+ * Set article cache by slug
+ * @param {string} slug - Article slug
+ * @param {any} data - Article data to cache
+ * @param {number} ttl - TTL in seconds (default 1 hour)
+ */
+async function setArticleCache(slug, data, ttl = 3600) {
+  const key = `article:${slug}`;
+  await setCache(key, data, ttl);
+}
+
+/**
+ * Invalidate article cache by slug
+ * @param {string} slug - Article slug
+ */
+async function invalidateArticleCache(slug) {
+  const key = `article:${slug}`;
+  await deleteCache(key);
+}
+
 module.exports = {
   redis,
   getCache,
@@ -106,4 +136,8 @@ module.exports = {
   deleteCache,
   invalidateCricketCache,
   invalidateNewsCache,
+  // Article-level caching
+  getArticleCache,
+  setArticleCache,
+  invalidateArticleCache,
 };

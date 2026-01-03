@@ -29,7 +29,82 @@ const CONFIG = {
   CONTENT_MAX_LENGTH: 1000, // Input context per article
   MAX_TOKENS: 16000, // Output tokens for 10 articles (increased from 10000)
   TEMPERATURE: 0.5, // Lower temp for consistent quality
+  MAX_RETRY_COUNT: 3, // Max retries for failed enhancements
+  MIN_WORD_COUNT: 80, // Minimum words (lowered - short news updates are valid)
+  MAX_WORD_COUNT: 700, // Maximum words (allow some buffer above 550)
 };
+
+// ============================================
+// CONTENT VALIDATION
+// ============================================
+
+/**
+ * Validate enhanced content meets quality requirements
+ * @param {Object} item - Enhanced content item
+ * @returns {Object} { valid: boolean, reason?: string }
+ */
+function validateEnhancedContent(item) {
+  if (!item.enhancedContent) {
+    return { valid: false, reason: "No content" };
+  }
+
+  const content = item.enhancedContent;
+
+  // Check word count
+  const wordCount = content.split(/\s+/).filter((w) => w.length > 0).length;
+  if (wordCount < CONFIG.MIN_WORD_COUNT) {
+    return {
+      valid: false,
+      reason: `Word count too low: ${wordCount} (min: ${CONFIG.MIN_WORD_COUNT})`,
+    };
+  }
+  if (wordCount > CONFIG.MAX_WORD_COUNT) {
+    return {
+      valid: false,
+      reason: `Word count too high: ${wordCount} (max: ${CONFIG.MAX_WORD_COUNT})`,
+    };
+  }
+
+  // Check for required markdown elements
+  const hasHeadings = /###/.test(content);
+  const hasBold = /\*\*/.test(content);
+  const hasBlockquote = />/.test(content);
+
+  if (!hasHeadings) {
+    return { valid: false, reason: "Missing ### headings" };
+  }
+  if (!hasBold) {
+    return { valid: false, reason: "Missing **bold** text" };
+  }
+
+  // Check for minimum paragraphs (at least 3 double-newline separations)
+  const paragraphs = content.split(/\n\n+/).filter((p) => p.trim().length > 20);
+  if (paragraphs.length < 3) {
+    return {
+      valid: false,
+      reason: `Too few paragraphs: ${paragraphs.length} (min: 3)`,
+    };
+  }
+
+  // Check title
+  if (!item.enhancedTitle || item.enhancedTitle.length < 20) {
+    return { valid: false, reason: "Title too short or missing" };
+  }
+
+  // Check meta description
+  if (!item.metaDescription || item.metaDescription.length < 50) {
+    return { valid: false, reason: "Meta description too short or missing" };
+  }
+
+  return {
+    valid: true,
+    wordCount,
+    hasHeadings,
+    hasBold,
+    hasBlockquote,
+    paragraphCount: paragraphs.length,
+  };
+}
 
 // ============================================
 // DATABASE SETUP
@@ -392,11 +467,12 @@ function parseResponse(response) {
 }
 
 /**
- * Save enhanced content to database
+ * Save enhanced content to database with validation
  */
 async function saveEnhancedContent(enhanced, originalArticles) {
   console.log(`\n💾 Saving enhanced content...`);
   let saved = 0;
+  let failed = 0;
 
   for (const item of enhanced) {
     try {
@@ -422,6 +498,39 @@ async function saveEnhancedContent(enhanced, originalArticles) {
         continue;
       }
 
+      // Validate content quality
+      const validation = validateEnhancedContent(item);
+
+      if (!validation.valid) {
+        console.log(
+          `   ⚠️ Validation failed for ${item.id}: ${validation.reason}`
+        );
+
+        // Get current retry count
+        const existing = await prisma.enhancedContent.findUnique({
+          where: { articleId: article.id },
+        });
+
+        // Mark as failed with incremented retry count
+        await prisma.enhancedContent.upsert({
+          where: { articleId: article.id },
+          update: {
+            status: "failed",
+          },
+          create: {
+            articleId: article.id,
+            title: item.enhancedTitle || "Failed",
+            content: item.enhancedContent || "",
+            metaDescription: item.metaDescription || "",
+            keyTakeaways: item.keyTakeaways || [],
+            status: "failed",
+          },
+        });
+        failed++;
+        continue;
+      }
+
+      // Save valid content
       await prisma.enhancedContent.upsert({
         where: { articleId: article.id },
         update: {
@@ -441,11 +550,17 @@ async function saveEnhancedContent(enhanced, originalArticles) {
         },
       });
 
-      console.log(`   ✅ Saved: ${item.enhancedTitle?.substring(0, 50)}...`);
+      console.log(
+        `   ✅ Saved (${validation.wordCount} words): ${item.enhancedTitle?.substring(0, 45)}...`
+      );
       saved++;
     } catch (error) {
       console.log(`   ❌ Save error for ${item.id}: ${error.message}`);
     }
+  }
+
+  if (failed > 0) {
+    console.log(`   ⚠️ ${failed} articles failed validation (will retry)`);
   }
 
   return saved;
@@ -454,16 +569,47 @@ async function saveEnhancedContent(enhanced, originalArticles) {
 /**
  * Fetch articles that need enhancement
  * Prioritizes high-value sources (IPL, ICC) over generic sources
+ * Also includes failed articles for retry (up to MAX_RETRY_COUNT attempts)
  */
 async function fetchArticlesToEnhance(limit) {
-  const articles = await prisma.newsArticle.findMany({
+  // Get articles without any enhanced content
+  const newArticles = await prisma.newsArticle.findMany({
     where: {
       enhancedContent: null,
       content: { not: null },
     },
     orderBy: { createdAt: "desc" },
-    take: limit * 2, // Fetch more to allow for priority sorting
+    take: limit * 2,
   });
+
+  // Get failed articles for retry (created in last 7 days, not exceeding retry limit)
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+  const failedArticles = await prisma.newsArticle.findMany({
+    where: {
+      enhancedContent: {
+        status: "failed",
+        createdAt: { gte: sevenDaysAgo },
+      },
+      content: { not: null },
+    },
+    include: {
+      enhancedContent: true,
+    },
+    orderBy: { createdAt: "desc" },
+    take: Math.floor(limit / 2), // Reserve some slots for retries
+  });
+
+  // Combine and deduplicate
+  const allArticles = [...newArticles];
+  for (const fa of failedArticles) {
+    if (!allArticles.find((a) => a.id === fa.id)) {
+      // Mark as retry for logging
+      fa.isRetry = true;
+      allArticles.push(fa);
+    }
+  }
 
   // Priority order: IPL/ICC content is more valuable for SEO
   const priorityOrder = {
@@ -475,7 +621,7 @@ async function fetchArticlesToEnhance(limit) {
   };
 
   // Sort by priority (higher priority sources first), then by recency
-  const sorted = articles.sort((a, b) => {
+  const sorted = allArticles.sort((a, b) => {
     const priorityA = priorityOrder[a.sourceName] || 99;
     const priorityB = priorityOrder[b.sourceName] || 99;
 
@@ -491,10 +637,17 @@ async function fetchArticlesToEnhance(limit) {
   const result = sorted.slice(0, limit);
 
   if (result.length > 0) {
-    console.log("   📊 Priority order:");
+    const newCount = result.filter((a) => !a.isRetry).length;
+    const retryCount = result.filter((a) => a.isRetry).length;
+
+    console.log(`   📊 Priority order (${newCount} new, ${retryCount} retry):`);
     result.forEach((a, i) => {
+      const retryTag = a.isRetry ? " [RETRY]" : "";
       console.log(
-        `      ${i + 1}. [${a.sourceName}] ${a.title?.substring(0, 40)}...`
+        `      ${i + 1}. [${a.sourceName}]${retryTag} ${a.title?.substring(
+          0,
+          35
+        )}...`
       );
     });
   }

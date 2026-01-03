@@ -3,7 +3,12 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 
 const getScorecardDetails = require("./scorecard");
-const { getCache, setCache } = require("../../component/redisClient");
+const {
+  getCache,
+  setCache,
+  getArticleCache,
+  setArticleCache,
+} = require("../../component/redisClient");
 const { parsePublishTime } = require("../../utils/timeParser");
 const { normalizeContent } = require("../../utils/contentNormalizer");
 const {
@@ -1820,6 +1825,16 @@ router.get("/news/:slug", async (req, res) => {
       "public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400"
     );
 
+    // Try article-level Redis cache first
+    const cachedArticle = await getArticleCache(slug);
+    if (cachedArticle) {
+      return res.json({
+        ...cachedArticle,
+        cached: true,
+        cacheSource: "redis-article",
+      });
+    }
+
     const prisma = require("../../component/prismaClient");
 
     // Fetch article with enhanced content if available
@@ -1844,7 +1859,7 @@ router.get("/news/:slug", async (req, res) => {
     const rawContent = enhanced?.content || article.content;
     const normalizedContent = normalizeContent(rawContent, article.sourceName);
 
-    res.json({
+    const response = {
       success: true,
       data: {
         ...article,
@@ -1857,7 +1872,12 @@ router.get("/news/:slug", async (req, res) => {
           enhanced?.metaDescription || article.metaDesc || article.description,
         keyTakeaways: enhanced?.keyTakeaways || [],
       },
-    });
+    };
+
+    // Cache the article for 1 hour
+    await setArticleCache(slug, response, 3600);
+
+    res.json(response);
   } catch (error) {
     console.error("Error fetching article:", error.message);
     return sendError(res, error);
@@ -1865,8 +1885,47 @@ router.get("/news/:slug", async (req, res) => {
 });
 
 // =============================================
+// ENHANCEMENT STATS ENDPOINT
+// =============================================
+
+// Get content enhancement statistics
+router.get("/enhancement-stats", async (req, res) => {
+  try {
+    // Cache for 5 minutes
+    res.setHeader("Cache-Control", "public, max-age=300");
+
+    const cacheKey = "cricket:enhancement-stats";
+    const cachedStats = await getCache(cacheKey);
+
+    if (cachedStats) {
+      return res.json({ ...cachedStats, cached: true });
+    }
+
+    const {
+      getEnhancementStats,
+    } = require("../../utils/enhancement-stats");
+
+    const stats = await getEnhancementStats({ recentDays: 7 });
+
+    const response = {
+      success: true,
+      ...stats,
+    };
+
+    // Cache for 5 minutes
+    await setCache(cacheKey, response, 300);
+
+    res.json(response);
+  } catch (error) {
+    console.error("Error fetching enhancement stats:", error.message);
+    return sendError(res, error);
+  }
+});
+
+// =============================================
 // STATS ENDPOINTS (RapidAPI Cricbuzz)
 // =============================================
+
 
 // ICC Rankings endpoint
 router.get("/stats/rankings", async (req, res) => {
