@@ -1,8 +1,8 @@
 /**
- * Content Enhancer using Perplexity Sonar Pro API
+ * Content Enhancer using Perplexity Sonar API
  *
  * Enhances scraped cricket articles with AI-generated rich content
- * Uses Perplexity's Sonar Pro model for high-quality, SEO-optimized output
+ * Uses Perplexity's Sonar model for high-quality, SEO-optimized output
  *
  * Usage: node scrapers/content-enhancer-perplexity.js
  */
@@ -25,9 +25,9 @@ const CONFIG = {
   PERPLEXITY_API_KEY: PRIMARY_API_KEY || FALLBACK_API_KEY,
   PERPLEXITY_API_URL: "https://api.perplexity.ai/chat/completions",
   MODEL: "sonar", // Cost-effective model (~$1-2/month vs $5-6 for pro)
-  BATCH_SIZE: 6, // 6 articles per run - good balance of throughput and quality
+  BATCH_SIZE: 10, // 10 articles per run - maximizing throughput
   CONTENT_MAX_LENGTH: 1000, // Input context per article
-  MAX_TOKENS: 10000, // Output tokens for 6 articles
+  MAX_TOKENS: 16000, // Output tokens for 10 articles (increased from 10000)
   TEMPERATURE: 0.5, // Lower temp for consistent quality
 };
 
@@ -255,7 +255,7 @@ OUTPUT FORMAT - JSON array:
 async function callPerplexityAPI(articles) {
   const userPrompt = buildUserPrompt(articles);
 
-  console.log(`\n🤖 Calling Perplexity Sonar Pro API...`);
+  console.log(`\n🤖 Calling Perplexity Sonar API...`);
   console.log(`   Model: ${CONFIG.MODEL}`);
   console.log(`   Articles: ${articles.length}`);
 
@@ -509,7 +509,7 @@ async function fetchArticlesToEnhance(limit) {
 async function main() {
   console.log(`
 ╔════════════════════════════════════════════════════════════╗
-║     Content Enhancer - Perplexity Sonar Pro                ║
+║     Content Enhancer - Perplexity Sonar                    ║
 ╠════════════════════════════════════════════════════════════╣
 ║  Started: ${new Date().toISOString()}              ║
 ╚════════════════════════════════════════════════════════════╝

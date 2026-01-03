@@ -1,0 +1,13 @@
+/var/log/cricket-scraper.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0644 ubuntu ubuntu
+    postrotate
+        # Signal any running process that log has rotated (if needed)
+        true
+    endscript
+}
