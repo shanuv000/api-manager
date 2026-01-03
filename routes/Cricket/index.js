@@ -5,6 +5,7 @@ const cheerio = require("cheerio");
 const getScorecardDetails = require("./scorecard");
 const { getCache, setCache } = require("../../component/redisClient");
 const { parsePublishTime } = require("../../utils/timeParser");
+const { normalizeContent } = require("../../utils/contentNormalizer");
 const {
   fetchRankings,
   fetchStandings,
@@ -1839,6 +1840,10 @@ router.get("/news/:slug", async (req, res) => {
     // Build response with enhanced content priority
     const enhanced = article.enhancedContent;
 
+    // Normalize content for consistent markdown format across all sources
+    const rawContent = enhanced?.content || article.content;
+    const normalizedContent = normalizeContent(rawContent, article.sourceName);
+
     res.json({
       success: true,
       data: {
@@ -1847,7 +1852,7 @@ router.get("/news/:slug", async (req, res) => {
         hasEnhancedContent: !!enhanced,
         // Provide enhanced fields at top level for easy access
         displayTitle: enhanced?.title || article.title,
-        displayContent: enhanced?.content || article.content,
+        displayContent: normalizedContent,
         displayMetaDescription:
           enhanced?.metaDescription || article.metaDesc || article.description,
         keyTakeaways: enhanced?.keyTakeaways || [],

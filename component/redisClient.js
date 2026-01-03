@@ -59,7 +59,7 @@ async function deleteCache(key) {
 }
 
 /**
- * Invalidate all cricket-related cache
+ * Invalidate all cricket-related cache (scores)
  */
 async function invalidateCricketCache() {
   const keys = [
@@ -67,9 +67,35 @@ async function invalidateCricketCache() {
     "cricket:live-scores",
     "cricket:upcoming-matches",
   ];
-  
+
   for (const key of keys) {
     await deleteCache(key);
+  }
+}
+
+/**
+ * Invalidate all cricket news cache entries
+ * Call this after scraping new articles to ensure fresh content is served
+ */
+async function invalidateNewsCache() {
+  try {
+    // Upstash Redis scan for keys matching pattern
+    const keys = await redis.keys("cricket:news:*");
+
+    if (keys.length === 0) {
+      console.log("✓ No news cache entries to invalidate");
+      return 0;
+    }
+
+    for (const key of keys) {
+      await deleteCache(key);
+    }
+
+    console.log(`✓ Invalidated ${keys.length} news cache entries`);
+    return keys.length;
+  } catch (error) {
+    console.error("Redis invalidateNewsCache error:", error.message);
+    return 0; // Fail gracefully
   }
 }
 
@@ -79,4 +105,5 @@ module.exports = {
   setCache,
   deleteCache,
   invalidateCricketCache,
+  invalidateNewsCache,
 };

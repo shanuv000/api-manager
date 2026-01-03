@@ -352,6 +352,28 @@ async function runCricbuzzScraper() {
     console.log(`   ESPN Cricinfo articles: ${espnCount}`);
     console.log(`   Total articles:         ${totalCount}`);
     console.log("━".repeat(60));
+
+    // STEP 5: Invalidate news cache if new articles were saved
+    if (savedCount > 0 || updatedCount > 0) {
+      console.log("\n🗑️  Invalidating news cache...");
+      const { invalidateNewsCache } = require("../component/redisClient");
+      await invalidateNewsCache();
+
+      // Trigger content enhancement in background
+      console.log("\n🤖 Triggering content enhancement...");
+      const { spawn } = require("child_process");
+      const enhancer = spawn(
+        "node",
+        ["scrapers/content-enhancer-perplexity.js"],
+        {
+          cwd: require("path").join(__dirname, ".."),
+          detached: true,
+          stdio: "ignore",
+        }
+      );
+      enhancer.unref();
+      console.log("   Enhancement process started in background");
+    }
   } catch (error) {
     console.error("❌ Error running Cricbuzz scraper:", error);
     process.exit(1);

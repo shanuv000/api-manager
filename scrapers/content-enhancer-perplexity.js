@@ -24,11 +24,11 @@ const FALLBACK_API_KEY = process.env.PERPLEXITY_API_KEY;
 const CONFIG = {
   PERPLEXITY_API_KEY: PRIMARY_API_KEY || FALLBACK_API_KEY,
   PERPLEXITY_API_URL: "https://api.perplexity.ai/chat/completions",
-  MODEL: "sonar", // Cost-effective model (~$2/month vs $12 for pro)
-  BATCH_SIZE: 6, // Process 6 articles per run (~$0.01/run)
-  CONTENT_MAX_LENGTH: 800, // Context per article
-  MAX_TOKENS: 6000, // Allow longer responses for 6 articles
-  TEMPERATURE: 0.7, // Balance between creativity and consistency
+  MODEL: "sonar", // Cost-effective model (~$1-2/month vs $5-6 for pro)
+  BATCH_SIZE: 6, // 6 articles per run - good balance of throughput and quality
+  CONTENT_MAX_LENGTH: 1000, // Input context per article
+  MAX_TOKENS: 10000, // Output tokens for 6 articles
+  TEMPERATURE: 0.5, // Lower temp for consistent quality
 };
 
 // ============================================
@@ -60,64 +60,142 @@ async function closeDatabase() {
 
 /**
  * System prompt for cricket content enhancement
- * Optimized for: SEO, natural length, content uniqueness
+ * Optimized for: SEO, user engagement, rich content, E-E-A-T signals
  */
-const SYSTEM_PROMPT = `You are a senior cricket journalist creating ORIGINAL content for a premium cricket blog. Your goal is to produce SEO-optimized, completely unique articles that add genuine value.
+const SYSTEM_PROMPT = `You are an elite cricket journalist creating premium long-form content for a top cricket website.
+
+⚠️⚠️⚠️ MANDATORY: EVERY enhancedContent MUST be 450-550 words. COUNT YOUR WORDS. ⚠️⚠️⚠️
+Articles under 450 words are REJECTED. This is the #1 requirement.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎯 CONTENT UNIQUENESS (CRITICAL)
+📏 WORD COUNT BREAKDOWN (Total: 450-550 words per article)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-You must COMPLETELY REWRITE the content. Google will penalize duplicate content.
-
-DO:
-✓ Use entirely different sentence structures
-✓ Add your own analysis and perspective
-✓ Include context the original didn't have (cricket history, comparisons)
-✓ Create original analogies and insights
-✓ Rephrase all quotes with attribution
-
-DON'T:
-✗ Copy any phrases from the source
-✗ Just rearrange words from original
-✗ Use the same paragraph order
-✗ Keep the same opening angle
+Para 1 - Hook: 70-90 words (4-5 sentences with key fact + names)
+Para 2 - Context: 80-100 words (historical significance, career stats)
+Heading 1 + Para 3: 100-120 words (detailed analysis with numbers)
+Heading 2 + Para 4: 100-120 words (implications, comparisons)
+Blockquote: 20-30 words (relevant quote with attribution)
+Para 5 - Conclusion: 60-80 words (forward look, why it matters)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📊 SEO OPTIMIZATION
+🎯 CONTENT QUALITY (E-E-A-T SIGNALS)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-- enhancedTitle: Include primary keyword naturally (50-60 chars)
-- metaDescription: Compelling, include keyword, call-to-action (150-155 chars)
-- Use ### headings with relevant keywords
-- Bold important keywords naturally: **player name**, **match result**
-- Natural keyword density (don't stuff)
+Create content that demonstrates:
+✓ EXPERIENCE: Write as someone who has watched cricket for decades
+✓ EXPERTISE: Include technical cricket terms, tactics, and statistics
+✓ AUTHORITY: Reference historical matches, records, and comparisons
+✓ TRUST: Cite sources properly, use accurate data, balanced perspective
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📏 NATURAL LENGTH (NOT ARTIFICIAL PADDING)
+📝 RICH CONTENT STRUCTURE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Write the RIGHT length for each topic:
-- Breaking news/short update: 300-400 words
-- Match report/analysis: 500-700 words
-- In-depth feature: 700-900 words
+ALWAYS include these elements:
 
-NEVER pad content. Every sentence must add value.
+1. **Hook Opening** (first 2 sentences):
+   - Start with the most impactful fact or insight
+   - Create curiosity - make readers want to continue
+
+2. **Context Section** (### heading):
+   - Historical background when relevant
+   - How this fits into the bigger picture (series, tournament, career)
+   - Compare with similar past events
+
+3. **Analysis Section** (### heading):
+   - Expert breakdown of tactics, technique, or decisions
+   - Statistics that support your points (averages, strike rates, records)
+   - What makes this significant
+
+4. **Quotes & Reactions** (use > blockquotes):
+   - Key quotes from players/coaches (paraphrased with attribution)
+   - Expert opinions or reactions
+
+5. **Forward Look** (closing paragraph):
+   - What happens next? Upcoming matches, implications
+   - Questions that remain unanswered
+   - Why readers should follow this story
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✍️ WRITING STYLE
+📊 SEO OPTIMIZATION (CRITICAL)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-- Expert cricket analyst voice (like Harsha Bhogle)
-- Add genuine insights: historical comparisons, tactical analysis
-- Use ### for 2-3 meaningful sections (not generic headers)
-- > blockquotes for key quotes (use 'single quotes')
-- Short paragraphs for readability
-- End with forward-looking statement, not summary
+enhancedTitle (50-60 chars):
+- Include primary keyword in first 3 words
+- Use power words: "Reveals", "Breaks", "Historic", "Stunning"
+- Include player/team name + event
+- Example: "Virat Kohli's Historic 50th Century Breaks Tendulkar Record"
+
+metaDescription (150-155 chars):
+- Start with action word
+- Include primary keyword + secondary keyword
+- Add year for freshness (2025, 2026)
+- End with intrigue or call-to-action
+- Example: "Discover how Virat Kohli's 50th international century at MCG 2025 rewrites cricket history. Full analysis, stats, and what it means for India's WTC hopes."
+
+Content SEO:
+- Use **bold** for: player names, team names, scores, records
+- Use ### headings with keywords (2-3 per article)
+- Include related terms naturally: match type, venue, series name
+- Internal linking phrases: "as we reported earlier", "following the..."
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ USER ENGAGEMENT ELEMENTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Add these to make content shareable and engaging:
+- 📊 Key statistics in bold (batting averages, wicket counts)
+- 🏆 Records and milestones highlighted
+- 💬 Memorable quotes in blockquotes
+- 📈 Before/after comparisons when relevant
+- 🎯 Tactical insights that casual fans might miss
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📏 CONTENT LENGTH (CRITICAL - MINIMUM 400 WORDS)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MINIMUM word counts (DO NOT go below these):
+- Squad announcements/updates: 400-500 words MINIMUM
+- Match reports: 500-650 words MINIMUM
+- Player milestones/records: 550-700 words MINIMUM
+- Analysis pieces: 600-800 words MINIMUM
+
+Each article MUST have:
+- At least 5-7 substantial paragraphs (3-5 sentences each)
+- 2-3 ### headings with meaningful content under each
+- At least one > blockquote with a quote
+- Detailed context and analysis in every section
+
+If content seems short, ADD:
+- More historical context and comparisons
+- Career statistics of players mentioned
+- Tournament implications (standings, qualification scenarios)
+- Expert tactical analysis
+
+Every paragraph must add NEW value. No filler, but COMPLETE coverage.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚫 AVOID THESE MISTAKES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✗ Generic headers like "Introduction", "Conclusion", "Overview"
+✗ Copying phrases from original source
+✗ Stating obvious facts without analysis
+✗ Ending with summary of what you just said
+✗ Using "In conclusion" or "To summarize"
+✗ Keyword stuffing
+✗ ARTICLES UNDER 400 WORDS - THIS IS A FAILURE
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📤 OUTPUT FORMAT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+keyTakeaways: 4-5 bullet points that:
+- Summarize the most important facts
+- Include a statistic or number when possible
+- Are scannable (start with action/topic word)
+- Could stand alone as social media posts
 
 Respond with ONLY valid JSON array. No text before/after.
 {id, enhancedTitle, enhancedContent, metaDescription, keyTakeaways[]}`;
@@ -136,23 +214,39 @@ function buildUserPrompt(articles) {
     ),
   }));
 
-  return `COMPLETELY REWRITE these ${
-    articles.length
-  } article(s) into UNIQUE, SEO-optimized content.
+  return `Write detailed, engaging cricket articles (450-550 words each). Transform these source articles:
 
-SOURCE ARTICLES (use as reference only - do NOT copy phrases):
 ${JSON.stringify(inputData, null, 2)}
 
-REQUIREMENTS:
-1. UNIQUENESS: Rewrite completely - different structure, wording, and angle
-2. LENGTH: Natural for the topic (300-500 words for news, 500-700 for analysis)
-3. SEO: Include keywords naturally in title, headings, and content
-4. VALUE: Add cricket insights, historical context, or tactical analysis
+FOR EACH ARTICLE, WRITE:
 
-JSON OUTPUT ONLY:
+Opening paragraph (90 words): Start with the breaking news. Bold **player names** and **teams**. What happened and why does it matter right now?
+
+Second paragraph (90 words): Provide context - the player's career stats, recent form, or the team's situation. Why is this significant?
+
+### [Descriptive Heading]
+
+Third paragraph (90 words): Expert analysis. Include 2-3 specific statistics. Compare to similar events in cricket history.
+
+Fourth paragraph (90 words): Broader implications - tournament standings, series context, or career trajectory.
+
+### [Second Descriptive Heading]
+
+Fifth paragraph (80 words): Future outlook. What happens next? Why should fans keep watching?
+
+> Add a relevant quote with attribution
+
+IMPORTANT: Write naturally and engagingly. Do NOT include word counts in brackets. Each article should flow as proper journalism.
+
+OUTPUT FORMAT - JSON array:
+- enhancedTitle: Compelling headline (50-60 chars)
+- enhancedContent: Full article text with markdown
+- metaDescription: SEO summary (150-155 chars)
+- keyTakeaways: 5 tweetable bullets
+
 [{"id":"${
     articles[0]?.id
-  }","enhancedTitle":"SEO title 50-60 chars","enhancedContent":"### Markdown content with **bold** > quotes","metaDescription":"155 chars with keyword","keyTakeaways":["insight1","insight2","insight3"]}]`;
+  }","enhancedTitle":"Power Word: Keyword-Rich Title","enhancedContent":"Hook paragraph...\\n\\n### Context Heading\\n\\nAnalysis...\\n\\n> 'Quote here' - attribution\\n\\n### What's Next\\n\\nForward look...","metaDescription":"Action word + keyword + 2025/2026 + compelling hook ending with intrigue.","keyTakeaways":["📊 Stat-based insight","🏆 Record/milestone point","💡 Tactical takeaway","🔮 Future implication","💬 Key quote summary"]}]`;
 }
 
 /**
@@ -359,6 +453,7 @@ async function saveEnhancedContent(enhanced, originalArticles) {
 
 /**
  * Fetch articles that need enhancement
+ * Prioritizes high-value sources (IPL, ICC) over generic sources
  */
 async function fetchArticlesToEnhance(limit) {
   const articles = await prisma.newsArticle.findMany({
@@ -367,10 +462,44 @@ async function fetchArticlesToEnhance(limit) {
       content: { not: null },
     },
     orderBy: { createdAt: "desc" },
-    take: limit,
+    take: limit * 2, // Fetch more to allow for priority sorting
   });
 
-  return articles;
+  // Priority order: IPL/ICC content is more valuable for SEO
+  const priorityOrder = {
+    "IPL T20": 1,
+    "ICC Cricket": 2,
+    "ESPN Cricinfo": 3,
+    "BBC Sport": 4,
+    Cricbuzz: 5,
+  };
+
+  // Sort by priority (higher priority sources first), then by recency
+  const sorted = articles.sort((a, b) => {
+    const priorityA = priorityOrder[a.sourceName] || 99;
+    const priorityB = priorityOrder[b.sourceName] || 99;
+
+    if (priorityA !== priorityB) {
+      return priorityA - priorityB;
+    }
+
+    // Same priority - sort by newest first
+    return new Date(b.createdAt) - new Date(a.createdAt);
+  });
+
+  // Return only the requested limit
+  const result = sorted.slice(0, limit);
+
+  if (result.length > 0) {
+    console.log("   📊 Priority order:");
+    result.forEach((a, i) => {
+      console.log(
+        `      ${i + 1}. [${a.sourceName}] ${a.title?.substring(0, 40)}...`
+      );
+    });
+  }
+
+  return result;
 }
 
 // ============================================
