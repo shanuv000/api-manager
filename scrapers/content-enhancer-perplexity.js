@@ -25,7 +25,7 @@ const CONFIG = {
   PERPLEXITY_API_KEY: PRIMARY_API_KEY || FALLBACK_API_KEY,
   PERPLEXITY_API_URL: "https://api.perplexity.ai/chat/completions",
   MODEL: "sonar", // Cost-effective model (~$1-2/month vs $5-6 for pro)
-  BATCH_SIZE: 10, // 10 articles per run - maximizing throughput
+  BATCH_SIZE: 5, // Reduced for more reliable responses
   CONTENT_MAX_LENGTH: 1000, // Input context per article
   MAX_TOKENS: 16000, // Output tokens for 10 articles (increased from 10000)
   TEMPERATURE: 0.5, // Lower temp for consistent quality

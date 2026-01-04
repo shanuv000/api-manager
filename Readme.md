@@ -1,5 +1,7 @@
 # Cricket API - Live Scores & Match Data
 
+node scrapers/content-enhancer-perplexity.js
+
 A robust and secure Express.js API server designed to provide real-time cricket data from Cricbuzz:
 
 - **Live Cricket Scores:** Up-to-the-minute updates for cricket enthusiasts
@@ -108,16 +110,17 @@ The server uses the following middleware:
 
 The API uses structured error responses with specific error codes:
 
-| Error Code | Status | Description |
-|------------|--------|-------------|
-| `VALIDATION_ERROR` | 400 | Invalid input parameters |
-| `NOT_FOUND` | 404 | Resource not found |
-| `RATE_LIMITED` | 429 | Source rate limit exceeded |
-| `SCRAPING_FAILED` | 502 | Failed to scrape data |
-| `SERVICE_UNAVAILABLE` | 503 | Source temporarily unavailable |
-| `TIMEOUT` | 504 | Request timed out |
+| Error Code            | Status | Description                    |
+| --------------------- | ------ | ------------------------------ |
+| `VALIDATION_ERROR`    | 400    | Invalid input parameters       |
+| `NOT_FOUND`           | 404    | Resource not found             |
+| `RATE_LIMITED`        | 429    | Source rate limit exceeded     |
+| `SCRAPING_FAILED`     | 502    | Failed to scrape data          |
+| `SERVICE_UNAVAILABLE` | 503    | Source temporarily unavailable |
+| `TIMEOUT`             | 504    | Request timed out              |
 
 **Error Response Format:**
+
 ```json
 {
   "success": false,
@@ -133,6 +136,7 @@ The API uses structured error responses with specific error codes:
 ### Testing Error Handling
 
 Run the error handling test suite:
+
 ```bash
 API_URL=https://api-sync.vercel.app node tests/test-error-handling.js
 ```
@@ -157,4 +161,3 @@ See `CRICKET_API.md` for detailed API documentation.
 ## License
 
 This project is licensed under the ISC License.
-

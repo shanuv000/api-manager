@@ -90,8 +90,9 @@ fi
 
 # Kill stale Chrome/Chromium processes from previous runs
 echo "🧹 Cleaning up stale browser processes..."
-STALE_COUNT=$(pgrep -c -f "chromium.*--headless" 2>/dev/null || echo "0")
-if [ "$STALE_COUNT" -gt 0 ]; then
+STALE_COUNT=$(pgrep -c -f "chromium.*--headless" 2>/dev/null | tr -d ' ' || echo "0")
+STALE_COUNT=${STALE_COUNT:-0}
+if [ "$STALE_COUNT" -gt 0 ] 2>/dev/null; then
   echo "   Found $STALE_COUNT stale Chromium processes, killing..."
   pkill -9 -f "chromium.*--headless" 2>/dev/null || true
   sleep 1

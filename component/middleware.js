@@ -8,7 +8,31 @@ const compression = require("compression");
 
 // CORS configuration - Allow all origins
 const corsOptions = {
-  origin: "*",
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+
+    const allowedOrigins = [
+      "https://urtechy.com",
+      "https://blog.urtechy.com",
+    ];
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    // Check for play.urtechy.com and its subdomains
+    if (origin === "https://play.urtechy.com" || origin.endsWith(".play.urtechy.com")) {
+      return callback(null, true);
+    }
+
+    // Check for localhost
+    if (origin.startsWith("http://localhost") || origin.startsWith("http://127.0.0.1")) {
+      return callback(null, true);
+    }
+
+    callback(new Error("Not allowed by CORS"));
+  },
   methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
   preflightContinue: false,
   optionsSuccessStatus: 204,
