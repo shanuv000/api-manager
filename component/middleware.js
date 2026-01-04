@@ -12,17 +12,8 @@ const corsOptions = {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
 
-    const allowedOrigins = [
-      "https://urtechy.com",
-      "https://blog.urtechy.com",
-    ];
-
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-
-    // Check for play.urtechy.com and its subdomains
-    if (origin === "https://play.urtechy.com" || origin.endsWith(".play.urtechy.com")) {
+    // Check for urtechy.com and its subdomains
+    if (origin === "https://urtechy.com" || origin.endsWith(".urtechy.com")) {
       return callback(null, true);
     }
 
