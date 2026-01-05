@@ -261,10 +261,18 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 TOTAL_NEW=$((CRICBUZZ_NEW + ESPN_NEW + ICC_NEW + BBC_NEW + IPL_NEW))
 TOTAL_UPDATED=$((CRICBUZZ_UPDATED + ESPN_UPDATED + ICC_UPDATED + BBC_UPDATED + IPL_UPDATED))
 
-# Get enhancement coverage stats
-ENHANCE_STATS=""
-if STATS_OUTPUT=$(timeout 10 node utils/enhancement-stats.js 2>&1); then
-  ENHANCE_STATS="\\\\n\\\\n${STATS_OUTPUT}"
+# Get enhancement coverage with alert status (pipe-separated: LEVEL|SUMMARY|DETAILS)
+COVERAGE_LEVEL="ok"
+COVERAGE_SUMMARY=""
+COVERAGE_DETAILS=""
+if COVERAGE_OUTPUT=$(timeout 15 node utils/enhancement-stats.js --status 2>&1); then
+  COVERAGE_LEVEL=$(echo "$COVERAGE_OUTPUT" | cut -d'|' -f1)
+  COVERAGE_SUMMARY=$(echo "$COVERAGE_OUTPUT" | cut -d'|' -f2)
+  COVERAGE_DETAILS=$(echo "$COVERAGE_OUTPUT" | cut -d'|' -f3-)
+  echo "📊 Coverage: $COVERAGE_LEVEL - $COVERAGE_DETAILS"
+else
+  echo "⚠️ Failed to get coverage stats"
+  COVERAGE_DETAILS="Stats unavailable"
 fi
 
 # Build status line for each scraper
@@ -277,18 +285,35 @@ SCRAPER_DETAILS="${SCRAPER_DETAILS}• BBC: ${BBC_STATUS} (${BBC_NEW} new)\\n"
 SCRAPER_DETAILS="${SCRAPER_DETAILS}• IPL: ${IPL_STATUS} (${IPL_NEW} new)\\n"
 SCRAPER_DETAILS="${SCRAPER_DETAILS}• AI Enhance: ${ENHANCE_STATUS} (${ENHANCE_COUNT} enhanced)"
 
+# Build coverage section based on alert level
+if [ "$COVERAGE_LEVEL" = "critical" ]; then
+  COVERAGE_SECTION="\\n\\n🚨 **Coverage Alert (CRITICAL):**\\n${COVERAGE_SUMMARY}\\n📊 ${COVERAGE_DETAILS}"
+elif [ "$COVERAGE_LEVEL" = "warning" ]; then
+  COVERAGE_SECTION="\\n\\n⚠️ **Coverage Warning:**\\n${COVERAGE_SUMMARY}\\n📊 ${COVERAGE_DETAILS}"
+else
+  COVERAGE_SECTION="\\n\\n📊 **Enhancement Coverage:**\\n${COVERAGE_DETAILS}"
+fi
+
 # System status
 SYSTEM_INFO="\\n\\n**System:**\\n💾 Disk: ${DISK_FINAL} | 🧠 Memory: ${MEM_FINAL}MB | ⏱️ Duration: ${DURATION}s"
 
 if [ -z "$ERRORS" ]; then
-  # SUCCESS - Green notification
-  TITLE="🏏 Cricket Scraper ✅ Success"
-  DESC="📰 **New:** ${TOTAL_NEW} | 🔄 **Updated:** ${TOTAL_UPDATED} | 🤖 **Enhanced:** ${ENHANCE_COUNT}\\n\\n${SCRAPER_DETAILS}\\n\\n📊 **Total in DB:** ${DB_TOTAL}${SYSTEM_INFO}"
-  COLOR="3066993"
+  # Check if coverage is critical - override to warning color
+  if [ "$COVERAGE_LEVEL" = "critical" ]; then
+    TITLE="🏏 Cricket Scraper ⚠️ Coverage Critical"
+    COLOR="15158332"  # Red
+  elif [ "$COVERAGE_LEVEL" = "warning" ]; then
+    TITLE="🏏 Cricket Scraper ✅ Success (Coverage Warning)"
+    COLOR="16776960"  # Yellow
+  else
+    TITLE="🏏 Cricket Scraper ✅ Success"
+    COLOR="3066993"  # Green
+  fi
+  DESC="📰 **New:** ${TOTAL_NEW} | 🔄 **Updated:** ${TOTAL_UPDATED} | 🤖 **Enhanced:** ${ENHANCE_COUNT}\\n\\n${SCRAPER_DETAILS}${COVERAGE_SECTION}\\n\\n📊 **Total in DB:** ${DB_TOTAL}${SYSTEM_INFO}"
 else
   # FAILURE - Red notification
   TITLE="⚠️ Cricket Scraper Issues"
-  DESC="${SCRAPER_DETAILS}\\n\\n❌ **Errors:**\\n${ERRORS}${SYSTEM_INFO}"
+  DESC="${SCRAPER_DETAILS}${COVERAGE_SECTION}\\n\\n❌ **Errors:**\\n${ERRORS}${SYSTEM_INFO}"
   COLOR="15158332"
 fi
 

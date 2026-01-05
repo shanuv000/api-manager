@@ -611,25 +611,11 @@ async function fetchArticlesToEnhance(limit) {
     }
   }
 
-  // Priority order: IPL/ICC content is more valuable for SEO
-  const priorityOrder = {
-    "IPL T20": 1,
-    "ICC Cricket": 2,
-    "ESPN Cricinfo": 3,
-    "BBC Sport": 4,
-    Cricbuzz: 5,
-  };
+  // Pure recency-based sorting: always newest articles first
+  const now = Date.now();
 
-  // Sort by priority (higher priority sources first), then by recency
   const sorted = allArticles.sort((a, b) => {
-    const priorityA = priorityOrder[a.sourceName] || 99;
-    const priorityB = priorityOrder[b.sourceName] || 99;
-
-    if (priorityA !== priorityB) {
-      return priorityA - priorityB;
-    }
-
-    // Same priority - sort by newest first
+    // Newest first (smallest age = highest priority)
     return new Date(b.createdAt) - new Date(a.createdAt);
   });
 
@@ -640,11 +626,12 @@ async function fetchArticlesToEnhance(limit) {
     const newCount = result.filter((a) => !a.isRetry).length;
     const retryCount = result.filter((a) => a.isRetry).length;
 
-    console.log(`   📊 Priority order (${newCount} new, ${retryCount} retry):`);
+    console.log(`   📊 Newest-first order (${newCount} new, ${retryCount} retry):`);
     result.forEach((a, i) => {
+      const ageHours = ((now - new Date(a.createdAt).getTime()) / (1000 * 60 * 60)).toFixed(1);
       const retryTag = a.isRetry ? " [RETRY]" : "";
       console.log(
-        `      ${i + 1}. [${a.sourceName}]${retryTag} ${a.title?.substring(
+        `      ${i + 1}. [${a.sourceName}] ${ageHours}h ago${retryTag} - ${a.title?.substring(
           0,
           35
         )}...`

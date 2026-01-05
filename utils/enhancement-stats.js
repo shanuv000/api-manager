@@ -155,12 +155,87 @@ async function getStatsSummary() {
   return `📊 Enhanced: ${stats.allTime.enhanced}/${stats.allTime.total} (${stats.allTime.coveragePercent}%) | Pending: ${stats.allTime.pending} | 7d: ${stats.recent.coveragePercent}%`;
 }
 
+/**
+ * Analyze coverage stats and return alerts based on thresholds
+ * @param {Object} stats - Stats from getEnhancementStats()
+ * @returns {Object} { level: 'ok'|'warning'|'critical', alerts: [], summary: string }
+ */
+function getCoverageAlerts(stats) {
+  const alerts = [];
+
+  // All-time coverage thresholds
+  if (stats.allTime.coveragePercent < 60) {
+    alerts.push({
+      level: "critical",
+      msg: `🚨 All-time coverage CRITICAL: ${stats.allTime.coveragePercent}% (<60%)`,
+    });
+  } else if (stats.allTime.coveragePercent < 75) {
+    alerts.push({
+      level: "warning",
+      msg: `⚠️ All-time coverage LOW: ${stats.allTime.coveragePercent}% (<75%)`,
+    });
+  }
+
+  // Recent 7-day coverage thresholds
+  if (stats.recent.coveragePercent < 50) {
+    alerts.push({
+      level: "critical",
+      msg: `🚨 7-day coverage CRITICAL: ${stats.recent.coveragePercent}% (<50%)`,
+    });
+  } else if (stats.recent.coveragePercent < 70) {
+    alerts.push({
+      level: "warning",
+      msg: `⚠️ 7-day coverage LOW: ${stats.recent.coveragePercent}% (<70%)`,
+    });
+  }
+
+  // Pending articles threshold
+  if (stats.allTime.pending > 100) {
+    alerts.push({
+      level: "warning",
+      msg: `📥 Backlog high: ${stats.allTime.pending} articles pending`,
+    });
+  }
+
+  const level = alerts.some((a) => a.level === "critical")
+    ? "critical"
+    : alerts.some((a) => a.level === "warning")
+    ? "warning"
+    : "ok";
+
+  return {
+    level,
+    alerts,
+    summary: alerts.map((a) => a.msg).join("; ") || "✅ Coverage healthy",
+  };
+}
+
+/**
+ * Get coverage status for CLI/bash parsing
+ * Output format: LEVEL|SUMMARY|DETAILS (pipe-separated for easy bash parsing)
+ */
+async function getCoverageStatus() {
+  const stats = await getEnhancementStats({ recentDays: 7 });
+  const alertInfo = getCoverageAlerts(stats);
+
+  const details = `All-time: ${stats.allTime.coveragePercent}% (${stats.allTime.enhanced}/${stats.allTime.total}) | 7d: ${stats.recent.coveragePercent}% | Pending: ${stats.allTime.pending}`;
+
+  // Output pipe-separated for bash parsing
+  console.log(`${alertInfo.level}|${alertInfo.summary}|${details}`);
+  return { level: alertInfo.level, summary: alertInfo.summary, details };
+}
+
 // CLI execution for VPS script
 if (require.main === module) {
   (async () => {
     try {
-      const summary = await getStatsSummary();
-      console.log(summary);
+      // Check if --status flag is passed for coverage status
+      if (process.argv.includes("--status")) {
+        await getCoverageStatus();
+      } else {
+        const summary = await getStatsSummary();
+        console.log(summary);
+      }
     } catch (error) {
       console.error("Error getting stats:", error.message);
     } finally {
@@ -172,6 +247,9 @@ if (require.main === module) {
 module.exports = {
   getEnhancementStats,
   getStatsSummary,
+  getCoverageAlerts,
+  getCoverageStatus,
   initDatabase,
   closeDatabase,
 };
+
