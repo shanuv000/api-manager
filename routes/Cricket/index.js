@@ -69,7 +69,13 @@ router.get("/", (req, res) => {
         "All errors return { success: false, error: { code, message, details, timestamp } }",
     },
     categories: {
-      scores: ["/live-scores", "/recent-scores", "/upcoming-matches"],
+      scores: [
+        "/live-scores",
+        "/recent-scores",
+        "/upcoming-matches",
+        "/scorecard/:matchId",
+        "/commentary/:matchId",
+      ],
       news: ["/news", "/news/:slug"],
       stats: [
         "/stats/rankings",
@@ -1551,6 +1557,106 @@ router.get("/scorecard/:matchId", async (req, res) => {
     res.status(500).json({
       success: false,
       error: "Error fetching scorecard",
+      message: error.message,
+      responseTime: Date.now() - startTime,
+    });
+  }
+});
+
+// Individual commentary endpoint - fetches ball-by-ball commentary for a single match
+// Commentary is only cached for LIVE matches by the background worker
+router.get("/commentary/:matchId", async (req, res) => {
+  const startTime = Date.now();
+  const { matchId } = req.params;
+  const limit = parseInt(req.query.limit) || 20;
+
+  // Validate matchId
+  if (!matchId || !/^\d+$/.test(matchId)) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid matchId",
+      message: "matchId must be a numeric string",
+      responseTime: Date.now() - startTime,
+    });
+  }
+
+  try {
+    // Import redis-client dynamically
+    let redisClient;
+    try {
+      redisClient = require("../../utils/redis-client");
+    } catch (e) {
+      return res.status(503).json({
+        success: false,
+        error: "Service unavailable",
+        message: "Redis client not available",
+        responseTime: Date.now() - startTime,
+      });
+    }
+
+    // Try Redis cache first
+    const cached = await redisClient.getMatchCommentary(matchId);
+    if (cached) {
+      const responseData = {
+        ...cached,
+        entries: cached.entries?.slice(0, limit),
+        entryCount: Math.min(cached.entries?.length || 0, limit),
+        totalAvailable: cached.entries?.length || 0,
+      };
+
+      return res.json({
+        success: true,
+        matchId,
+        data: responseData,
+        fromCache: true,
+        cacheSource: "redis",
+        cacheAgeSeconds: Math.round((Date.now() - cached.timestamp) / 1000),
+        responseTime: Date.now() - startTime,
+      });
+    }
+
+    // Fallback: Try to fetch live (only for active matches)
+    try {
+      const { getRecentCommentary } = require("./commentary");
+      const matchUrl = `https://www.cricbuzz.com/live-cricket-scores/${matchId}`;
+
+      const commentary = await getRecentCommentary(matchUrl, limit);
+      if (commentary && commentary.entries && commentary.entries.length > 0) {
+        return res.json({
+          success: true,
+          matchId,
+          data: {
+            matchId,
+            matchInfo: commentary.matchInfo,
+            currentInnings: commentary.currentInnings,
+            activeBatsmen: commentary.activeBatsmen,
+            overSummaries: commentary.overSummaries?.slice(0, 5),
+            entries: commentary.entries,
+            entryCount: commentary.entryCount,
+            totalAvailable: commentary.totalAvailable,
+            timestamp: Date.now(),
+          },
+          fromCache: false,
+          cacheSource: "live-fetch",
+          responseTime: Date.now() - startTime,
+        });
+      }
+    } catch (fetchErr) {
+      // Fall through to not found
+    }
+
+    // Commentary not found
+    return res.status(404).json({
+      success: false,
+      error: "Commentary not found",
+      message: `No commentary available for matchId: ${matchId}. Commentary is only available for live matches.`,
+      responseTime: Date.now() - startTime,
+    });
+  } catch (error) {
+    console.error(`Error fetching commentary for ${matchId}:`, error.message);
+    res.status(500).json({
+      success: false,
+      error: "Error fetching commentary",
       message: error.message,
       responseTime: Date.now() - startTime,
     });

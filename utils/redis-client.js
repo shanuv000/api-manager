@@ -12,6 +12,7 @@ const KEYS = {
   LIVE_SCORES_LITE: "live_scores_lite",
   WORKER_STATUS: "live_scores_worker_status",
   SCORECARD_PREFIX: "scorecard:",
+  COMMENTARY_PREFIX: "commentary:",
 };
 
 // TTL in seconds (90s to allow 60s refresh cycle + buffer)
@@ -230,6 +231,49 @@ async function setLiteScores(matches, ttl = DEFAULT_TTL) {
   }
 }
 
+/**
+ * Get individual match commentary from Redis
+ * @param {string} matchId
+ * @returns {Promise<any|null>}
+ */
+async function getMatchCommentary(matchId) {
+  const client = getClient();
+  if (!client) return null;
+
+  try {
+    const key = `${KEYS.COMMENTARY_PREFIX}${matchId}`;
+    const cached = await client.get(key);
+    if (cached) {
+      return cached;
+    }
+    return null;
+  } catch (error) {
+    console.error(`Redis GET commentary error (${matchId}):`, error.message);
+    return null;
+  }
+}
+
+/**
+ * Set individual match commentary in Redis
+ * @param {string} matchId
+ * @param {Object} data
+ * @param {number} ttl
+ * @returns {Promise<boolean>}
+ */
+async function setMatchCommentary(matchId, data, ttl = DEFAULT_TTL) {
+  const client = getClient();
+  if (!client) return false;
+
+  try {
+    const key = `${KEYS.COMMENTARY_PREFIX}${matchId}`;
+    await client.set(key, data, { ex: ttl });
+    return true;
+  } catch (error) {
+    console.error(`Redis SET commentary error (${matchId}):`, error.message);
+    return false;
+  }
+}
+
 module.exports = {
   getClient,
   getLiveScores,
@@ -240,6 +284,8 @@ module.exports = {
   getWorkerStatus,
   getMatchScorecard,
   setMatchScorecard,
+  getMatchCommentary,
+  setMatchCommentary,
   KEYS,
   DEFAULT_TTL,
 };

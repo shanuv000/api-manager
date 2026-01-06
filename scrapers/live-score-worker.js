@@ -16,6 +16,7 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 const { createLimiter } = require("../utils/concurrency-limiter");
 const getScorecardDetails = require("../routes/Cricket/scorecard");
+const { getRecentCommentary } = require("../routes/Cricket/commentary");
 const { withAxiosRetry } = require("../utils/scraper-retry");
 const redisClient = require("../utils/redis-client");
 
@@ -27,6 +28,8 @@ const CONFIG = {
   SCRAPE_INTERVAL_MS: 60 * 1000, // 60 seconds (optimized for free tier)
   LIVE_SCORES_URL: "https://www.cricbuzz.com/cricket-match/live-scores",
   CONCURRENT_SCORECARD_LIMIT: 3,
+  CONCURRENT_COMMENTARY_LIMIT: 2, // Limit concurrent commentary fetches
+  COMMENTARY_ENTRIES_LIMIT: 20, // Max commentary entries to cache per match
   REDIS_TTL: 90, // 90 seconds TTL
   MAX_CONSECUTIVE_ERRORS: 3, // Only notify after this many consecutive errors
 };
@@ -651,7 +654,57 @@ async function scrapeAndCache() {
     }
     console.log(`💾 Saved ${savedScorecards} individual scorecards to Redis`);
 
-    // 3c: Save FULL data (backward compatible) for ?full=true requests
+    // 3c: Fetch and cache commentary for LIVE matches only
+    const liveMatchesForCommentary = matchesWithIds.filter(
+      (m) => m.matchStatus === "live" && m.matchLink && m.matchId
+    );
+    let savedCommentary = 0;
+
+    if (liveMatchesForCommentary.length > 0) {
+      console.log(
+        `📝 Fetching commentary for ${liveMatchesForCommentary.length} live matches...`
+      );
+
+      const commentaryLimit = createLimiter(CONFIG.CONCURRENT_COMMENTARY_LIMIT);
+      await Promise.all(
+        liveMatchesForCommentary.map((match) =>
+          commentaryLimit(async () => {
+            try {
+              const commentary = await getRecentCommentary(
+                match.matchLink,
+                CONFIG.COMMENTARY_ENTRIES_LIMIT
+              );
+              if (commentary && commentary.entries.length > 0) {
+                await redisClient.setMatchCommentary(
+                  match.matchId,
+                  {
+                    matchId: match.matchId,
+                    title: match.title,
+                    teams: match.teams,
+                    currentInnings: commentary.currentInnings,
+                    matchInfo: commentary.matchInfo,
+                    activeBatsmen: commentary.activeBatsmen,
+                    overSummaries: commentary.overSummaries?.slice(0, 5),
+                    entries: commentary.entries,
+                    entryCount: commentary.entryCount,
+                    timestamp: Date.now(),
+                  },
+                  CONFIG.REDIS_TTL
+                );
+                savedCommentary++;
+              }
+            } catch (err) {
+              // Silent fail - commentary is optional enhancement
+            }
+          })
+        )
+      );
+      console.log(
+        `💾 Saved ${savedCommentary}/${liveMatchesForCommentary.length} commentaries to Redis`
+      );
+    }
+
+    // 3d: Save FULL data (backward compatible) for ?full=true requests
     const saved = await redisClient.setLiveScores(
       matchesWithIds,
       CONFIG.REDIS_TTL
@@ -664,6 +717,8 @@ async function scrapeAndCache() {
         matchCount: matchesWithIds.length,
         scorecardCount,
         savedScorecards,
+        savedCommentary,
+        liveMatchCount: liveMatchesForCommentary.length,
         lastScrapeMs: Date.now() - startTime,
       });
     }
