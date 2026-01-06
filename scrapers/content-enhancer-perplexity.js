@@ -17,20 +17,22 @@ const { Pool } = require("pg");
 // CONFIGURATION
 // ============================================
 
-// API Keys with fallback (primary: Match Insights $5/mo, fallback: main account)
+// API Keys with fallback (primary: Match Insights, fallback: main account)
+// Fallback is used automatically on API errors (rate limit, quota exceeded, etc.)
 const PRIMARY_API_KEY = process.env.PERPLEXITY_API_KEY_MATCH_INSIGHTS;
 const FALLBACK_API_KEY = process.env.PERPLEXITY_API_KEY;
 
 const CONFIG = {
-  PERPLEXITY_API_KEY: PRIMARY_API_KEY || FALLBACK_API_KEY,
+  PRIMARY_API_KEY: PRIMARY_API_KEY,
+  FALLBACK_API_KEY: FALLBACK_API_KEY,
   PERPLEXITY_API_URL: "https://api.perplexity.ai/chat/completions",
-  MODEL: "sonar", // Cost-effective model (~$1-2/month vs $5-6 for pro)
+  MODEL: "sonar-pro", // Better quality model for enhanced content
   BATCH_SIZE: 5, // Reduced for more reliable responses
   CONTENT_MAX_LENGTH: 1000, // Input context per article
-  MAX_TOKENS: 16000, // Output tokens for 10 articles (increased from 10000)
+  MAX_TOKENS: 16000, // Output tokens for batch
   TEMPERATURE: 0.5, // Lower temp for consistent quality
   MAX_RETRY_COUNT: 3, // Max retries for failed enhancements
-  MIN_WORD_COUNT: 80, // Minimum words (lowered - short news updates are valid)
+  MIN_WORD_COUNT: 80, // Minimum words (allow short news updates)
   MAX_WORD_COUNT: 700, // Maximum words (allow some buffer above 550)
 };
 
@@ -135,145 +137,98 @@ async function closeDatabase() {
 
 /**
  * System prompt for cricket content enhancement
- * Optimized for: SEO, user engagement, rich content, E-E-A-T signals
+ * Optimized for: Indian cricket fans, SEO, flexible length, clean markdown, no citations
  */
-const SYSTEM_PROMPT = `You are an elite cricket journalist creating premium long-form content for a top cricket website.
+const SYSTEM_PROMPT = `You are an elite cricket journalist writing original content for play.urtechy.com, a premium Indian cricket platform.
 
-⚠️⚠️⚠️ MANDATORY: EVERY enhancedContent MUST be 450-550 words. COUNT YOUR WORDS. ⚠️⚠️⚠️
-Articles under 450 words are REJECTED. This is the #1 requirement.
+⚠️ CRITICAL RULES:
+1. NO CITATIONS - Never include [1], [2], [3] or any reference numbers
+2. NO source attributions - No "According to..." or "reports suggest"
+3. Write as original journalism with natural authority
+4. Use Indian cricket fan perspective and terminology
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📏 WORD COUNT BREAKDOWN (Total: 450-550 words per article)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📏 DYNAMIC LENGTH (Match depth to content significance):
+┌──────────────────────────────────────┬────────────────┐
+│ Content Type                         │ Target Length  │
+├──────────────────────────────────────┼────────────────┤
+│ Breaking news / Quick updates        │ 150-250 words  │
+│ Squad changes / Injury updates       │ 250-350 words  │
+│ Match previews / Post-match reports  │ 350-500 words  │
+│ Player milestones / Feature stories  │ 450-600 words  │
+│ Historical deep-dives / Analysis     │ 500-700 words  │
+└──────────────────────────────────────┴────────────────┘
 
-Para 1 - Hook: 70-90 words (4-5 sentences with key fact + names)
-Para 2 - Context: 80-100 words (historical significance, career stats)
-Heading 1 + Para 3: 100-120 words (detailed analysis with numbers)
-Heading 2 + Para 4: 100-120 words (implications, comparisons)
-Blockquote: 20-30 words (relevant quote with attribution)
-Para 5 - Conclusion: 60-80 words (forward look, why it matters)
+📝 MARKDOWN STYLING:
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎯 CONTENT QUALITY (E-E-A-T SIGNALS)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+**Bold** for emphasis:
+- Player names (first mention): **Virat Kohli**, **Jasprit Bumrah**
+- Team names: **Team India**, **Mumbai Indians**, **RCB**
+- Key stats: **156 runs**, **5/27**, **fastest century**
+- Tournament names: **IPL 2026**, **T20 World Cup**
 
-Create content that demonstrates:
-✓ EXPERIENCE: Write as someone who has watched cricket for decades
-✓ EXPERTISE: Include technical cricket terms, tactics, and statistics
-✓ AUTHORITY: Reference historical matches, records, and comparisons
-✓ TRUST: Cite sources properly, use accurate data, balanced perspective
+### Subheadings (Max 2-3):
+- Make them engaging: "### Rohit's Captaincy Masterclass" ✓
+- Avoid generic: "### Match Analysis" ✗
+- Skip: "Introduction", "Conclusion", "Overview"
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📝 RICH CONTENT STRUCTURE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+> Blockquotes for quotes:
+- Player/coach quotes only: > "This win means everything." — Rohit Sharma
+- Limit: 1-2 quotes per article
+- No made-up quotes - use only if present in source
 
-ALWAYS include these elements:
+Paragraph flow:
+- **Lead (40-60 words)**: Hook + key news + bolded names
+- **Body (2-4 paragraphs)**: Context, stats, historical comparison
+- **Close (30-40 words)**: What's next / Stakes / Anticipation
 
-1. **Hook Opening** (first 2 sentences):
-   - Start with the most impactful fact or insight
-   - Create curiosity - make readers want to continue
+🎯 SEO OPTIMIZATION:
 
-2. **Context Section** (### heading):
-   - Historical background when relevant
-   - How this fits into the bigger picture (series, tournament, career)
-   - Compare with similar past events
+enhancedTitle (50-65 characters):
+- Primary keyword in first 3 words
+- Include: Player/team name + action + context
+- Power words: Breaks, Stuns, Reveals, Dominates, Slams, Historic
+- Examples:
+  ✓ "Kohli Smashes Record 50th ODI Century Against Australia"
+  ✓ "IPL 2026: RCB Signs Rashid Khan in Mega Auction Shocker"
+  ✗ "Virat Kohli Scores Another Century" (too bland)
 
-3. **Analysis Section** (### heading):
-   - Expert breakdown of tactics, technique, or decisions
-   - Statistics that support your points (averages, strike rates, records)
-   - What makes this significant
+metaDescription (150-160 characters):
+- Action verb start (Discover, Learn, Find out)
+- Primary + secondary keywords
+- Include year (2026) and tournament name
+- End with intrigue
 
-4. **Quotes & Reactions** (use > blockquotes):
-   - Key quotes from players/coaches (paraphrased with attribution)
-   - Expert opinions or reactions
+keyTakeaways (Exactly 4 bullets):
+- Format: Emoji + concise insight (under 100 chars)
+- Required emojis: 📊 (stat), 🏆 (achievement), 💡 (insight), 🔮 (future)
+- Example:
+  • 📊 Kohli now has 50 ODI centuries, 8 behind Tendulkar's record
+  • 🏆 Fastest player to reach 13,000 ODI runs in just 267 innings
+  • 💡 His average in Australia stands at an impressive 58.6
+  • 🔮 Next milestone: 14,000 ODI runs expected in March 2026
 
-5. **Forward Look** (closing paragraph):
-   - What happens next? Upcoming matches, implications
-   - Questions that remain unanswered
-   - Why readers should follow this story
+🇮🇳 INDIAN CRICKET FAN VOICE:
+- Use passionate but professional tone
+- Reference iconic moments: "Dhoni-style finish", "Kohli-esque cover drive"
+- Cultural context: IPL craze, India-Pakistan rivalry, fan emotions
+- Local terms: "Men in Blue", "King Kohli", "Hitman Rohit"
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📊 SEO OPTIMIZATION (CRITICAL)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❌ NEVER INCLUDE:
+✗ Citation numbers [1] [2] or reference markers
+✗ "According to sources/reports/ESPN/Cricinfo"
+✗ Phrases like "It is reported that..." or "Studies show..."
+✗ Generic conclusions: "In conclusion", "To sum up"
+✗ Exact copied sentences from source
+✗ Word count mentions in output
+✗ Multiple exclamation marks!!!
+✗ ALL CAPS words (except IPL, ODI, T20)
 
-enhancedTitle (50-60 chars):
-- Include primary keyword in first 3 words
-- Use power words: "Reveals", "Breaks", "Historic", "Stunning"
-- Include player/team name + event
-- Example: "Virat Kohli's Historic 50th Century Breaks Tendulkar Record"
+📤 OUTPUT FORMAT:
+Return valid JSON array. enhancedContent must use \\n\\n for paragraph breaks.
 
-metaDescription (150-155 chars):
-- Start with action word
-- Include primary keyword + secondary keyword
-- Add year for freshness (2025, 2026)
-- End with intrigue or call-to-action
-- Example: "Discover how Virat Kohli's 50th international century at MCG 2025 rewrites cricket history. Full analysis, stats, and what it means for India's WTC hopes."
+[{"id":"article-id","enhancedTitle":"SEO Title","enhancedContent":"**Virat Kohli** smashed...\\n\\n### Record Performance\\n\\nThe **Indian captain**...\\n\\n> \\"This innings means everything.\\" — Virat Kohli\\n\\nWith this century...","metaDescription":"160-char description","keyTakeaways":["📊 Stat","🏆 Achievement","💡 Insight","🔮 Future"]}]
 
-Content SEO:
-- Use **bold** for: player names, team names, scores, records
-- Use ### headings with keywords (2-3 per article)
-- Include related terms naturally: match type, venue, series name
-- Internal linking phrases: "as we reported earlier", "following the..."
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✨ USER ENGAGEMENT ELEMENTS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Add these to make content shareable and engaging:
-- 📊 Key statistics in bold (batting averages, wicket counts)
-- 🏆 Records and milestones highlighted
-- 💬 Memorable quotes in blockquotes
-- 📈 Before/after comparisons when relevant
-- 🎯 Tactical insights that casual fans might miss
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📏 CONTENT LENGTH (CRITICAL - MINIMUM 400 WORDS)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-MINIMUM word counts (DO NOT go below these):
-- Squad announcements/updates: 400-500 words MINIMUM
-- Match reports: 500-650 words MINIMUM
-- Player milestones/records: 550-700 words MINIMUM
-- Analysis pieces: 600-800 words MINIMUM
-
-Each article MUST have:
-- At least 5-7 substantial paragraphs (3-5 sentences each)
-- 2-3 ### headings with meaningful content under each
-- At least one > blockquote with a quote
-- Detailed context and analysis in every section
-
-If content seems short, ADD:
-- More historical context and comparisons
-- Career statistics of players mentioned
-- Tournament implications (standings, qualification scenarios)
-- Expert tactical analysis
-
-Every paragraph must add NEW value. No filler, but COMPLETE coverage.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🚫 AVOID THESE MISTAKES
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-✗ Generic headers like "Introduction", "Conclusion", "Overview"
-✗ Copying phrases from original source
-✗ Stating obvious facts without analysis
-✗ Ending with summary of what you just said
-✗ Using "In conclusion" or "To summarize"
-✗ Keyword stuffing
-✗ ARTICLES UNDER 400 WORDS - THIS IS A FAILURE
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📤 OUTPUT FORMAT
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-keyTakeaways: 4-5 bullet points that:
-- Summarize the most important facts
-- Include a statistic or number when possible
-- Are scannable (start with action/topic word)
-- Could stand alone as social media posts
-
-Respond with ONLY valid JSON array. No text before/after.
-{id, enhancedTitle, enhancedContent, metaDescription, keyTakeaways[]}`;
+REMEMBER: Write with the authority of someone who watched the match, not someone reading about it. NO citations anywhere.`;
 
 /**
  * Build the user prompt with article data
@@ -289,92 +244,107 @@ function buildUserPrompt(articles) {
     ),
   }));
 
-  return `Write detailed, engaging cricket articles (450-550 words each). Transform these source articles:
+  return `Transform these cricket articles. Match length to content depth:
 
 ${JSON.stringify(inputData, null, 2)}
 
-FOR EACH ARTICLE, WRITE:
+RULES:
+1. NO CITATIONS [1][2] - Write as original journalism
+2. FLEXIBLE LENGTH - Short news = 150-250 words, in-depth = 400-600 words
+3. Bold **player names**, **teams**, **scores** on first mention
+4. Max 2 ### headings per article (descriptive, not generic)
+5. Max 1 blockquote per article (player/coach quote)
 
-Opening paragraph (90 words): Start with the breaking news. Bold **player names** and **teams**. What happened and why does it matter right now?
-
-Second paragraph (90 words): Provide context - the player's career stats, recent form, or the team's situation. Why is this significant?
-
-### [Descriptive Heading]
-
-Third paragraph (90 words): Expert analysis. Include 2-3 specific statistics. Compare to similar events in cricket history.
-
-Fourth paragraph (90 words): Broader implications - tournament standings, series context, or career trajectory.
-
-### [Second Descriptive Heading]
-
-Fifth paragraph (80 words): Future outlook. What happens next? Why should fans keep watching?
-
-> Add a relevant quote with attribution
-
-IMPORTANT: Write naturally and engagingly. Do NOT include word counts in brackets. Each article should flow as proper journalism.
-
-OUTPUT FORMAT - JSON array:
-- enhancedTitle: Compelling headline (50-60 chars)
-- enhancedContent: Full article text with markdown
-- metaDescription: SEO summary (150-155 chars)
-- keyTakeaways: 5 tweetable bullets
-
-[{"id":"${
-    articles[0]?.id
-  }","enhancedTitle":"Power Word: Keyword-Rich Title","enhancedContent":"Hook paragraph...\\n\\n### Context Heading\\n\\nAnalysis...\\n\\n> 'Quote here' - attribution\\n\\n### What's Next\\n\\nForward look...","metaDescription":"Action word + keyword + 2025/2026 + compelling hook ending with intrigue.","keyTakeaways":["📊 Stat-based insight","🏆 Record/milestone point","💡 Tactical takeaway","🔮 Future implication","💬 Key quote summary"]}]`;
+OUTPUT FORMAT - JSON array only:
+[{"id":"${articles[0]?.id}","enhancedTitle":"Keyword-Rich Title (50-65 chars)","enhancedContent":"Opening hook with **bold names**...\\n\\n### Descriptive Heading\\n\\nBody with stats...\\n\\n> \"Quote\" — Player\\n\\nClosing paragraph.","metaDescription":"SEO summary 150-160 chars with year","keyTakeaways":["📊 Stat insight","🏆 Key point","💡 Takeaway"]}]`;
 }
 
 /**
- * Call Perplexity Sonar Pro API
+ * Call Perplexity Sonar Pro API with automatic fallback
+ * Uses primary API key first, falls back to secondary on errors
  */
 async function callPerplexityAPI(articles) {
   const userPrompt = buildUserPrompt(articles);
+  const apiKeys = [
+    { key: CONFIG.PRIMARY_API_KEY, name: "Primary (Match Insights)" },
+    { key: CONFIG.FALLBACK_API_KEY, name: "Fallback (Main Account)" },
+  ].filter((k) => k.key); // Only include configured keys
 
-  console.log(`\n🤖 Calling Perplexity Sonar API...`);
+  console.log(`\n🤖 Calling Perplexity Sonar Pro API...`);
   console.log(`   Model: ${CONFIG.MODEL}`);
   console.log(`   Articles: ${articles.length}`);
+  console.log(`   API Keys available: ${apiKeys.length}`);
 
-  const startTime = Date.now();
+  let lastError = null;
 
-  try {
-    const response = await fetch(CONFIG.PERPLEXITY_API_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${CONFIG.PERPLEXITY_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: CONFIG.MODEL,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: userPrompt },
-        ],
-        max_tokens: CONFIG.MAX_TOKENS,
-        temperature: CONFIG.TEMPERATURE,
-      }),
-    });
+  for (let i = 0; i < apiKeys.length; i++) {
+    const { key, name } = apiKeys[i];
+    const startTime = Date.now();
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`API error ${response.status}: ${errorText}`);
+    console.log(`   🔑 Trying ${name}...`);
+
+    try {
+      const response = await fetch(CONFIG.PERPLEXITY_API_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: CONFIG.MODEL,
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user", content: userPrompt },
+          ],
+          max_tokens: CONFIG.MAX_TOKENS,
+          temperature: CONFIG.TEMPERATURE,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        const errorCode = response.status;
+        
+        // Determine if we should try fallback
+        const shouldFallback = [429, 402, 403, 500, 502, 503].includes(errorCode);
+        
+        if (shouldFallback && i < apiKeys.length - 1) {
+          console.log(`   ⚠️ ${name} failed (${errorCode}), trying fallback...`);
+          lastError = new Error(`API error ${errorCode}: ${errorText}`);
+          continue; // Try next key
+        }
+        
+        throw new Error(`API error ${errorCode}: ${errorText}`);
+      }
+
+      const data = await response.json();
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+      console.log(`   ✅ Response received in ${elapsed}s using ${name}`);
+
+      if (data.usage) {
+        console.log(
+          `   📊 Tokens: ${data.usage.prompt_tokens} in / ${data.usage.completion_tokens} out`
+        );
+      }
+
+      return data.choices[0]?.message?.content;
+    } catch (error) {
+      lastError = error;
+      
+      // If this is not the last key and it's a retriable error, continue
+      if (i < apiKeys.length - 1 && error.message.includes("API error")) {
+        console.log(`   ⚠️ ${name} error: ${error.message}`);
+        continue;
+      }
+      
+      console.error(`   ❌ API Error: ${error.message}`);
+      throw error;
     }
-
-    const data = await response.json();
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-
-    console.log(`   ✅ Response received in ${elapsed}s`);
-
-    if (data.usage) {
-      console.log(
-        `   📊 Tokens: ${data.usage.prompt_tokens} in / ${data.usage.completion_tokens} out`
-      );
-    }
-
-    return data.choices[0]?.message?.content;
-  } catch (error) {
-    console.error(`   ❌ API Error: ${error.message}`);
-    throw error;
   }
+
+  // If we exhausted all keys
+  throw lastError || new Error("All API keys exhausted");
 }
 
 /**
@@ -655,12 +625,13 @@ async function main() {
 ╚════════════════════════════════════════════════════════════╝
 `);
 
-  // Validate API key
-  if (!CONFIG.PERPLEXITY_API_KEY) {
-    console.error("❌ PERPLEXITY_API_KEY_MATCH_INSIGHTS not set in .env");
+  // Validate API keys
+  const hasApiKey = CONFIG.PRIMARY_API_KEY || CONFIG.FALLBACK_API_KEY;
+  if (!hasApiKey) {
+    console.error("❌ No Perplexity API keys set in .env (PERPLEXITY_API_KEY_MATCH_INSIGHTS or PERPLEXITY_API_KEY)");
     process.exit(1);
   }
-  console.log("✅ Perplexity API key loaded");
+  console.log(`✅ Perplexity API keys loaded (${CONFIG.PRIMARY_API_KEY ? 'Primary' : ''}${CONFIG.PRIMARY_API_KEY && CONFIG.FALLBACK_API_KEY ? ' + ' : ''}${CONFIG.FALLBACK_API_KEY ? 'Fallback' : ''})`);
 
   try {
     // Initialize database
