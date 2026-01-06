@@ -1620,21 +1620,38 @@ router.get("/commentary/:matchId", async (req, res) => {
       const { getRecentCommentary } = require("./commentary");
       const matchUrl = `https://www.cricbuzz.com/live-cricket-scores/${matchId}`;
 
-      const commentary = await getRecentCommentary(matchUrl, limit);
+      const commentary = await getRecentCommentary(matchUrl, 30); // Fetch 30 entries
       if (commentary && commentary.entries && commentary.entries.length > 0) {
+        const responseData = {
+          matchId,
+          matchInfo: commentary.matchInfo,
+          currentInnings: commentary.currentInnings,
+          activeBatsmen: commentary.activeBatsmen,
+          overSummaries: commentary.overSummaries?.slice(0, 5),
+          entries: commentary.entries,
+          entryCount: commentary.entries.length,
+          totalAvailable: commentary.totalAvailable || commentary.entries.length,
+          timestamp: Date.now(),
+        };
+
+        // Cache-on-read: Store in Redis for 60 seconds (saves Redis usage vs background worker)
+        // Only cache if Redis client is available
+        if (redisClient && redisClient.setMatchCommentary) {
+          try {
+            await redisClient.setMatchCommentary(matchId, responseData, 60);
+          } catch (cacheErr) {
+            // Silent fail - caching is optional optimization
+            console.log(`Commentary cache write failed for ${matchId}:`, cacheErr.message);
+          }
+        }
+
         return res.json({
           success: true,
           matchId,
           data: {
-            matchId,
-            matchInfo: commentary.matchInfo,
-            currentInnings: commentary.currentInnings,
-            activeBatsmen: commentary.activeBatsmen,
-            overSummaries: commentary.overSummaries?.slice(0, 5),
-            entries: commentary.entries,
-            entryCount: commentary.entryCount,
-            totalAvailable: commentary.totalAvailable,
-            timestamp: Date.now(),
+            ...responseData,
+            entries: responseData.entries.slice(0, limit),
+            entryCount: Math.min(responseData.entries.length, limit),
           },
           fromCache: false,
           cacheSource: "live-fetch",
