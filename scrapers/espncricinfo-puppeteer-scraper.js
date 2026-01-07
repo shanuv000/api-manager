@@ -52,6 +52,8 @@ class ESPNCricinfoPuppeteerScraper {
         "--disable-plugins",
         "--disable-images", // Don't load images to speed up
         "--blink-settings=imagesEnabled=false",
+        "--single-process", // Required for cron/systemd execution
+        "--no-zygote", // Required for cron/systemd execution
       ],
       defaultViewport: { width: 1280, height: 800 },
       ...options.launchOptions,

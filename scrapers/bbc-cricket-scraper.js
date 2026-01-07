@@ -370,7 +370,9 @@ class BBCCricketScraper {
         error.name === "TimeoutError" ||
         error.message.includes("timeout") ||
         error.message.includes("Navigation") ||
-        error.message.includes("net::");
+        error.message.includes("net::") ||
+        error.message.includes("Connection closed") ||
+        error.message.includes("closed");
 
       console.error(
         `❌ Error fetching news (attempt ${retryCount + 1}): ${error.message}`
@@ -907,7 +909,9 @@ class BBCCricketScraper {
       const isRetryable =
         error.name === "TimeoutError" ||
         error.message.includes("timeout") ||
-        error.message.includes("net::");
+        error.message.includes("net::") ||
+        error.message.includes("Connection closed") ||
+        error.message.includes("closed");
 
       if (isRetryable && retryCount < maxRetries) {
         const retryDelay = this.config.RETRY_DELAY * Math.pow(1.5, retryCount);

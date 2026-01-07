@@ -365,21 +365,6 @@ async function runESPNCricinfoScraper() {
       console.log("\n🗑️  Invalidating news cache...");
       const { invalidateNewsCache } = require("../component/redisClient");
       await invalidateNewsCache();
-
-      // Trigger content enhancement in background
-      console.log("\n🤖 Triggering content enhancement...");
-      const { spawn } = require("child_process");
-      const enhancer = spawn(
-        "node",
-        ["scrapers/content-enhancer-perplexity.js"],
-        {
-          cwd: require("path").join(__dirname, ".."),
-          detached: true,
-          stdio: "ignore",
-        }
-      );
-      enhancer.unref();
-      console.log("   Enhancement process started in background");
     }
   } catch (error) {
     console.error("❌ Error running ESPN Cricinfo scraper:", error);
