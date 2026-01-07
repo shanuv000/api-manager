@@ -128,7 +128,7 @@ GET /api/cricket/live-scores/worker-status
 | ----------------------- | ------------------------------------------------ |
 | 3+ consecutive failures | 🚨 Discord error alert                           |
 | Recovery after failures | ✅ Discord recovery alert                        |
-| PM2 logs                | `/home/ubuntu/.pm2/logs/live-score-worker-*.log` |
+| PM2 logs                | `/home/dev/.pm2/logs/live-score-worker-*.log` |
 
 ---
 
