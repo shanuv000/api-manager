@@ -116,7 +116,7 @@ function parseICCPublishTime(timeString) {
       if (!isNaN(dateObj.getTime())) {
         return dateObj.toISOString();
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   // Final fallback
@@ -125,7 +125,7 @@ function parseICCPublishTime(timeString) {
     if (!isNaN(dateObj.getTime())) {
       return dateObj.toISOString();
     }
-  } catch (e) {}
+  } catch (e) { }
 
   return null;
 }
@@ -161,7 +161,7 @@ async function runICCScraper() {
 
     // STEP 1: Fetch articles with details
     console.log("\n📡 Fetching news with detailed content...");
-    const limit = 15;
+    const limit = 10;
     const articlesWithDetails = await scraper.fetchLatestNewsWithDetails(limit);
     console.log(
       `   Fetched ${articlesWithDetails.length} articles with details\n`
@@ -262,7 +262,7 @@ async function runICCScraper() {
               thumbnailUrl: article.imageUrl || details.mainImage,
               publishedTime: publishedTime,
               ...(tags.length > 0 &&
-              (!existing.tags || existing.tags.length === 0)
+                (!existing.tags || existing.tags.length === 0)
                 ? { tags }
                 : {}),
               relatedArticles: details.relatedArticles || null,

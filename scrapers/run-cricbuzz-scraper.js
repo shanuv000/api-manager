@@ -102,7 +102,7 @@ function parseCricbuzzPublishTime(timeString) {
       if (!isNaN(dateObj.getTime())) {
         return dateObj.toISOString();
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   // Handle relative format: "5h ago", "2d ago"
@@ -126,7 +126,7 @@ function parseCricbuzzPublishTime(timeString) {
     if (!isNaN(dateObj.getTime())) {
       return dateObj.toISOString();
     }
-  } catch (e) {}
+  } catch (e) { }
 
   return null;
 }
@@ -170,7 +170,7 @@ async function runCricbuzzScraper() {
 
     // STEP 1: Fetch articles with details
     console.log("\n📡 Fetching news with detailed content...");
-    const limit = 15;
+    const limit = 10;
     const articlesWithDetails = await scraper.fetchLatestNewsWithDetails(limit);
     console.log(
       `   Fetched ${articlesWithDetails.length} articles with details\n`
@@ -277,7 +277,7 @@ async function runCricbuzzScraper() {
               thumbnailUrl: article.thumbnailUrl || details.mainImage,
               publishedTime: publishedTime,
               ...(tags.length > 0 &&
-              (!existing.tags || existing.tags.length === 0)
+                (!existing.tags || existing.tags.length === 0)
                 ? { tags }
                 : {}),
               relatedArticles: relatedArticles,

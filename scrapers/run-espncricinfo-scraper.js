@@ -102,7 +102,7 @@ function extractPublishedTimeFromTitle(rawTitle) {
       if (!isNaN(dateObj.getTime())) {
         return dateObj.toISOString();
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   // Try to extract relative time like "22 mins ago" or "5 hrs ago"
@@ -183,7 +183,7 @@ async function runESPNCricinfoScraper() {
 
     // STEP 1: Fetch articles with details
     console.log("\n📡 Fetching news with detailed content...");
-    const limit = 15; // Fetch top 15 articles
+    const limit = 10; // Fetch top 10 articles
     const articlesWithDetails = await scraper.fetchLatestNewsWithDetails(limit);
     console.log(
       `   Fetched ${articlesWithDetails.length} articles with details\n`
@@ -285,7 +285,7 @@ async function runESPNCricinfoScraper() {
                   details.publishedTime || article.publishedTime
                 ) || extractPublishedTimeFromTitle(article.title),
               ...(tags.length > 0 &&
-              (!existing.tags || existing.tags.length === 0)
+                (!existing.tags || existing.tags.length === 0)
                 ? { tags }
                 : {}),
               relatedArticles: details.relatedArticles || null,

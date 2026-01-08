@@ -15,6 +15,7 @@ set -o pipefail
 SCRIPT_DIR="/home/dev/app/api-manager"
 LOCK_FILE="/tmp/cricket-scraper.lock"
 SCRAPER_TIMEOUT=300  # 5 minutes max per scraper (increased to accommodate retries)
+BBC_TIMEOUT=420      # 7 minutes for BBC (slower page loads)
 
 cd "$SCRIPT_DIR"
 
@@ -188,7 +189,7 @@ echo "$ICC_OUTPUT"
 
 # Run BBC Sport scraper (Puppeteer - with timeout)
 echo "📰 Running BBC Sport scraper..."
-if BBC_OUTPUT=$(timeout $SCRAPER_TIMEOUT node scrapers/run-bbc-scraper.js 2>&1); then
+if BBC_OUTPUT=$(timeout $BBC_TIMEOUT node scrapers/run-bbc-scraper.js 2>&1); then
   BBC_STATUS="✅ Success"
   BBC_NEW=$(echo "$BBC_OUTPUT" | grep -oP "New articles saved:\s*\K\d+" || echo "0")
   BBC_UPDATED=$(echo "$BBC_OUTPUT" | grep -oP "Updated articles:\s*\K\d+" || echo "0")
@@ -197,8 +198,8 @@ if BBC_OUTPUT=$(timeout $SCRAPER_TIMEOUT node scrapers/run-bbc-scraper.js 2>&1);
 else
   exit_code=$?
   if [ $exit_code -eq 124 ]; then
-    ERRORS="${ERRORS}BBC timed out (>${SCRAPER_TIMEOUT}s)\\n"
-    echo "⚠️ BBC scraper timed out after ${SCRAPER_TIMEOUT}s"
+    ERRORS="${ERRORS}BBC timed out (>${BBC_TIMEOUT}s)\\n"
+    echo "⚠️ BBC scraper timed out after ${BBC_TIMEOUT}s"
   else
     ERRORS="${ERRORS}BBC failed (exit: $exit_code)\\n"
   fi

@@ -16,7 +16,7 @@ const puppeteer = require("puppeteer-core");
 // Find Chrome executable - prioritize Puppeteer's bundled Chrome (works in cron)
 function findChromiumPath() {
   const fs = require("fs");
-  
+
   // First, try Puppeteer's bundled Chrome (not a snap, works in cron)
   try {
     const puppeteerFull = require("puppeteer");
@@ -28,7 +28,7 @@ function findChromiumPath() {
   } catch (e) {
     // puppeteer not available, try system paths
   }
-  
+
   // Fallback to system Chromium paths
   const CHROMIUM_PATHS = [
     process.env.CHROME_PATH,
@@ -37,7 +37,7 @@ function findChromiumPath() {
     "/usr/bin/google-chrome",
     "/snap/bin/chromium", // LAST - snap fails in cron!
   ].filter(Boolean);
-  
+
   for (const path of CHROMIUM_PATHS) {
     if (fs.existsSync(path)) {
       console.log(`📍 Using system Chromium: ${path}`);
@@ -154,7 +154,7 @@ class ESPNCricinfoPuppeteerScraper {
     try {
       const d = new Date(clean);
       if (!isNaN(d.getTime())) return d.toISOString();
-    } catch (e) {}
+    } catch (e) { }
 
     return null;
   }
@@ -522,7 +522,7 @@ class ESPNCricinfoPuppeteerScraper {
                 break;
               }
             }
-          } catch (e) {}
+          } catch (e) { }
         }
 
         // ========== TITLE ==========
@@ -1042,9 +1042,9 @@ class ESPNCricinfoPuppeteerScraper {
         result.keywords =
           typeof kw === "string"
             ? kw
-                .split(",")
-                .map((k) => k.trim())
-                .filter((k) => k)
+              .split(",")
+              .map((k) => k.trim())
+              .filter((k) => k)
             : [];
 
         // ========== RELATED ARTICLES ==========
@@ -1161,8 +1161,7 @@ class ESPNCricinfoPuppeteerScraper {
         embedSummary.push(`${details.embeddedInstagram.length} IG`);
 
       console.log(
-        `   ✓ ${details.wordCount} words${
-          embedSummary.length ? `, ${embedSummary.join(", ")}` : ""
+        `   ✓ ${details.wordCount} words${embedSummary.length ? `, ${embedSummary.join(", ")}` : ""
         }, published: ${details.publishedTime || "unknown"}`
       );
 
@@ -1174,9 +1173,13 @@ class ESPNCricinfoPuppeteerScraper {
 
   /**
    * Fetch news with full content extraction
+   * Includes retry logic for connection failures
    */
   async fetchLatestNewsWithDetails(limit = 5) {
     await this.init();
+
+    const MAX_RETRIES = 2;
+    const BASE_RETRY_DELAY = 3000;
 
     try {
       const articles = await this.fetchLatestNews();
@@ -1195,21 +1198,47 @@ class ESPNCricinfoPuppeteerScraper {
         const shortTitle = article.title.substring(0, 50);
         console.log(`${i + 1}/${toProcess} - ${shortTitle}...`);
 
-        try {
-          const details = await this.fetchArticleDetails(article.link);
+        let success = false;
+        let lastError = null;
 
-          detailed.push({
-            ...article,
-            // Override with cleaned title from details
-            title: details.title || article.title,
-            details,
-          });
+        // Retry loop for connection errors
+        for (let attempt = 0; attempt <= MAX_RETRIES && !success; attempt++) {
+          try {
+            if (attempt > 0) {
+              const retryDelay = BASE_RETRY_DELAY * Math.pow(1.5, attempt - 1);
+              console.log(`   ⚠️ Article fetch failed, retrying in ${retryDelay / 1000}s...`);
+              await this.delay(retryDelay);
+            }
 
-          // Rate limiting
-          await this.delay(1000);
-        } catch (error) {
-          console.log(`   ❌ Failed: ${error.message.substring(0, 40)}`);
-          detailed.push(article);
+            const details = await this.fetchArticleDetails(article.link);
+
+            detailed.push({
+              ...article,
+              // Override with cleaned title from details
+              title: details.title || article.title,
+              details,
+            });
+
+            success = true;
+
+            // Rate limiting
+            await this.delay(1000);
+          } catch (error) {
+            lastError = error;
+            const isRetryable =
+              error.message.includes("Connection closed") ||
+              error.message.includes("Navigation") ||
+              error.message.includes("timeout") ||
+              error.message.includes("net::") ||
+              error.message.includes("detached");
+
+            if (!isRetryable || attempt >= MAX_RETRIES) {
+              console.log(`   ❌ Error: ${error.message.substring(0, 50)}`);
+              console.log(`   Skipping article due to error: ${error.message}`);
+              detailed.push(article);
+              break;
+            }
+          }
         }
       }
 
@@ -1290,9 +1319,9 @@ async function main() {
     const avgWords =
       withDetails.length > 0
         ? Math.round(
-            withDetails.reduce((s, a) => s + (a.details?.wordCount || 0), 0) /
-              withDetails.length
-          )
+          withDetails.reduce((s, a) => s + (a.details?.wordCount || 0), 0) /
+          withDetails.length
+        )
         : 0;
 
     console.log("━".repeat(60));
