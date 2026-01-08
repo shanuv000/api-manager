@@ -2,6 +2,8 @@
 // Used by GitHub Actions workflow or manual execution
 // Only saves articles that have actual content
 
+require("dotenv").config();
+
 const BBCCricketScraper = require("./bbc-cricket-scraper");
 const { PrismaClient } = require("@prisma/client");
 const { PrismaPg } = require("@prisma/adapter-pg");

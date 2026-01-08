@@ -2,6 +2,8 @@
 // Used by GitHub Actions workflow
 // Only saves articles that have actual content (skips empty/minimal content)
 
+require("dotenv").config();
+
 const ESPNCricinfoScraper = require("./espncricinfo-puppeteer-scraper");
 const { PrismaClient } = require("@prisma/client");
 const { PrismaPg } = require("@prisma/adapter-pg");

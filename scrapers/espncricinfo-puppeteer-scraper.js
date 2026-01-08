@@ -13,19 +13,34 @@
 
 const puppeteer = require("puppeteer-core");
 
-// Find system Chromium executable
-const CHROMIUM_PATHS = [
-  "/usr/bin/chromium-browser",
-  "/usr/bin/chromium",
-  "/usr/bin/google-chrome",
-  "/snap/bin/chromium",
-  process.env.CHROME_PATH,
-].filter(Boolean);
-
+// Find Chrome executable - prioritize Puppeteer's bundled Chrome (works in cron)
 function findChromiumPath() {
   const fs = require("fs");
+  
+  // First, try Puppeteer's bundled Chrome (not a snap, works in cron)
+  try {
+    const puppeteerFull = require("puppeteer");
+    const bundledPath = puppeteerFull.executablePath();
+    if (fs.existsSync(bundledPath)) {
+      console.log("📍 Using Puppeteer bundled Chrome");
+      return bundledPath;
+    }
+  } catch (e) {
+    // puppeteer not available, try system paths
+  }
+  
+  // Fallback to system Chromium paths
+  const CHROMIUM_PATHS = [
+    process.env.CHROME_PATH,
+    "/usr/bin/chromium-browser",
+    "/usr/bin/chromium",
+    "/usr/bin/google-chrome",
+    "/snap/bin/chromium", // LAST - snap fails in cron!
+  ].filter(Boolean);
+  
   for (const path of CHROMIUM_PATHS) {
     if (fs.existsSync(path)) {
+      console.log(`📍 Using system Chromium: ${path}`);
       return path;
     }
   }
