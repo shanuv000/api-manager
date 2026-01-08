@@ -1203,7 +1203,7 @@ router.get("/recent-scores", async (req, res) => {
       count: enrichedMatches.length,
       data: enrichedMatches,
     };
-    await setCache(cacheKey, fullResponse, 3600);
+    await setCache(cacheKey, fullResponse, 1800); // 30min (reduced for match days)
 
     // Apply limit/offset for this request
     const slicedMatches = limit
@@ -1461,14 +1461,14 @@ router.get("/live-scores/worker-status", async (req, res) => {
       },
       cache: cache
         ? {
-            available: true,
-            matchCount: cache.count,
-            ageSeconds: Math.round((Date.now() - cache.timestamp) / 1000),
-          }
+          available: true,
+          matchCount: cache.count,
+          ageSeconds: Math.round((Date.now() - cache.timestamp) / 1000),
+        }
         : {
-            available: false,
-            message: "No cached data - worker may not be running",
-          },
+          available: false,
+          message: "No cached data - worker may not be running",
+        },
     });
   } catch (error) {
     console.error("Error fetching worker status:", error.message);
@@ -1730,7 +1730,7 @@ router.get("/upcoming-matches", async (req, res) => {
       count: enrichedMatches.length,
       data: enrichedMatches,
     };
-    await setCache(cacheKey, fullResponse, 10800);
+    await setCache(cacheKey, fullResponse, 3600); // 1hr (reduced for match days)
 
     // Apply limit/offset for this request
     const slicedMatches = limit
@@ -1844,9 +1844,8 @@ router.get("/news", async (req, res) => {
     }
 
     // Cache key includes all filter params
-    const cacheKey = `cricket:news:${limit}:${offset}:${
-      sourceFilter || "all"
-    }:${searchQuery || ""}:${tagFilter || ""}:${sortOrder}`;
+    const cacheKey = `cricket:news:${limit}:${offset}:${sourceFilter || "all"
+      }:${searchQuery || ""}:${tagFilter || ""}:${sortOrder}`;
 
     // STEP 1: Try Redis cache first (fastest)
     const cachedData = await getCache(cacheKey);
@@ -2664,8 +2663,8 @@ router.get("/rapidapi/health", async (req, res) => {
           quota.monthlyRemaining <= 10
             ? "critical"
             : quota.monthlyRemaining <= 50
-            ? "warning"
-            : "healthy",
+              ? "warning"
+              : "healthy",
       },
       quota: {
         ...quota,
@@ -2680,11 +2679,10 @@ router.get("/rapidapi/health", async (req, res) => {
           "All RapidAPI endpoints use aggressive caching to minimize API calls",
         fallbackEnabled:
           "Stale cache fallback is enabled for all RapidAPI endpoints",
-        recommendedUsage: `With ${
-          quota.monthlyLimit
-        } requests/month, aim for ~${Math.floor(
-          quota.monthlyLimit / 30
-        )} requests/day`,
+        recommendedUsage: `With ${quota.monthlyLimit
+          } requests/month, aim for ~${Math.floor(
+            quota.monthlyLimit / 30
+          )} requests/day`,
       },
     };
 
