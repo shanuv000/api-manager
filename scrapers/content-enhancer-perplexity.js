@@ -12,6 +12,10 @@ const path = require("path");
 const { PrismaClient } = require("@prisma/client");
 const { PrismaPg } = require("@prisma/adapter-pg");
 const { Pool } = require("pg");
+const {
+  invalidateArticleCache,
+  invalidateNewsCache,
+} = require("../component/redisClient");
 
 // ============================================
 // CONFIGURATION
@@ -106,6 +110,50 @@ function validateEnhancedContent(item) {
     hasBlockquote,
     paragraphCount: paragraphs.length,
   };
+}
+
+/**
+ * Determine if an article should be enhanced based on content quality/value
+ * Skips low-value content to save API costs
+ * @param {Object} article - Article from database
+ * @returns {Object} { enhance: boolean, reason?: string }
+ */
+function shouldEnhanceArticle(article) {
+  const content = article.content || "";
+  const wordCount = content.split(/\s+/).filter((w) => w.length > 0).length;
+
+  // Skip very short news (likely wire stories with minimal value-add from enhancement)
+  if (wordCount < 100) {
+    return {
+      enhance: false,
+      reason: `Too short for meaningful enhancement (${wordCount} words, min: 100)`,
+    };
+  }
+
+  // Check if content is already well-structured (has headings and quotes)
+  const headingCount = (content.match(/^#{1,4}\s/gm) || []).length;
+  const quoteCount = (content.match(/^>/gm) || []).length;
+  const hasBoldNames = (content.match(/\*\*[A-Z][a-z]+\s[A-Z][a-z]+\*\*/g) || []).length;
+
+  // Skip if already rich content (2+ headings AND 2+ quotes AND bolded names)
+  // These are likely already well-formatted feature articles
+  if (headingCount >= 2 && quoteCount >= 2 && hasBoldNames >= 3 && wordCount > 500) {
+    return {
+      enhance: false,
+      reason: `Already well-structured (${headingCount} headings, ${quoteCount} quotes, ${hasBoldNames} bold names)`,
+    };
+  }
+
+  // Skip match scorecards and pure statistical content
+  const tableCount = (content.match(/\|.*\|/g) || []).length;
+  if (tableCount > 10 && wordCount < 300) {
+    return {
+      enhance: false,
+      reason: `Scorecard/table content (${tableCount} table rows, ${wordCount} words)`,
+    };
+  }
+
+  return { enhance: true, wordCount };
 }
 
 // ============================================
@@ -438,11 +486,13 @@ function parseResponse(response) {
 
 /**
  * Save enhanced content to database with validation
+ * Also invalidates Redis cache for enhanced articles to ensure fresh data
  */
 async function saveEnhancedContent(enhanced, originalArticles) {
   console.log(`\n💾 Saving enhanced content...`);
   let saved = 0;
   let failed = 0;
+  const enhancedSlugs = []; // Track slugs for cache invalidation
 
   for (const item of enhanced) {
     try {
@@ -520,6 +570,11 @@ async function saveEnhancedContent(enhanced, originalArticles) {
         },
       });
 
+      // Track slug for cache invalidation
+      if (article.slug) {
+        enhancedSlugs.push(article.slug);
+      }
+
       console.log(
         `   ✅ Saved (${validation.wordCount} words): ${item.enhancedTitle?.substring(0, 45)}...`
       );
@@ -531,6 +586,27 @@ async function saveEnhancedContent(enhanced, originalArticles) {
 
   if (failed > 0) {
     console.log(`   ⚠️ ${failed} articles failed validation (will retry)`);
+  }
+
+  // Invalidate Redis cache for all enhanced articles
+  // This ensures fresh enhanced content is served instead of stale cached data
+  if (enhancedSlugs.length > 0) {
+    console.log(`\n🗑️  Invalidating cache for ${enhancedSlugs.length} enhanced articles...`);
+    for (const slug of enhancedSlugs) {
+      try {
+        await invalidateArticleCache(slug);
+      } catch (cacheError) {
+        console.log(`   ⚠️ Cache invalidation failed for ${slug}: ${cacheError.message}`);
+      }
+    }
+    
+    // Also invalidate news list cache to reflect hasEnhancedContent changes
+    try {
+      await invalidateNewsCache();
+      console.log(`   ✅ News list cache invalidated`);
+    } catch (cacheError) {
+      console.log(`   ⚠️ News list cache invalidation failed: ${cacheError.message}`);
+    }
   }
 
   return saved;
@@ -589,8 +665,35 @@ async function fetchArticlesToEnhance(limit) {
     return new Date(b.createdAt) - new Date(a.createdAt);
   });
 
+  // Apply smart filtering to skip low-value content
+  const filtered = [];
+  const skipped = [];
+
+  for (const article of sorted) {
+    const check = shouldEnhanceArticle(article);
+    if (check.enhance) {
+      filtered.push(article);
+    } else {
+      skipped.push({ title: article.title, reason: check.reason });
+    }
+    
+    // Stop once we have enough qualifying articles
+    if (filtered.length >= limit) break;
+  }
+
+  // Log skipped articles (for visibility into cost savings)
+  if (skipped.length > 0) {
+    console.log(`   💰 Smart filter: Skipped ${skipped.length} low-value articles:`);
+    skipped.slice(0, 5).forEach((s) => {
+      console.log(`      ⏭️  ${s.title?.substring(0, 40)}... - ${s.reason}`);
+    });
+    if (skipped.length > 5) {
+      console.log(`      ... and ${skipped.length - 5} more`);
+    }
+  }
+
   // Return only the requested limit
-  const result = sorted.slice(0, limit);
+  const result = filtered.slice(0, limit);
 
   if (result.length > 0) {
     const newCount = result.filter((a) => !a.isRetry).length;

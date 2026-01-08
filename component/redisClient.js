@@ -129,6 +129,32 @@ async function invalidateArticleCache(slug) {
   await deleteCache(key);
 }
 
+/**
+ * Invalidate all article caches
+ * Call this after content enhancement to ensure fresh enhanced content is served
+ * @returns {Promise<number>} - Number of invalidated cache entries
+ */
+async function invalidateAllArticleCaches() {
+  try {
+    const keys = await redis.keys("article:*");
+
+    if (keys.length === 0) {
+      console.log("✓ No article cache entries to invalidate");
+      return 0;
+    }
+
+    for (const key of keys) {
+      await deleteCache(key);
+    }
+
+    console.log(`✓ Invalidated ${keys.length} article cache entries`);
+    return keys.length;
+  } catch (error) {
+    console.error("Redis invalidateAllArticleCaches error:", error.message);
+    return 0; // Fail gracefully
+  }
+}
+
 module.exports = {
   redis,
   getCache,
@@ -140,4 +166,5 @@ module.exports = {
   getArticleCache,
   setArticleCache,
   invalidateArticleCache,
+  invalidateAllArticleCaches,
 };

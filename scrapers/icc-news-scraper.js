@@ -184,10 +184,15 @@ class ICCNewsScraper {
           let titleFromLink = link.textContent.trim();
 
           if (titleFromLink && titleFromLink.length > 15) {
-            // Remove time indicator
+            // Remove time indicator (e.g., "5h", "34m", "2d", "1 day ago")
             const timePattern =
-              /(\d+[hd]|[\d]+\s*(hour|day|min|sec)s?\s*(ago)?)\s*$/i;
+              /,?\s*(\d+[mhd]|[\d]+\s*(hour|day|min|minute|sec|second)s?\s*(ago)?)\s*$/i;
             titleFromLink = titleFromLink.replace(timePattern, "").trim();
+
+            // Remove year-range prefixes (e.g., ", 2025/27", ", 2026")
+            // These appear at the beginning of some ICC titles
+            const yearPrefixPattern = /^,?\s*\d{4}(\/\d{2})?\s*/;
+            titleFromLink = titleFromLink.replace(yearPrefixPattern, "").trim();
 
             // Remove common category prefixes
             const categoryPrefixes = [

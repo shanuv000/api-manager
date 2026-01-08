@@ -68,20 +68,25 @@ async function getEnhancementStats(options = {}) {
     ]);
 
   // Get recent stats (last N days)
-  const [recentTotal, recentEnhanced] = await Promise.all([
-    prisma.newsArticle.count({
-      where: {
-        content: { not: null },
-        createdAt: { gte: recentDate },
-      },
-    }),
-    prisma.enhancedContent.count({
-      where: {
+  // Count articles created in the last N days
+  const recentTotal = await prisma.newsArticle.count({
+    where: {
+      content: { not: null },
+      createdAt: { gte: recentDate },
+    },
+  });
+
+  // Count articles created in last N days that have been enhanced
+  // This is the correct query - we want articles created recently that have enhancement
+  const recentEnhanced = await prisma.newsArticle.count({
+    where: {
+      content: { not: null },
+      createdAt: { gte: recentDate },
+      enhancedContent: {
         status: "published",
-        createdAt: { gte: recentDate },
       },
-    }),
-  ]);
+    },
+  });
 
   // Calculate coverage percentages
   const allTimeCoverage =
