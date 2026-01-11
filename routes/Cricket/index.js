@@ -22,6 +22,16 @@ const {
   getRapidAPIQuota,
 } = require("./stats");
 const {
+  fetchPointsTable,
+  fetchSchedule,
+  getMatchById,
+  getAvailableSeasons,
+  fetchTeams,
+  fetchTeamSquad,
+  getTeamSlugs,
+  fetchPlayerProfile,
+} = require("./ipl");
+const {
   ApiError,
   ValidationError,
   NotFoundError,
@@ -2689,6 +2699,376 @@ router.get("/rapidapi/health", async (req, res) => {
     res.json(response);
   } catch (error) {
     console.error("Error generating RapidAPI health report:", error.message);
+    return sendError(res, error);
+  }
+});
+
+// ================================
+// IPL ENDPOINTS
+// ================================
+
+/**
+ * GET /ipl/seasons
+ * Get available IPL seasons
+ */
+router.get("/ipl/seasons", async (req, res) => {
+  try {
+    const seasons = getAvailableSeasons();
+    res.json({
+      success: true,
+      data: seasons,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error("Error fetching IPL seasons:", error.message);
+    return sendError(res, error);
+  }
+});
+
+/**
+ * GET /ipl/points-table
+ * Get IPL points table / standings
+ * Query params: season (default: 2025)
+ */
+router.get("/ipl/points-table", async (req, res) => {
+  const season = req.query.season || 2025;
+  const cacheKey = `ipl:points-table:${season}`;
+  const cacheTTL = season == 2025 ? 300 : 3600; // 5 min for current, 1 hour for historical
+
+  try {
+    // Check cache first
+    const cached = await getCache(cacheKey);
+    if (cached) {
+      return res.json({
+        success: true,
+        ...cached,
+        cached: true
+      });
+    }
+
+    const data = await fetchPointsTable(season);
+
+    // Cache the result
+    await setCache(cacheKey, data, cacheTTL);
+
+    res.json({
+      success: true,
+      ...data,
+      cached: false
+    });
+  } catch (error) {
+    console.error("Error fetching IPL points table:", error.message);
+
+    // Try stale cache as fallback
+    try {
+      const stale = await getCache(cacheKey);
+      if (stale) {
+        return res.json({
+          success: true,
+          ...stale,
+          cached: true,
+          stale: true,
+          warning: "Using stale cached data due to fetch error"
+        });
+      }
+    } catch (cacheError) {
+      // Ignore cache errors
+    }
+
+    return sendError(res, error);
+  }
+});
+
+/**
+ * GET /ipl/schedule
+ * Get IPL match schedule
+ * Query params: season (default: 2025), status (optional: live, upcoming, completed)
+ */
+router.get("/ipl/schedule", async (req, res) => {
+  const season = req.query.season || 2025;
+  const statusFilter = req.query.status?.toLowerCase();
+  const cacheKey = `ipl:schedule:${season}`;
+  const cacheTTL = season == 2025 ? 300 : 3600; // 5 min for current, 1 hour for historical
+
+  try {
+    // Check cache first
+    const cached = await getCache(cacheKey);
+    let data = cached;
+    let fromCache = !!cached;
+
+    if (!cached) {
+      data = await fetchSchedule(season);
+      await setCache(cacheKey, data, cacheTTL);
+    }
+
+    // Apply status filter if provided
+    let matches = data.matches;
+    if (statusFilter && ['live', 'upcoming', 'completed'].includes(statusFilter)) {
+      matches = matches.filter(m => m.status?.toLowerCase() === statusFilter);
+    }
+
+    res.json({
+      success: true,
+      season: data.season,
+      competitionId: data.competitionId,
+      lastUpdated: data.lastUpdated,
+      summary: statusFilter ? { filtered: matches.length, total: data.matches.length } : data.summary,
+      matches,
+      cached: fromCache
+    });
+  } catch (error) {
+    console.error("Error fetching IPL schedule:", error.message);
+
+    // Try stale cache as fallback
+    try {
+      const stale = await getCache(cacheKey);
+      if (stale) {
+        return res.json({
+          success: true,
+          ...stale,
+          cached: true,
+          stale: true,
+          warning: "Using stale cached data due to fetch error"
+        });
+      }
+    } catch (cacheError) {
+      // Ignore cache errors
+    }
+
+    return sendError(res, error);
+  }
+});
+
+/**
+ * GET /ipl/match/:matchId
+ * Get single IPL match details
+ * Query params: season (default: 2025)
+ */
+router.get("/ipl/match/:matchId", async (req, res) => {
+  const { matchId } = req.params;
+  const season = req.query.season || 2025;
+  const cacheKey = `ipl:match:${season}:${matchId}`;
+  const cacheTTL = 300; // 5 minutes
+
+  try {
+    // Validate matchId
+    if (!matchId || !/^\d+$/.test(matchId)) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Invalid match ID. Must be a numeric value.",
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+
+    // Check cache first
+    const cached = await getCache(cacheKey);
+    if (cached) {
+      return res.json({
+        success: true,
+        ...cached,
+        cached: true
+      });
+    }
+
+    const data = await getMatchById(matchId, season);
+
+    if (!data) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: "NOT_FOUND",
+          message: `Match ${matchId} not found in season ${season}`,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+
+    // Cache the result
+    await setCache(cacheKey, data, cacheTTL);
+
+    res.json({
+      success: true,
+      ...data,
+      cached: false
+    });
+  } catch (error) {
+    console.error(`Error fetching IPL match ${matchId}:`, error.message);
+    return sendError(res, error);
+  }
+});
+
+/**
+ * GET /ipl/live
+ * Get only live IPL matches (shortcut endpoint)
+ */
+router.get("/ipl/live", async (req, res) => {
+  const season = req.query.season || 2025;
+  const cacheKey = `ipl:schedule:${season}`;
+  const cacheTTL = 60; // 1 minute for live data
+
+  try {
+    // Check cache first
+    let data = await getCache(cacheKey);
+
+    if (!data) {
+      data = await fetchSchedule(season);
+      await setCache(cacheKey, data, cacheTTL);
+    }
+
+    const liveMatches = data.matches.filter(m => m.status?.toLowerCase() === 'live');
+
+    res.json({
+      success: true,
+      season: data.season,
+      lastUpdated: data.lastUpdated,
+      count: liveMatches.length,
+      matches: liveMatches,
+      cached: !!data
+    });
+  } catch (error) {
+    console.error("Error fetching live IPL matches:", error.message);
+    return sendError(res, error);
+  }
+});
+
+/**
+ * GET /ipl/teams
+ * Get all IPL teams
+ */
+router.get("/ipl/teams", async (req, res) => {
+  const cacheKey = "ipl:teams";
+  const cacheTTL = 3600; // 1 hour
+
+  try {
+    // Check cache first
+    const cached = await getCache(cacheKey);
+    if (cached) {
+      return res.json({
+        success: true,
+        ...cached,
+        cached: true
+      });
+    }
+
+    const data = await fetchTeams();
+    await setCache(cacheKey, data, cacheTTL);
+
+    res.json({
+      success: true,
+      ...data,
+      cached: false
+    });
+  } catch (error) {
+    console.error("Error fetching IPL teams:", error.message);
+    return sendError(res, error);
+  }
+});
+
+/**
+ * GET /ipl/teams/:teamSlug
+ * Get team details with squad
+ */
+router.get("/ipl/teams/:teamSlug", async (req, res) => {
+  const { teamSlug } = req.params;
+  const cacheKey = `ipl:team:${teamSlug}`;
+  const cacheTTL = 3600; // 1 hour
+
+  try {
+    // Validate team slug
+    const validSlugs = getTeamSlugs();
+    if (!validSlugs.includes(teamSlug)) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: `Invalid team slug: ${teamSlug}`,
+          validSlugs,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+
+    // Check cache first
+    const cached = await getCache(cacheKey);
+    if (cached) {
+      return res.json({
+        success: true,
+        ...cached,
+        cached: true
+      });
+    }
+
+    const data = await fetchTeamSquad(teamSlug);
+    await setCache(cacheKey, data, cacheTTL);
+
+    res.json({
+      success: true,
+      ...data,
+      cached: false
+    });
+  } catch (error) {
+    console.error(`Error fetching IPL team ${teamSlug}:`, error.message);
+    return sendError(res, error);
+  }
+});
+
+/**
+ * GET /ipl/players/:playerSlug/:playerId
+ * Get detailed player profile
+ */
+router.get("/ipl/players/:playerSlug/:playerId", async (req, res) => {
+  const { playerSlug, playerId } = req.params;
+  const cacheKey = `ipl:player:${playerSlug}:${playerId}`;
+  const cacheTTL = 3600; // 1 hour
+
+  try {
+    // Validate playerId
+    if (!playerId || !/^\d+$/.test(playerId)) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Invalid player ID. Must be a numeric value.",
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+
+    // Check cache first
+    const cached = await getCache(cacheKey);
+    if (cached) {
+      return res.json({
+        success: true,
+        ...cached,
+        cached: true
+      });
+    }
+
+    const data = await fetchPlayerProfile(playerSlug, playerId);
+    await setCache(cacheKey, data, cacheTTL);
+
+    res.json({
+      success: true,
+      ...data,
+      cached: false
+    });
+  } catch (error) {
+    console.error(`Error fetching IPL player ${playerSlug}/${playerId}:`, error.message);
+
+    if (error.message.includes('not found')) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: "NOT_FOUND",
+          message: error.message,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+
     return sendError(res, error);
   }
 });

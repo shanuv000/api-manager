@@ -75,10 +75,15 @@ model EnhancedContent {
   // Processing status
   status          String   @default("completed") // completed | failed
   
+  // Twitter posting tracking
+  tweetedAt       DateTime?  // When article was tweeted (null = not tweeted)
+  tweetId         String?    // Twitter post ID for reference
+  
   // Timestamps
   createdAt       DateTime @default(now())
   
   @@index([articleId])
   @@index([createdAt(sort: Desc)])
+  @@index([tweetedAt])
   @@map("enhanced_content")
 }

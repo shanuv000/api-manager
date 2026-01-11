@@ -10,11 +10,17 @@
  * - Score/fixture extraction
  * - Related articles and topics extraction
  * - Robust retry mechanisms
+ * - Comprehensive logging for debugging
  *
  * Usage: Can be run standalone or imported for integration
  */
 
 const puppeteer = require("puppeteer-core");
+const os = require("os");
+const axios = require("axios");
+
+// Discord webhook for error alerts
+const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 
 // ===== CONFIGURATION =====
 const CONFIG = {
@@ -40,6 +46,18 @@ const CONFIG = {
 
   // Logging
   VERBOSE_LOGGING: true,
+  DEBUG_LOGGING: process.env.DEBUG_BBC_SCRAPER === 'true',
+};
+
+// Log levels for structured logging
+const LOG_LEVELS = {
+  DEBUG: 'DEBUG',
+  INFO: 'INFO',
+  WARN: 'WARN',
+  ERROR: 'ERROR',
+  PERF: 'PERF',
+  NETWORK: 'NETWORK',
+  BROWSER: 'BROWSER',
 };
 
 /**
@@ -49,24 +67,221 @@ class BBCCricketScraper {
   constructor(options = {}) {
     this.config = { ...CONFIG, ...options };
     this.browser = null;
+    this.stats = {
+      browserRestarts: 0,
+      pagesCreated: 0,
+      requestsBlocked: 0,
+      requestsAllowed: 0,
+      retryAttempts: 0,
+      errors: [],
+    };
+    this.sessionId = Date.now().toString(36);
   }
 
-  log(message, level = "info") {
-    if (this.config.VERBOSE_LOGGING || level === "error") {
-      const timestamp = new Date().toISOString().split("T")[1].slice(0, 8);
-      const prefix = level === "error" ? "❌" : level === "warn" ? "⚠️" : "📍";
-      console.log(`[${timestamp}] ${prefix} ${message}`);
+  /**
+   * Enhanced logging with levels, context, and structured data
+   */
+  log(message, level = "info", context = {}) {
+    const timestamp = new Date().toISOString();
+    const timeShort = timestamp.split("T")[1].slice(0, 12);
+    
+    const levelIcons = {
+      debug: "🔍",
+      info: "📍",
+      warn: "⚠️",
+      error: "❌",
+      perf: "⏱️",
+      network: "🌐",
+      browser: "🖥️",
+      success: "✅",
+    };
+
+    const icon = levelIcons[level] || "📍";
+    const levelUpper = level.toUpperCase().padEnd(7);
+    
+    // Always log errors, respect VERBOSE_LOGGING for others
+    if (level === "error" || this.config.VERBOSE_LOGGING) {
+      const contextStr = Object.keys(context).length > 0 
+        ? ` | ${JSON.stringify(context)}` 
+        : '';
+      console.log(`[${timeShort}] ${icon} [${levelUpper}] [${this.sessionId}] ${message}${contextStr}`);
     }
+
+    // Store errors for summary
+    if (level === "error") {
+      this.stats.errors.push({
+        timestamp,
+        message,
+        context,
+      });
+    }
+  }
+
+  /**
+   * Log performance metrics
+   */
+  logPerf(operation, durationMs, context = {}) {
+    this.log(`${operation} completed in ${durationMs}ms`, "perf", context);
+  }
+
+  /**
+   * Log system resources
+   */
+  logSystemResources() {
+    const memUsage = process.memoryUsage();
+    const freeMem = os.freemem();
+    const totalMem = os.totalmem();
+    const loadAvg = os.loadavg();
+    
+    this.log("System resources", "debug", {
+      heapUsedMB: Math.round(memUsage.heapUsed / 1024 / 1024),
+      heapTotalMB: Math.round(memUsage.heapTotal / 1024 / 1024),
+      rssMB: Math.round(memUsage.rss / 1024 / 1024),
+      freeMemMB: Math.round(freeMem / 1024 / 1024),
+      totalMemMB: Math.round(totalMem / 1024 / 1024),
+      memUsagePercent: Math.round((1 - freeMem / totalMem) * 100),
+      loadAvg1m: loadAvg[0].toFixed(2),
+    });
+  }
+
+  /**
+   * Send critical error alert to Discord
+   * @param {string} errorType - Type of error (browser_crash, connection_lost, timeout, blocked, critical)
+   * @param {Error} error - The error object
+   * @param {Object} context - Additional context
+   */
+  async sendDiscordErrorAlert(errorType, error, context = {}) {
+    if (!DISCORD_WEBHOOK_URL) {
+      this.log("Discord webhook not configured, skipping alert", "warn");
+      return;
+    }
+
+    const errorColors = {
+      browser_crash: 15158332,    // Red
+      connection_lost: 15105570,  // Orange  
+      timeout: 16776960,          // Yellow
+      blocked: 10181046,          // Purple
+      critical: 15158332,         // Red
+      session_errors: 16744192,   // Light red
+    };
+
+    try {
+      const freeMem = os.freemem();
+      const loadAvg = os.loadavg();
+      
+      const fields = [
+        {
+          name: "📊 Session Stats",
+          value: `Browser Restarts: \`${this.stats.browserRestarts}\`\nPages Created: \`${this.stats.pagesCreated}\`\nRetry Attempts: \`${this.stats.retryAttempts}\`\nTotal Errors: \`${this.stats.errors.length}\``,
+          inline: true,
+        },
+        {
+          name: "🖥️ System",
+          value: `Memory: \`${Math.round(freeMem / 1024 / 1024)}MB free\`\nLoad: \`${loadAvg[0].toFixed(2)}\``,
+          inline: true,
+        },
+      ];
+
+      if (context.url) {
+        fields.push({
+          name: "🔗 URL",
+          value: `\`${context.url}\``,
+          inline: false,
+        });
+      }
+
+      if (context.retries !== undefined) {
+        fields.push({
+          name: "🔄 Retry Info",
+          value: `Attempts: \`${context.retries + 1}\` / Max: \`${this.config.MAX_RETRIES}\``,
+          inline: true,
+        });
+      }
+
+      if (error.stack) {
+        fields.push({
+          name: "📋 Stack Trace",
+          value: `\`\`\`${error.stack.substring(0, 400)}\`\`\``,
+          inline: false,
+        });
+      }
+
+      const embed = {
+        title: `🚨 BBC Scraper Alert: ${errorType.toUpperCase().replace(/_/g, ' ')}`,
+        description: `**Session:** \`${this.sessionId}\`\n**Error:** ${error.message?.substring(0, 300) || 'Unknown error'}`,
+        color: errorColors[errorType] || 15158332,
+        fields,
+        timestamp: new Date().toISOString(),
+        footer: { text: "BBC Cricket Scraper | Auto-Alert" },
+      };
+
+      await axios.post(DISCORD_WEBHOOK_URL, {
+        username: "BBC Scraper Monitor",
+        avatar_url: "https://static.files.bbci.co.uk/core/website/assets/static/icons/favicon/bbc-favicon-196.png",
+        embeds: [embed],
+      });
+      
+      this.log("Discord alert sent", "info", { errorType });
+    } catch (alertError) {
+      this.log(`Failed to send Discord alert: ${alertError.message}`, "error");
+    }
+  }
+
+  /**
+   * Get session statistics summary
+   */
+  getStats() {
+    return {
+      ...this.stats,
+      sessionId: this.sessionId,
+    };
   }
 
   delay(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  async initBrowser() {
+  async initBrowser(forceNew = false) {
+    const startTime = Date.now();
+    this.log(`initBrowser called`, "browser", { forceNew, hasBrowser: !!this.browser });
+    
+    // Check if existing browser is still connected
+    if (this.browser && !forceNew) {
+      try {
+        // Test if browser is still responsive
+        const pages = await this.browser.pages();
+        this.log(`Browser health check passed`, "browser", { openPages: pages.length });
+        return this.browser;
+      } catch (e) {
+        this.log(`Browser health check failed: ${e.message}`, "warn", { error: e.name });
+        this.browser = null;
+      }
+    }
+
+    // Close existing browser if forcing new one
+    if (this.browser && forceNew) {
+      this.log("Force closing existing browser...", "browser");
+      try {
+        await this.browser.close();
+        this.log("Existing browser closed", "browser");
+      } catch (e) {
+        this.log(`Error closing browser: ${e.message}`, "warn");
+      }
+      this.browser = null;
+    }
+
     if (!this.browser) {
-      const os = require("os");
+      this.stats.browserRestarts++;
+      this.logSystemResources();
+      
       const isArm64 = os.arch() === "arm64";
+      const platform = os.platform();
+      
+      this.log(`Launching new browser`, "browser", { 
+        isArm64, 
+        platform, 
+        restartCount: this.stats.browserRestarts 
+      });
 
       const options = {
         headless: "new",
@@ -77,34 +292,65 @@ class BBCCricketScraper {
           "--disable-gpu",
           "--single-process",
           "--no-zygote",
+          "--disable-extensions",
+          "--disable-background-networking",
+          "--disable-default-apps",
+          "--disable-sync",
+          "--disable-translate",
+          "--mute-audio",
+          "--no-first-run",
+          "--safebrowsing-disable-auto-update",
         ],
       };
 
       if (isArm64) {
-        this.log("Running on ARM64, using system Chromium");
+        this.log("Using system Chromium for ARM64", "browser");
         options.executablePath = "/snap/bin/chromium";
       } else {
-        this.log("Running locally, finding Chromium...");
+        this.log("Finding local Chromium...", "browser");
         try {
           const puppeteerLocal = require("puppeteer");
           options.executablePath = puppeteerLocal.executablePath();
+          this.log(`Found Chromium at: ${options.executablePath}`, "browser");
         } catch (e) {
-          this.log("Puppeteer not found, trying system Chromium", "warn");
+          this.log(`Puppeteer not found: ${e.message}, using system Chromium`, "warn");
           options.executablePath = "/snap/bin/chromium";
         }
       }
 
-      this.browser = await puppeteer.launch(options);
-      this.log("Browser initialized ✓");
+      try {
+        this.browser = await puppeteer.launch(options);
+        const launchTime = Date.now() - startTime;
+        this.log(`Browser launched successfully`, "success", { launchTimeMs: launchTime });
+      } catch (launchError) {
+        this.log(`Browser launch failed: ${launchError.message}`, "error", {
+          executablePath: options.executablePath,
+          stack: launchError.stack?.split('\n').slice(0, 3).join(' | '),
+        });
+        
+        // Send Discord alert for browser crash
+        await this.sendDiscordErrorAlert('browser_crash', launchError, {
+          chromePath: options.executablePath,
+        });
+        
+        throw launchError;
+      }
     }
     return this.browser;
   }
 
   async closeBrowser() {
     if (this.browser) {
-      await this.browser.close();
+      const startTime = Date.now();
+      try {
+        const pages = await this.browser.pages();
+        this.log(`Closing browser`, "browser", { openPages: pages.length });
+        await this.browser.close();
+        this.log(`Browser closed`, "success", { closeTimeMs: Date.now() - startTime });
+      } catch (e) {
+        this.log(`Error during browser close: ${e.message}`, "warn");
+      }
       this.browser = null;
-      this.log("Browser closed ✓");
     }
   }
 
@@ -114,51 +360,74 @@ class BBCCricketScraper {
   async fetchLatestNews(retryCount = 0) {
     let page;
     const startTime = Date.now();
+    const operationId = `news-${Date.now().toString(36)}`;
 
     try {
       console.log("\n🏏 Fetching BBC Sport Cricket News...\n");
+      this.log(`Starting fetchLatestNews`, "info", { operationId, retryCount });
 
       if (retryCount > 0) {
-        console.log(
-          `🔄 Retry attempt ${retryCount}/${this.config.MAX_RETRIES}`
-        );
+        this.stats.retryAttempts++;
+        console.log(`🔄 Retry attempt ${retryCount}/${this.config.MAX_RETRIES}`);
+        this.log(`Retry attempt for news list`, "warn", { 
+          attempt: retryCount, 
+          maxRetries: this.config.MAX_RETRIES 
+        });
       }
 
       const browser = await this.initBrowser();
-      this.log("Step 1/5: Creating new page...");
+      this.log("Step 1/5: Creating new page...", "info");
+      this.stats.pagesCreated++;
       page = await browser.newPage();
+      this.log(`Page created`, "debug", { pageId: this.stats.pagesCreated });
 
       await page.setUserAgent(
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
       );
       await page.setViewport({ width: 1920, height: 1080 });
 
-      page.on("error", (err) =>
-        this.log(`Page error: ${err.message}`, "error")
-      );
-      page.on("pageerror", (err) =>
-        this.log(`Page JS error: ${err.message}`, "warn")
-      );
+      // Enhanced error listeners
+      page.on("error", (err) => {
+        this.log(`Page crashed: ${err.message}`, "error", { 
+          operationId,
+          stack: err.stack?.split('\n').slice(0, 2).join(' | ')
+        });
+      });
+      page.on("pageerror", (err) => {
+        this.log(`Page JS error: ${err.message}`, "warn", { operationId });
+      });
+      page.on("console", (msg) => {
+        if (msg.type() === 'error') {
+          this.log(`Browser console error: ${msg.text()}`, "debug");
+        }
+      });
 
-      this.log(`Step 2/5: Navigating to ${this.config.CRICKET_URL}...`);
+      const navStartTime = Date.now();
+      this.log(`Step 2/5: Navigating to ${this.config.CRICKET_URL}...`, "network");
       await page.goto(this.config.CRICKET_URL, {
         waitUntil: "networkidle2",
         timeout: this.config.PAGE_LOAD_TIMEOUT,
       });
+      this.logPerf("Page navigation", Date.now() - navStartTime, { url: this.config.CRICKET_URL });
 
-      this.log("Step 3/5: Waiting for content to load...");
+      this.log("Step 3/5: Waiting for content to load...", "info");
       await this.delay(this.config.CONTENT_WAIT_TIMEOUT);
 
-      this.log(`Step 4/5: Scrolling to load more content...`);
+      this.log(`Step 4/5: Scrolling to load more content...`, "info", {
+        iterations: this.config.SCROLL_ITERATIONS,
+        scrollDelay: this.config.SCROLL_DELAY
+      });
       for (let i = 0; i < this.config.SCROLL_ITERATIONS; i++) {
         await page.evaluate(() => window.scrollBy(0, window.innerHeight * 2));
         await this.delay(this.config.SCROLL_DELAY);
+        this.log(`Scroll ${i + 1}/${this.config.SCROLL_ITERATIONS} complete`, "debug");
       }
 
       await page.evaluate(() => window.scrollTo(0, 0));
       await this.delay(1000);
 
-      this.log("Step 5/5: Extracting news articles...");
+      const extractStartTime = Date.now();
+      this.log("Step 5/5: Extracting news articles...", "info");
       const newsArticles = await page.evaluate((maxArticles) => {
         const articles = [];
         const seen = new Set();
@@ -352,27 +621,78 @@ class BBCCricketScraper {
         return uniqueArticles;
       }, this.config.MAX_ARTICLES);
 
+      this.logPerf("Content extraction", Date.now() - extractStartTime, {
+        articlesFound: newsArticles.length,
+        selector: 'a[href*="/sport/cricket/articles/"]'
+      });
+
       const duration = Date.now() - startTime;
       await page.close();
+      this.log(`Page closed after news list extraction`, "debug");
 
       console.log(
         `✅ Successfully fetched ${newsArticles.length} news articles in ${duration}ms`
       );
+      
+      this.log(`fetchLatestNews completed successfully`, "success", {
+        operationId,
+        articlesCount: newsArticles.length,
+        durationMs: duration,
+        retryCount,
+      });
+      
+      // Log article titles for debugging
+      if (this.config.DEBUG_LOGGING) {
+        newsArticles.forEach((a, i) => {
+          this.log(`Article ${i + 1}: ${a.title.substring(0, 50)}...`, "debug", {
+            id: a.id,
+            hasImage: !!a.imageUrl,
+            hasDescription: !!a.description,
+          });
+        });
+      }
+      
       return newsArticles;
     } catch (error) {
+      const duration = Date.now() - startTime;
+      
       if (page) {
         try {
           await page.close();
-        } catch (e) {}
+          this.log(`Page closed after error`, "debug");
+        } catch (e) {
+          this.log(`Failed to close page after error: ${e.message}`, "warn");
+        }
       }
 
-      const isRetryable =
-        error.name === "TimeoutError" ||
-        error.message.includes("timeout") ||
-        error.message.includes("Navigation") ||
-        error.message.includes("net::") ||
+      const isConnectionError = 
         error.message.includes("Connection closed") ||
-        error.message.includes("closed");
+        error.message.includes("closed") ||
+        error.message.includes("detached") ||
+        error.message.includes("Target closed");
+
+      const isTimeoutError = 
+        error.name === "TimeoutError" ||
+        error.message.includes("timeout");
+
+      const isNetworkError = 
+        error.message.includes("net::") ||
+        error.message.includes("Navigation");
+
+      const isRetryable = isConnectionError || isTimeoutError || isNetworkError;
+
+      this.log(`fetchLatestNews failed`, "error", {
+        operationId,
+        errorName: error.name,
+        errorMessage: error.message,
+        isConnectionError,
+        isTimeoutError,
+        isNetworkError,
+        isRetryable,
+        retryCount,
+        durationMs: duration,
+        stack: error.stack?.split('\n').slice(0, 3).join(' | '),
+      });
 
       console.error(
         `❌ Error fetching news (attempt ${retryCount + 1}): ${error.message}`
@@ -380,14 +700,33 @@ class BBCCricketScraper {
 
       if (isRetryable && retryCount < this.config.MAX_RETRIES) {
         const retryDelay = this.config.RETRY_DELAY * Math.pow(1.5, retryCount);
+        this.log(`Will retry after ${retryDelay}ms`, "warn", {
+          nextAttempt: retryCount + 1,
+          maxRetries: this.config.MAX_RETRIES,
+        });
         console.log(`⏳ Waiting ${retryDelay / 1000}s before retry...`);
         await this.delay(retryDelay);
 
         try {
+          this.log(`Closing browser before retry`, "browser");
           await this.closeBrowser();
-        } catch (e) {}
+        } catch (e) {
+          this.log(`Browser close failed before retry: ${e.message}`, "warn");
+        }
         return this.fetchLatestNews(retryCount + 1);
       }
+
+      this.log(`fetchLatestNews exhausted all retries`, "error", {
+        operationId,
+        totalAttempts: retryCount + 1,
+      });
+
+      // Send Discord alert for persistent failure
+      await this.sendDiscordErrorAlert('connection_lost', error, {
+        url: this.config.CRICKET_URL,
+        retries: retryCount,
+        operationId,
+      });
 
       throw error;
     }
@@ -400,24 +739,89 @@ class BBCCricketScraper {
     let page;
     const startTime = Date.now();
     const maxRetries = 2;
+    const articleId = articleUrl.split("/").pop();
+    const operationId = `article-${articleId}-${Date.now().toString(36)}`;
 
     try {
-      this.log(`Fetching article: ${articleUrl.split("/").pop()}`);
+      this.log(`Fetching article: ${articleId}`, "info", { 
+        operationId, 
+        retryCount,
+        url: articleUrl 
+      });
+      
       const browser = await this.initBrowser();
+      this.stats.pagesCreated++;
       page = await browser.newPage();
+      this.log(`Page created for article`, "debug", { articleId, pageId: this.stats.pagesCreated });
 
       await page.setUserAgent(
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
       );
       await page.setViewport({ width: 1920, height: 1080 });
-
-      await page.goto(articleUrl, {
-        waitUntil: "networkidle2",
-        timeout: this.config.PAGE_LOAD_TIMEOUT,
+      
+      // Block unnecessary resources to speed up page load
+      let blockedCount = 0;
+      let allowedCount = 0;
+      await page.setRequestInterception(true);
+      page.on('request', (req) => {
+        const resourceType = req.resourceType();
+        const url = req.url();
+        // Block ads, analytics, videos, and large media files
+        if (
+          resourceType === 'media' ||
+          resourceType === 'font' ||
+          url.includes('analytics') ||
+          url.includes('tracking') ||
+          url.includes('ads') ||
+          url.includes('doubleclick') ||
+          url.includes('googlesyndication') ||
+          url.includes('.mp4') ||
+          url.includes('.webm')
+        ) {
+          blockedCount++;
+          req.abort();
+        } else {
+          allowedCount++;
+          req.continue();
+        }
       });
 
+      // Add error listeners for this page
+      page.on('error', (err) => {
+        this.log(`Page error during article fetch`, "error", {
+          articleId,
+          error: err.message,
+        });
+      });
+
+      const navStartTime = Date.now();
+      await page.goto(articleUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: this.config.PAGE_LOAD_TIMEOUT,
+      });
+      const navTime = Date.now() - navStartTime;
+      this.log(`Article page loaded`, "network", { 
+        articleId, 
+        navTimeMs: navTime,
+        requestsBlocked: blockedCount,
+        requestsAllowed: allowedCount,
+      });
+      this.stats.requestsBlocked += blockedCount;
+      this.stats.requestsAllowed += allowedCount;
+
+      // Wait for article content to be available
+      const selectorStartTime = Date.now();
+      const selectorFound = await page.waitForSelector('article, main, h1', { timeout: 10000 })
+        .then(() => true)
+        .catch(() => false);
+      this.log(`Content selector check`, "debug", {
+        articleId,
+        selectorFound,
+        waitTimeMs: Date.now() - selectorStartTime,
+      });
       await this.delay(this.config.CONTENT_WAIT_TIMEOUT);
 
+      const extractStartTime = Date.now();
       const articleDetails = await page.evaluate(() => {
         // ========== TITLE EXTRACTION ==========
         const title = document.querySelector("h1")?.textContent.trim() || "";
@@ -886,8 +1290,24 @@ class BBCCricketScraper {
         };
       });
 
+      const extractTime = Date.now() - extractStartTime;
       const duration = Date.now() - startTime;
       await page.close();
+
+      // Log extraction details
+      this.log(`Article content extracted`, "success", {
+        articleId,
+        wordCount: articleDetails.wordCount,
+        hasContent: !!articleDetails.content,
+        contentLength: articleDetails.content?.length || 0,
+        hasImage: !!articleDetails.mainImage,
+        hasAuthor: !!articleDetails.author,
+        publishedTime: articleDetails.publishedTime || 'unknown',
+        topicsCount: articleDetails.topics?.length || 0,
+        relatedCount: articleDetails.relatedArticles?.length || 0,
+        extractTimeMs: extractTime,
+        totalTimeMs: duration,
+      });
 
       console.log(
         `   ✓ ${articleDetails.wordCount} words, published: ${
@@ -900,28 +1320,79 @@ class BBCCricketScraper {
         url: articleUrl,
       };
     } catch (error) {
+      const duration = Date.now() - startTime;
+      
       if (page) {
         try {
           await page.close();
-        } catch (e) {}
+          this.log(`Page closed after article error`, "debug", { articleId });
+        } catch (e) {
+          this.log(`Failed to close page: ${e.message}`, "warn", { articleId });
+        }
       }
 
-      const isRetryable =
-        error.name === "TimeoutError" ||
-        error.message.includes("timeout") ||
-        error.message.includes("net::") ||
+      const isConnectionError = 
         error.message.includes("Connection closed") ||
-        error.message.includes("closed");
+        error.message.includes("closed") ||
+        error.message.includes("detached") ||
+        error.message.includes("Target closed") ||
+        error.message.includes("Protocol error");
+
+      const isTimeoutError = 
+        error.name === "TimeoutError" ||
+        error.message.includes("timeout");
+
+      const isNetworkError = 
+        error.message.includes("net::");
+
+      const isRetryable = isTimeoutError || isNetworkError || isConnectionError;
+
+      this.log(`Article fetch failed`, "error", {
+        operationId,
+        articleId,
+        errorName: error.name,
+        errorMessage: error.message,
+        isConnectionError,
+        isTimeoutError,
+        isNetworkError,
+        isRetryable,
+        retryCount,
+        maxRetries,
+        durationMs: duration,
+        stack: error.stack?.split('\n').slice(0, 3).join(' | '),
+      });
 
       if (isRetryable && retryCount < maxRetries) {
+        this.stats.retryAttempts++;
         const retryDelay = this.config.RETRY_DELAY * Math.pow(1.5, retryCount);
-        this.log(
-          `Article fetch failed, retrying in ${retryDelay / 1000}s...`,
-          "warn"
-        );
+        this.log(`Article retry scheduled`, "warn", {
+          articleId,
+          retryDelay,
+          nextAttempt: retryCount + 1,
+          maxRetries,
+          reason: isConnectionError ? 'connection' : isTimeoutError ? 'timeout' : 'network',
+        });
+        
+        // On connection errors, restart the browser
+        if (isConnectionError) {
+          this.log("Connection error - restarting browser before retry", "browser", { articleId });
+          try {
+            await this.closeBrowser();
+          } catch (e) {
+            this.log(`Browser close failed: ${e.message}`, "warn");
+          }
+          await this.delay(1000);
+        }
+        
         await this.delay(retryDelay);
         return this.fetchArticleDetails(articleUrl, retryCount + 1);
       }
+
+      this.log(`Article fetch exhausted all retries`, "error", {
+        operationId,
+        articleId,
+        totalAttempts: retryCount + 1,
+      });
 
       console.error(`   ❌ Error: ${error.message}`);
       throw error;
@@ -1038,14 +1509,28 @@ class BBCCricketScraper {
    * Fetch news list with full article details
    */
   async fetchLatestNewsWithDetails(limit = 5) {
+    const operationStartTime = Date.now();
+    const operationId = `batch-${Date.now().toString(36)}`;
+    
+    this.log(`Starting batch article fetch`, "info", { operationId, limit });
+    this.logSystemResources();
+    
     try {
       const newsList = await this.fetchLatestNews();
       const detailedNews = [];
 
       if (newsList.length === 0) {
+        this.log(`No news articles found in list`, "warn", { operationId });
         console.log("⚠️  No news articles found");
         return [];
       }
+
+      const articlesToFetch = newsList.slice(0, limit);
+      this.log(`Will fetch details for ${articlesToFetch.length} articles`, "info", {
+        operationId,
+        totalInList: newsList.length,
+        fetchLimit: limit,
+      });
 
       console.log(
         `\n📚 Fetching detailed content for top ${Math.min(
@@ -1054,10 +1539,14 @@ class BBCCricketScraper {
         )} articles...\n`
       );
 
-      const articlesToFetch = newsList.slice(0, limit);
+      let consecutiveErrors = 0;
+      let successCount = 0;
+      let errorCount = 0;
 
       for (let i = 0; i < articlesToFetch.length; i++) {
         const article = articlesToFetch[i];
+        const articleStartTime = Date.now();
+        
         console.log(
           `[${i + 1}/${articlesToFetch.length}] ${article.title.substring(
             0,
@@ -1071,13 +1560,45 @@ class BBCCricketScraper {
             ...article,
             details,
           });
+          consecutiveErrors = 0; // Reset on success
+          successCount++;
+          
+          this.log(`Article ${i + 1}/${articlesToFetch.length} fetched`, "debug", {
+            articleId: article.id,
+            wordCount: details.wordCount,
+            fetchTimeMs: Date.now() - articleStartTime,
+          });
         } catch (error) {
+          errorCount++;
           console.error(`   Skipping article due to error: ${error.message}`);
+          this.log(`Article ${i + 1}/${articlesToFetch.length} failed`, "error", {
+            articleId: article.id,
+            error: error.message,
+            consecutiveErrors: consecutiveErrors + 1,
+          });
+          
           detailedNews.push({
             ...article,
             details: null,
             fetchError: error.message,
           });
+          consecutiveErrors++;
+          
+          // If too many consecutive errors, restart browser
+          if (consecutiveErrors >= 2) {
+            this.log("Multiple consecutive errors - restarting browser", "warn", {
+              operationId,
+              consecutiveErrors,
+              articleIndex: i,
+            });
+            try {
+              await this.closeBrowser();
+            } catch (e) {
+              this.log(`Browser close failed: ${e.message}`, "warn");
+            }
+            await this.delay(2000);
+            consecutiveErrors = 0;
+          }
         }
 
         if (i < articlesToFetch.length - 1) {
@@ -1085,11 +1606,80 @@ class BBCCricketScraper {
         }
       }
 
+      const totalDuration = Date.now() - operationStartTime;
+      
+      // Log final batch summary
+      this.log(`Batch article fetch completed`, "success", {
+        operationId,
+        totalArticles: articlesToFetch.length,
+        successCount,
+        errorCount,
+        successRate: `${Math.round((successCount / articlesToFetch.length) * 100)}%`,
+        totalDurationMs: totalDuration,
+        avgTimePerArticle: Math.round(totalDuration / articlesToFetch.length),
+      });
+
+      // Log session stats
+      this.log(`Session statistics`, "perf", this.getStats());
+
       return detailedNews;
     } catch (error) {
+      this.log(`Batch fetch failed completely`, "error", {
+        operationId,
+        error: error.message,
+        stack: error.stack?.split('\n').slice(0, 3).join(' | '),
+      });
       console.error(`❌ Failed to fetch news with details: ${error.message}`);
       throw error;
     }
+  }
+
+  /**
+   * Print session statistics summary
+   */
+  printStatsSummary() {
+    const stats = this.getStats();
+    console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('📊 BBC SCRAPER SESSION STATISTICS');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log(`   Session ID:        ${stats.sessionId}`);
+    console.log(`   Browser restarts:  ${stats.browserRestarts}`);
+    console.log(`   Pages created:     ${stats.pagesCreated}`);
+    console.log(`   Retry attempts:    ${stats.retryAttempts}`);
+    console.log(`   Requests blocked:  ${stats.requestsBlocked}`);
+    console.log(`   Requests allowed:  ${stats.requestsAllowed}`);
+    console.log(`   Errors logged:     ${stats.errors.length}`);
+    if (stats.errors.length > 0) {
+      console.log('   Last errors:');
+      stats.errors.slice(-3).forEach((e, i) => {
+        console.log(`     ${i + 1}. ${e.message}`);
+      });
+    }
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+    
+    // Return stats for potential async alert
+    return stats;
+  }
+
+  /**
+   * Async version of printStatsSummary that also sends Discord alert on errors
+   */
+  async printStatsSummaryWithAlert() {
+    const stats = this.printStatsSummary();
+    
+    // If there were errors during the session, send a summary alert
+    if (stats.errors.length >= 3) {
+      await this.sendDiscordErrorAlert('session_errors', 
+        new Error(`Session had ${stats.errors.length} errors`), 
+        { 
+          errorCount: stats.errors.length,
+          browserRestarts: stats.browserRestarts,
+          retryAttempts: stats.retryAttempts,
+        }
+      );
+    }
+    
+    return stats;
   }
 
   /**
