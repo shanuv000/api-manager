@@ -16,10 +16,6 @@ const {
   invalidateArticleCache,
   invalidateNewsCache,
 } = require("../component/redisClient");
-const {
-  postArticleTweet,
-  CONFIG: TWITTER_CONFIG,
-} = require("../services/twitter-service");
 
 // ============================================
 // CONFIGURATION
@@ -582,41 +578,6 @@ async function saveEnhancedContent(enhanced, originalArticles) {
       console.log(
         `   ✅ Saved (${validation.wordCount} words): ${item.enhancedTitle?.substring(0, 45)}...`
       );
-
-      // Auto-tweet newly enhanced article (with daily limit check)
-      if (TWITTER_CONFIG.ENABLED) {
-        try {
-          // Check daily limit before tweeting
-          const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-          const todaysTweets = await prisma.enhancedContent.count({
-            where: { tweetedAt: { gte: twentyFourHoursAgo } },
-          });
-          
-          const MAX_DAILY_TWEETS = 10;
-          if (todaysTweets >= MAX_DAILY_TWEETS) {
-            console.log(`   ⏸️ Daily tweet limit reached (${todaysTweets}/${MAX_DAILY_TWEETS}). Will tweet later.`);
-          } else {
-            const tweetResult = await postArticleTweet(article, savedContent);
-            if (tweetResult.success) {
-              // Update database with tweet info
-              await prisma.enhancedContent.update({
-                where: { id: savedContent.id },
-                data: {
-                  tweetedAt: new Date(),
-                  tweetId: tweetResult.tweetId,
-                },
-              });
-              console.log(`   🐦 Tweeted: ${tweetResult.tweetUrl}`);
-            } else if (tweetResult.shouldStopAll) {
-              // Stop tweeting for this batch if rate limited
-              console.log(`   ⛔ Twitter limit hit - skipping remaining tweets for this batch`);
-            }
-          }
-        } catch (tweetError) {
-          // Tweet failure shouldn't break enhancement flow
-          console.log(`   ⚠️ Tweet failed (will retry later): ${tweetError.message}`);
-        }
-      }
 
       saved++;
     } catch (error) {
