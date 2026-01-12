@@ -44,7 +44,7 @@ const CONFIG = {
 
   // Maximum tweets per day - Twitter's unwritten safe limit
   // Weekends get slightly higher limit
-  MAX_TWEETS_PER_DAY: isWeekend() ? 12 : 10,
+  MAX_TWEETS_PER_DAY: isWeekend() ? 18 : 15,
 
   // Minimum hours between runs (to spread tweets throughout day)
   MIN_HOURS_BETWEEN_RUNS: 2,
