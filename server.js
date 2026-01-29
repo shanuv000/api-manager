@@ -2,6 +2,7 @@ const express = require("express");
 const path = require("path");
 const setupMiddleware = require("./component/middleware");
 
+
 // Consolidated Cricket Routes
 const cricketRoutes = require("./routes/Cricket/index");
 
@@ -32,6 +33,8 @@ app.use("/api/cricket", cricketRoutes);
 // app.use("/api/cricket", t20WorldCupRoute);
 // app.use("/api/cricket", espnRoute);
 
+
+
 // Fallback route for undefined endpoints
 app.use((req, res) => {
   res.status(404).json({ error: "Endpoint not found" });
@@ -52,18 +55,18 @@ const server = app.listen(PORT, () => {
 // Graceful shutdown handling
 const gracefulShutdown = (signal) => {
   console.log(`\n${signal} received. Starting graceful shutdown...`);
-  
+
   // Stop accepting new connections
   server.close(() => {
     console.log('HTTP server closed.');
-    
+
     // Close database connections if any
     // Add your cleanup code here (e.g., Redis, database connections)
-    
+
     console.log('Graceful shutdown completed.');
     process.exit(0);
   });
-  
+
   // Force shutdown after 10 seconds
   setTimeout(() => {
     console.error('Forced shutdown after timeout.');

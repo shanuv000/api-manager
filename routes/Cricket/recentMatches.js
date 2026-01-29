@@ -50,10 +50,73 @@ router.get("/recent-scores", async (req, res) => {
     const matches = [];
     const processedLinks = new Set(); // To avoid duplicates
 
+    // === EXTRACT NEXT.JS DATA ===
+    // This is crucial for recent matches because the DOM often lacks "playingTeamBat" info
+    // in the simplified card view, or classes have changed.
+    const extractMatchesFromNextData = (html) => {
+      const matchesData = [];
+      try {
+        const cheerio = require('cheerio');
+        const $ = cheerio.load(html);
+
+        $("script").each((i, el) => {
+          let content = $(el).html();
+          if (!content) return;
+
+          const key = '\\"matchesList\\":';
+          let idx = content.indexOf(key);
+          while (idx !== -1) {
+            let start = idx + key.length;
+            let balance = 0;
+            let inString = false;
+            let extracted = "";
+            let foundStart = false;
+
+            for (let k = start; k < content.length; k++) {
+              const char = content[k];
+              if (!foundStart) {
+                if (char === '{') { foundStart = true; balance = 1; extracted += char; }
+                continue;
+              }
+              extracted += char;
+              if (char === '\\') { k++; if (k < content.length) extracted += content[k]; continue; }
+              if (char === '"') inString = !inString;
+              if (!inString) { if (char === '{') balance++; else if (char === '}') balance--; }
+              if (balance === 0) break;
+            }
+
+            if (foundStart && extracted) {
+              try {
+                const unescaped = extracted.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+                const json = JSON.parse(unescaped);
+                if (json.matches) matchesData.push(...json.matches);
+              } catch (e) { }
+            }
+            idx = content.indexOf(key, idx + 1);
+          }
+        });
+      } catch (e) {
+        console.error("Error extracting Next.js data in recent matches:", e.message);
+      }
+      return matchesData;
+    };
+
+    const nextJsMatches = extractMatchesFromNextData(html);
+    const nextJsMap = new Map();
+    if (nextJsMatches.length > 0) {
+      nextJsMatches.forEach(m => {
+        if (m.match && m.match.matchInfo && m.match.matchInfo.matchId) {
+          nextJsMap.set(m.match.matchInfo.matchId.toString(), m.match);
+        }
+      });
+    }
+
     // Find all match cards directly - they are <a> tags with specific classes
     const matchElements = $("a.w-full.bg-cbWhite.flex.flex-col");
+    // Also include the simpler card types found in recent matches
+    const allMatchElements = matchElements.add("a.block.mb-3");
 
-    matchElements.each((index, element) => {
+    allMatchElements.each((index, element) => {
       const $matchCard = $(element);
       const href = $matchCard.attr("href");
       const title = $matchCard.attr("title");
@@ -76,6 +139,10 @@ router.get("/recent-scores", async (req, res) => {
       match.title = title.trim();
       match.matchLink = href ? `https://www.cricbuzz.com${href}` : null;
 
+      // Extract matchId
+      const idMatch = href.match(/\/live-cricket-scores\/(\d+)\//);
+      match.matchId = idMatch ? idMatch[1] : null;
+
       // Extract match info from title
       const titleParts = title.split(" - ");
       if (titleParts.length >= 2) {
@@ -92,44 +159,87 @@ router.get("/recent-scores", async (req, res) => {
         .first();
       match.location = locationSpan.length ? locationSpan.text().trim() : "N/A";
 
-      // Extract team names and scores
+      // Extract team names and scores from DOM
       const teams = [];
       const teamAbbr = [];
       const scores = [];
 
       // Find all team/score rows within this match card
-      $matchCard
-        .find("div.flex.items-center.gap-4.justify-between")
-        .each((i, row) => {
+      let rows = $matchCard.find("div.flex.items-center.gap-4.justify-between");
+
+      if (rows.length === 0) {
+        // Simple card fallback
+        const simpleTeamDiv = $matchCard.find("div.text-white").first();
+        if (simpleTeamDiv.length) {
+          const text = simpleTeamDiv.text().trim();
+          if (text.includes(" vs ")) {
+            const parts = text.split(" vs ");
+            teams.push(parts[0].trim());
+            if (parts[1]) teams.push(parts[1].trim());
+          }
+        }
+      } else {
+        rows.each((i, row) => {
           const $row = $(row);
 
-          // Get full team name (desktop version - hidden wb:block)
-          const teamFull = $row
-            .find("span.hidden.wb\\:block.whitespace-nowrap")
-            .text()
-            .trim();
-          if (teamFull) {
-            teams.push(teamFull);
-          }
+          // Get full team name (desktop version - relaxed selector)
+          const teamFull = $row.find("span.hidden.wb\\:block").text().trim();
+          if (teamFull) teams.push(teamFull);
 
-          // Get team abbreviation (mobile version - block wb:hidden)
-          const teamAbb = $row
-            .find("span.block.wb\\:hidden.whitespace-nowrap")
-            .text()
-            .trim();
-          if (teamAbb) {
-            teamAbbr.push(teamAbb);
-          }
+          // Get team abbreviation (mobile version - relaxed selector)
+          const teamAbb = $row.find("span.block.wb\\:hidden").text().trim();
+          if (teamAbb) teamAbbr.push(teamAbb);
 
           // Get score
-          const score = $row
-            .find("span.font-medium.wb\\:font-semibold")
-            .text()
-            .trim();
-          if (score) {
-            scores.push(score);
-          }
+          const score = $row.find("span.font-medium.wb\\:font-semibold").text().trim();
+          if (score) scores.push(score);
         });
+      }
+
+      // Merge with Next.js data (PRIORITY)
+      if (match.matchId && nextJsMap.has(match.matchId)) {
+        const nextData = nextJsMap.get(match.matchId);
+
+        // Update teams if missing
+        if (teams.length < 2 && nextData.matchInfo) {
+          if (nextData.matchInfo.team1) teams[0] = nextData.matchInfo.team1.teamName;
+          if (nextData.matchInfo.team2) teams[1] = nextData.matchInfo.team2.teamName;
+
+          if (nextData.matchInfo.team1) teamAbbr[0] = nextData.matchInfo.team1.teamSName;
+          if (nextData.matchInfo.team2) teamAbbr[1] = nextData.matchInfo.team2.teamSName;
+        }
+
+        // Update scores from Next.js data
+        if (nextData.matchScore) {
+          // Need to format scores: "166-5 (19.6)"
+          const formatScore = (scoreObj) => {
+            if (!scoreObj || !scoreObj.inngs1) return null;
+            const inngs = scoreObj.inngs1;
+            let s = "";
+            if (inngs.runs !== undefined) s += inngs.runs;
+            if (inngs.wickets !== undefined) s += `-${inngs.wickets}`;
+            if (inngs.overs !== undefined) s += ` (${inngs.overs})`;
+            return s || null;
+          };
+
+          const s1 = formatScore(nextData.matchScore.team1Score);
+          const s2 = formatScore(nextData.matchScore.team2Score);
+
+          // Override checks
+          if (s1) {
+            if (scores.length > 0) scores[0] = s1; else scores.push(s1);
+          }
+          if (s2) {
+            if (scores.length > 1) scores[1] = s2; else scores.push(s2);
+          }
+        }
+
+        // Update status/commentary
+        if (nextData.matchInfo.status) {
+          match.liveCommentary = nextData.matchInfo.status;
+          match.status = nextData.matchInfo.stateTitle || nextData.matchInfo.status;
+        }
+      }
 
       // Assign teams
       if (teams.length >= 2) {
@@ -166,9 +276,12 @@ router.get("/recent-scores", async (req, res) => {
           'span[class*="text-cbComplete"], span[class*="text-cbLive"], span[class*="text-cbPreview"]'
         )
         .first();
-      match.liveCommentary = resultSpan.length
-        ? resultSpan.text().trim()
-        : match.status || "N/A";
+
+      if (!match.liveCommentary || match.liveCommentary === "N/A") {
+        match.liveCommentary = resultSpan.length
+          ? resultSpan.text().trim()
+          : match.status || "N/A";
+      }
 
       // === ENHANCED DATA EXTRACTION ===
 

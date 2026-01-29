@@ -12,16 +12,16 @@ const CACHE_CONFIG = {
     checkPeriod: 10,
   },
   recentMatches: {
-    ttl: 120, // 2 minutes - recent matches update less frequently
-    checkPeriod: 30,
+    ttl: 3600, // 1 hour - recent matches only update when a match ends
+    checkPeriod: 120,
   },
   scorecard: {
     ttl: 60, // 1 minute - scorecards during live matches
     checkPeriod: 20,
   },
   upcomingMatches: {
-    ttl: 300, // 5 minutes - upcoming matches rarely change
-    checkPeriod: 60,
+    ttl: 7200, // 2 hours - upcoming matches/schedules rarely change
+    checkPeriod: 300,
   },
 };
 

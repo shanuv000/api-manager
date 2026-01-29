@@ -16,11 +16,15 @@ const {
   fetchStandings,
   fetchRecordFilters,
   fetchRecords,
-  fetchPhotosList,
-  fetchPhotoGallery,
-  fetchImage,
   getRapidAPIQuota,
 } = require("./stats");
+const {
+  fetchPhotoGalleryList,
+  fetchPhotoGalleryById,
+  fetchImage: fetchPhotoImage,
+  generateImageUrls,
+  STATIC_CDN_URL,
+} = require("../../scrapers/cricbuzz-photos-scraper");
 const {
   fetchPointsTable,
   fetchSchedule,
@@ -31,6 +35,12 @@ const {
   getTeamSlugs,
   fetchPlayerProfile,
 } = require("./ipl");
+const {
+  getSeriesList,
+  getCurrentSeries,
+  getSeriesDetails,
+  getSeriesPointsTable,
+} = require("../../services/series");
 const {
   ApiError,
   ValidationError,
@@ -772,13 +782,13 @@ const scrapeCricbuzzMatches = async (url, maxResults = null) => {
         const $row = $(row);
 
         const teamFull = $row
-          .find("span.hidden.wb\\:block.whitespace-nowrap")
+          .find("span.hidden.wb\\:block")
           .text()
           .trim();
         if (teamFull) teams.push(teamFull);
 
         const teamAbb = $row
-          .find("span.block.wb\\:hidden.whitespace-nowrap")
+          .find("span.block.wb\\:hidden")
           .text()
           .trim();
         if (teamAbb) teamAbbr.push(teamAbb);
@@ -2366,8 +2376,8 @@ router.get("/photos/list", async (req, res) => {
   const cacheKey = "cricket:photos:list";
 
   try {
-    // 6 hours cache - optimized for free tier RapidAPI (200 req/month)
-    setCacheHeaders(res, { maxAge: 21600, staleWhileRevalidate: 3600 });
+    // 3 hours cache - no quota concerns with direct scraping
+    setCacheHeaders(res, { maxAge: 10800, staleWhileRevalidate: 3600 });
 
     // Check cache first
     const cachedData = await getCache(cacheKey);
@@ -2376,19 +2386,20 @@ router.get("/photos/list", async (req, res) => {
       return res.json({ ...cachedData, cached: true });
     }
 
-    // Fetch from RapidAPI
-    const data = await fetchPhotosList();
+    // Fetch directly from Cricbuzz using Cheerio
+    const result = await fetchPhotoGalleryList();
 
     const response = {
       success: true,
-      data,
-      source: "rapidapi",
+      count: result.count,
+      data: result.galleries,
+      source: "cricbuzz-scrape",
       cached: false,
       timestamp: new Date().toISOString(),
     };
 
-    // Cache for 6 hours (21600 seconds) - conserve API quota
-    await setCache(cacheKey, response, 21600);
+    // Cache for 3 hours (10800 seconds)
+    await setCache(cacheKey, response, 10800);
 
     // Record success for health monitoring
     scraperHealth.recordSuccess(SCRAPER_NAME, Date.now() - startTime);
@@ -2413,7 +2424,7 @@ router.get("/photos/list", async (req, res) => {
           ...staleCache,
           cached: true,
           stale: true,
-          error_note: "Serving cached data due to RapidAPI error",
+          error_note: "Serving cached data due to scraping error",
         });
       }
     } catch (cacheError) {
@@ -2445,8 +2456,8 @@ router.get("/photos/gallery/:galleryId", async (req, res) => {
   const cacheKey = `cricket:photos:gallery:${galleryId}`;
 
   try {
-    // 12 hours cache - galleries don't change, conserve free tier quota
-    setCacheHeaders(res, { maxAge: 43200, staleWhileRevalidate: 7200 });
+    // 6 hours cache - galleries are fairly static
+    setCacheHeaders(res, { maxAge: 21600, staleWhileRevalidate: 7200 });
 
     // Check cache first
     const cachedData = await getCache(cacheKey);
@@ -2455,19 +2466,26 @@ router.get("/photos/gallery/:galleryId", async (req, res) => {
       return res.json({ ...cachedData, cached: true });
     }
 
-    // Fetch from RapidAPI
-    const data = await fetchPhotoGallery(galleryId);
+    // Fetch directly from Cricbuzz using Cheerio
+    const result = await fetchPhotoGalleryById(galleryId);
 
     const response = {
       success: true,
-      data,
-      source: "rapidapi",
+      data: {
+        galleryId: result.galleryId,
+        headline: result.headline,
+        url: result.url,
+        photoCount: result.photoCount,
+        photos: result.photos,
+        tags: result.tags,
+      },
+      source: "cricbuzz-scrape",
       cached: false,
       timestamp: new Date().toISOString(),
     };
 
-    // Cache for 12 hours (43200 seconds) - galleries are static content
-    await setCache(cacheKey, response, 43200);
+    // Cache for 6 hours (21600 seconds) - galleries are static content
+    await setCache(cacheKey, response, 21600);
 
     // Record success for health monitoring
     scraperHealth.recordSuccess(SCRAPER_NAME, Date.now() - startTime);
@@ -2494,7 +2512,7 @@ router.get("/photos/gallery/:galleryId", async (req, res) => {
           ...staleCache,
           cached: true,
           stale: true,
-          error_note: "Serving cached data due to RapidAPI error",
+          error_note: "Serving cached data due to scraping error",
         });
       }
     } catch (cacheError) {
@@ -2539,8 +2557,8 @@ router.get("/photos/image/*", async (req, res) => {
       return res.send(Buffer.from(cachedData.data, "base64"));
     }
 
-    // Fetch from RapidAPI
-    const imageData = await fetchImage(imagePath);
+    // Fetch directly from Cricbuzz CDN
+    const imageData = await fetchPhotoImage(imagePath);
 
     // Cache the image for 30 days (2592000 seconds) - images never change
     await setCache(
@@ -2612,15 +2630,13 @@ router.get("/rapidapi/health", async (req, res) => {
     const quota = await getRapidAPIQuota();
 
     // Get health metrics for RapidAPI-dependent scrapers only
+    // NOTE: Photo scrapers removed - they now use direct Cheerio scraping
     const allMetrics = scraperHealth.getAllMetrics();
     const rapidAPIScrapers = [
       "stats-rankings",
       "stats-standings",
       "stats-record-filters",
       "stats-records",
-      "photos-list",
-      "photos-gallery",
-      "photos-image",
     ];
 
     const scraperMetrics = {};
@@ -2699,6 +2715,321 @@ router.get("/rapidapi/health", async (req, res) => {
     res.json(response);
   } catch (error) {
     console.error("Error generating RapidAPI health report:", error.message);
+    return sendError(res, error);
+  }
+});
+
+// ================================
+// SERIES ENDPOINTS (Cricbuzz)
+// ================================
+
+/**
+ * GET /series
+ * Get list of cricket series by category
+ * Query params: category (all|international|domestic|league|women)
+ */
+router.get("/series", async (req, res) => {
+  const category = req.query.category || "all";
+  const validCategories = ["all", "international", "domestic", "league", "women"];
+
+  if (!validCategories.includes(category)) {
+    return sendError(res, new ValidationError(`Invalid category. Must be one of: ${validCategories.join(", ")}`));
+  }
+
+  try {
+    const cacheKey = `series:list:${category}`;
+    const cached = await getCache(cacheKey);
+
+    if (cached) {
+      return res.json({
+        ...cached,
+        cached: true,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const result = await getSeriesList(category);
+
+    if (result.success) {
+      await setCache(cacheKey, result, 3600); // 1 hour cache
+    }
+
+    res.json({
+      ...result,
+      cached: false,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("Error fetching series list:", error.message);
+    return sendError(res, error);
+  }
+});
+
+/**
+ * GET /series/current
+ * Get currently running/live series only
+ */
+router.get("/series/current", async (req, res) => {
+  try {
+    const cacheKey = "series:current";
+    const cached = await getCache(cacheKey);
+
+    if (cached) {
+      return res.json({
+        ...cached,
+        cached: true,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const result = await getCurrentSeries();
+
+    if (result.success) {
+      await setCache(cacheKey, result, 1800); // 30 min cache
+    }
+
+    res.json({
+      ...result,
+      cached: false,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("Error fetching current series:", error.message);
+    return sendError(res, error);
+  }
+});
+
+/**
+ * GET /series/:seriesId/points-table
+ * Get points table for a specific series
+ * Query params: light=true (strip recentMatches for smaller response)
+ */
+router.get("/series/:seriesId/points-table", async (req, res) => {
+  const { seriesId } = req.params;
+  const light = req.query.light === "true";
+
+  if (!seriesId || isNaN(parseInt(seriesId))) {
+    return sendError(res, new ValidationError("Series ID must be a valid number"));
+  }
+
+  try {
+    const cacheKey = `series:points:${seriesId}`;
+    const cached = await getCache(cacheKey);
+
+    if (cached) {
+      let data = cached;
+
+      // Strip recentMatches if light mode
+      if (light && data.groups) {
+        data = {
+          ...data,
+          groups: data.groups.map(g => ({
+            ...g,
+            teams: g.teams.map(t => {
+              const { recentMatches, ...rest } = t;
+              return rest;
+            }),
+          })),
+        };
+      }
+
+      return res.json({
+        ...data,
+        cached: true,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const result = await getSeriesPointsTable(parseInt(seriesId));
+
+    if (result.success) {
+      await setCache(cacheKey, result, 600); // 10 min cache
+    }
+
+    // Strip recentMatches if light mode
+    let responseData = result;
+    if (light && result.groups) {
+      responseData = {
+        ...result,
+        groups: result.groups.map(g => ({
+          ...g,
+          teams: g.teams.map(t => {
+            const { recentMatches, ...rest } = t;
+            return rest;
+          }),
+        })),
+      };
+    }
+
+    res.json({
+      ...responseData,
+      cached: false,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("Error fetching points table:", error.message);
+    return sendError(res, error);
+  }
+});
+
+/**
+ * GET /series/:seriesId
+ * Get matches for a specific series
+ * Query params: light=true (minimal match data)
+ */
+router.get("/series/:seriesId", async (req, res) => {
+  const { seriesId } = req.params;
+  const light = req.query.light === "true";
+
+  if (!seriesId || isNaN(parseInt(seriesId))) {
+    return sendError(res, new ValidationError("Series ID must be a valid number"));
+  }
+
+  try {
+    const cacheKey = `series:matches:${seriesId}`;
+    const cached = await getCache(cacheKey);
+
+    if (cached) {
+      return res.json({
+        ...cached,
+        cached: true,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // Get series info first to get the series name and slug
+    const seriesInfo = await getSeriesDetails(parseInt(seriesId));
+
+    if (!seriesInfo.success) {
+      return sendError(res, new NotFoundError(`Series ${seriesId} not found`));
+    }
+
+    // Get all match types from existing cached endpoints
+    const [liveCache, recentCache, upcomingCache] = await Promise.all([
+      getCache("cricbuzz:live-scores"),
+      getCache("cricbuzz:recent-matches"),
+      getCache("cricbuzz:upcoming-matches"),
+    ]);
+
+    // If caches exist, filter matches by series
+    const seriesSlug = seriesInfo.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+
+    // Helper to filter matches by series
+    const filterBySeriesId = (matches) => {
+      if (!matches || !Array.isArray(matches)) return [];
+      return matches.filter(m => {
+        // Check if matchLink contains either series ID or slug
+        const link = m.matchLink || "";
+        return link.includes(`/${seriesId}/`) ||
+          link.includes(`-${seriesSlug}`) ||
+          link.includes(seriesSlug.replace(/-/g, "-"));
+      });
+    };
+
+    // Also check by matching against the match list from series page
+    const seriesMatchIds = new Set(
+      seriesInfo.matches?.map(m => m.matchId) || []
+    );
+
+    const filterByMatchIds = (matches) => {
+      if (!matches || !Array.isArray(matches)) return [];
+      return matches.filter(m => {
+        // Extract matchId from matchLink
+        const matchIdMatch = (m.matchLink || "").match(/\/(\d+)\//);
+        return matchIdMatch && seriesMatchIds.has(matchIdMatch[1]);
+      });
+    };
+
+    // Combine both filtering approaches
+    const filterMatches = (matches) => {
+      const bySlug = filterBySeriesId(matches);
+      const byId = filterByMatchIds(matches);
+
+      // Merge and dedupe
+      const seen = new Set();
+      const result = [];
+      [...bySlug, ...byId].forEach(m => {
+        const matchIdMatch = (m.matchLink || "").match(/\/(\d+)\//);
+        const id = matchIdMatch ? matchIdMatch[1] : m.matchLink;
+        if (!seen.has(id)) {
+          seen.add(id);
+          result.push(m);
+        }
+      });
+      return result;
+    };
+
+    // Transform match for lighter response
+    const transformMatch = (match) => {
+      if (light) {
+        return {
+          matchId: (match.matchLink?.match(/\/(\d+)\//) || [])[1],
+          title: match.title,
+          status: match.matchStatus,
+          statusText: match.status,
+          teams: match.teams || [],
+          score1: match.liveScorebat || null,
+          score2: match.liveScoreball || null,
+          venue: match.location || null,
+          time: match.time || null,
+        };
+      }
+      return match;
+    };
+
+    // Filter from caches
+    const live = (liveCache?.data || [])
+      .filter(m => filterMatches([m]).length > 0)
+      .map(transformMatch);
+
+    const completed = (recentCache?.data || [])
+      .filter(m => filterMatches([m]).length > 0)
+      .map(transformMatch);
+
+    const upcoming = (upcomingCache?.data || [])
+      .filter(m => filterMatches([m]).length > 0)
+      .map(transformMatch);
+
+    // If no cached data, use the matches from series page
+    let fallbackMatches = [];
+    if (live.length === 0 && completed.length === 0 && upcoming.length === 0) {
+      fallbackMatches = seriesInfo.matches?.map(m => ({
+        matchId: m.matchId,
+        title: m.title,
+        matchLink: m.url,
+        scorecardUrl: m.scorecardUrl,
+      })) || [];
+    }
+
+    const result = {
+      success: true,
+      seriesId: parseInt(seriesId),
+      seriesName: seriesInfo.name,
+      matchCount: seriesInfo.matchCount,
+      count: live.length + completed.length + upcoming.length,
+      data: {
+        live,
+        upcoming,
+        completed,
+      },
+      // Include fallback if no filtered matches found
+      ...(fallbackMatches.length > 0 && { matches: fallbackMatches }),
+      pointsTableUrl: `/api/cricket/series/${seriesId}/points-table`,
+    };
+
+    // Cache for 5 minutes
+    await setCache(cacheKey, result, 300);
+
+    res.json({
+      ...result,
+      cached: false,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("Error fetching series matches:", error.message);
     return sendError(res, error);
   }
 });

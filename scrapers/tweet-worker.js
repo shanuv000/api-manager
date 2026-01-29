@@ -34,20 +34,98 @@ function isWeekend() {
   return day === 0 || day === 6; // Sunday = 0, Saturday = 6
 }
 
+/**
+ * Get current hour in IST (India Standard Time)
+ * IST is UTC+5:30
+ */
+function getISTHour() {
+  const now = new Date();
+  const utcHours = now.getUTCHours();
+  const utcMinutes = now.getUTCMinutes();
+  // IST is UTC + 5:30
+  let istHours = utcHours + 5;
+  if (utcMinutes >= 30) istHours += 1;
+  return istHours % 24;
+}
+
+/**
+ * Smart Posting Times - Check if current time is optimal for posting
+ * Based on cricket Twitter engagement patterns (IST timezone)
+ * 
+ * Peak Hours (IST):
+ * - Morning:  7:00 AM - 11:00 AM (pre-match, commute time)
+ * - Evening:  5:00 PM - 11:00 PM (post-work, match time, prime time)
+ * 
+ * Off-Peak Hours:
+ * - Night:    11:00 PM - 7:00 AM (sleeping hours)
+ * - Midday:   11:00 AM - 5:00 PM (work hours, lower engagement)
+ * 
+ * @returns {Object} { isPeakHour, period, engagementMultiplier, istHour }
+ */
+function checkPostingTime() {
+  const istHour = getISTHour();
+
+  // Define time periods
+  let period, isPeakHour, engagementMultiplier;
+
+  if (istHour >= 7 && istHour < 11) {
+    // Morning peak: 7 AM - 11 AM IST
+    period = 'MORNING_PEAK';
+    isPeakHour = true;
+    engagementMultiplier = 1.3;
+  } else if (istHour >= 17 && istHour < 23) {
+    // Evening peak: 5 PM - 11 PM IST (prime time)
+    period = 'EVENING_PEAK';
+    isPeakHour = true;
+    engagementMultiplier = 1.5; // Highest engagement
+  } else if (istHour >= 11 && istHour < 17) {
+    // Midday: 11 AM - 5 PM IST (work hours)
+    period = 'MIDDAY';
+    isPeakHour = false;
+    engagementMultiplier = 0.8;
+  } else {
+    // Night: 11 PM - 7 AM IST
+    period = 'NIGHT';
+    isPeakHour = false;
+    engagementMultiplier = 0.5;
+  }
+
+  // Weekends get a boost
+  if (isWeekend()) {
+    engagementMultiplier *= 1.2;
+    // Midday is okay on weekends
+    if (period === 'MIDDAY') {
+      isPeakHour = true;
+    }
+  }
+
+  return {
+    isPeakHour,
+    period,
+    engagementMultiplier: Math.round(engagementMultiplier * 10) / 10,
+    istHour,
+    isWeekend: isWeekend(),
+  };
+}
+
 const CONFIG = {
   // How many articles to tweet per run
-  // Weekends get more tweets since fans are more active
-  BATCH_SIZE: isWeekend() ? 4 : 3,
+  // With 2 tweet variants per article, 4 articles = 8 tweets
+  BATCH_SIZE: 4,
 
   // Delay between tweets (milliseconds) - CRITICAL for avoiding bans
   TWEET_DELAY_MS: 10 * 60 * 1000, // 10 minutes between tweets
 
-  // Maximum tweets per day - Twitter's unwritten safe limit
-  // Weekends get slightly higher limit
-  MAX_TWEETS_PER_DAY: isWeekend() ? 18 : 15,
+  // Maximum tweets per day - Conservative limit for Twitter FREE tier
+  // Free tier: 500 posts/month = ~16/day max
+  // Using 8/day = 240/month (48% usage) leaves 52% buffer
+  MAX_TWEETS_PER_DAY: 8,
 
   // Minimum hours between runs (to spread tweets throughout day)
   MIN_HOURS_BETWEEN_RUNS: 2,
+
+  // Smart Posting: Skip off-peak hours unless forced
+  SMART_POSTING_ENABLED: process.env.TWEET_SMART_POSTING !== 'false',
 
   // Cutoff date
   START_DATE: TWITTER_CONFIG.START_DATE,
@@ -81,7 +159,7 @@ async function closeDatabase() {
  */
 async function getTodaysTweetCount() {
   const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  
+
   const count = await prisma.enhancedContent.count({
     where: {
       tweetedAt: {
@@ -89,7 +167,7 @@ async function getTodaysTweetCount() {
       },
     },
   });
-  
+
   return count;
 }
 
@@ -100,7 +178,7 @@ async function getTodaysTweetCount() {
 async function checkDailyLimit() {
   const tweetsToday = await getTodaysTweetCount();
   const remaining = Math.max(0, CONFIG.MAX_TWEETS_PER_DAY - tweetsToday);
-  
+
   return {
     canTweet: tweetsToday < CONFIG.MAX_TWEETS_PER_DAY,
     tweetsToday,
@@ -125,13 +203,13 @@ async function getLastTweetTime() {
       tweetedAt: true,
     },
   });
-  
+
   if (!lastTweet?.tweetedAt) {
     return { lastTweetTime: null, hoursSince: 999 };
   }
-  
+
   const hoursSince = (Date.now() - new Date(lastTweet.tweetedAt).getTime()) / (1000 * 60 * 60);
-  
+
   return {
     lastTweetTime: lastTweet.tweetedAt,
     hoursSince,
@@ -243,26 +321,40 @@ async function main() {
     // ============================================
     // ANTI-BAN SAFETY CHECKS
     // ============================================
-    
+
     if (!isDryRun && !forceRun) {
       console.log("🛡️ Running anti-ban safety checks...\n");
-      
+
       // Check 1: Daily tweet limit
       const dailyStatus = await checkDailyLimit();
       console.log(`   📊 Tweets in last 24h: ${dailyStatus.tweetsToday}/${dailyStatus.limit}`);
-      
+
       if (!dailyStatus.canTweet) {
         console.log(`   ⛔ DAILY LIMIT REACHED! Skipping to protect account.`);
         console.log(`   💡 Will resume when oldest tweet is >24h old.`);
         return;
       }
       console.log(`   ✅ Daily limit OK (${dailyStatus.remaining} tweets remaining)`);
-      
-      // Check 2: Time since last tweet (spread tweets throughout day)
+
+      // Check 2: Smart Posting Time (IST-based)
+      if (CONFIG.SMART_POSTING_ENABLED) {
+        const postingTime = checkPostingTime();
+        console.log(`   🕐 IST Time: ${postingTime.istHour}:00 (${postingTime.period})`);
+        console.log(`   📈 Engagement multiplier: ${postingTime.engagementMultiplier}x${postingTime.isWeekend ? ' (weekend boost)' : ''}`);
+
+        if (!postingTime.isPeakHour) {
+          console.log(`   ⏸️ OFF-PEAK HOURS - Skipping to maximize engagement.`);
+          console.log(`   💡 Peak hours: 7-11 AM IST, 5-11 PM IST (or use --force)`);
+          return;
+        }
+        console.log(`   ✅ Peak posting time - good engagement expected!`);
+      }
+
+      // Check 3: Time since last tweet (spread tweets throughout day)
       const lastTweet = await getLastTweetTime();
       if (lastTweet.lastTweetTime) {
         console.log(`   ⏱️ Last tweet: ${lastTweet.hoursSince.toFixed(1)} hours ago`);
-        
+
         // Warn if posting too frequently
         if (lastTweet.hoursSince < 0.5) { // Less than 30 minutes
           console.log(`   ⚠️ WARNING: Recent tweet detected. Adding extra delay...`);
@@ -270,7 +362,7 @@ async function main() {
       } else {
         console.log(`   ⏱️ No previous tweets found`);
       }
-      
+
       console.log("");
     }
 
@@ -289,7 +381,7 @@ async function main() {
     const dailyStatus = await checkDailyLimit();
     const maxToFetch = isDryRun ? CONFIG.BATCH_SIZE : Math.min(CONFIG.BATCH_SIZE, dailyStatus.remaining);
     const limit = isSingle ? 1 : maxToFetch;
-    
+
     console.log(`📊 Fetching up to ${limit} untweeted articles...`);
     const articles = await fetchUntweetedArticles(limit);
 
@@ -317,8 +409,9 @@ async function main() {
 
       if (isDryRun) {
         // Dry run - just show what would be tweeted
-        const { formatTweet } = require("../services/twitter-service");
-        const tweet = formatTweet(article, enhanced);
+        const { formatTweet, formatTweetFromTakeaway } = require("../services/twitter-service");
+        // Prefer takeaway-based tweets (more engaging hooks with emojis)
+        const tweet = formatTweetFromTakeaway(article, enhanced) || formatTweet(article, enhanced);
         console.log(`   📝 Would tweet (${tweet.length} chars):`);
         console.log(`   ────────────────────────────────────`);
         tweet.split("\n").forEach((line) => console.log(`   ${line}`));
@@ -344,7 +437,7 @@ async function main() {
           }
         } else {
           failCount++;
-          
+
           // CRITICAL: Stop immediately if Twitter signals account issues
           if (result.shouldStopAll) {
             console.log(`\n   ⛔ EMERGENCY STOP - Protecting account!`);
@@ -352,7 +445,7 @@ async function main() {
             stoppedEarly = true;
             break;
           }
-          
+
           // For duplicates, continue but don't mark as error
           if (result.isDuplicate) {
             // Mark as tweeted to avoid retry loops

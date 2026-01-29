@@ -68,12 +68,12 @@ async function sendDiscordError(title, errorMessage, details = {}) {
             },
             ...(details.duration
               ? [
-                  {
-                    name: "Duration",
-                    value: `${details.duration}ms`,
-                    inline: true,
-                  },
-                ]
+                {
+                  name: "Duration",
+                  value: `${details.duration}ms`,
+                  inline: true,
+                },
+              ]
               : []),
           ],
           timestamp: new Date().toISOString(),
@@ -128,14 +128,116 @@ async function sendDiscordRecovery(previousErrors, duration) {
 }
 
 /**
+ * Extract matches from Next.js hydration data (hidden JSON)
+ * This is deeper and more reliable than DOM scraping for some fields.
+ */
+function extractMatchesFromNextData(html) {
+  const matchesData = [];
+  try {
+    const cheerio = require('cheerio');
+    const $ = cheerio.load(html);
+
+    $("script").each((i, el) => {
+      let content = $(el).html();
+      if (!content) return;
+
+      const key = '\\"matchesList\\":';
+      let idx = content.indexOf(key);
+      while (idx !== -1) {
+        let start = idx + key.length;
+        let balance = 0;
+        let inString = false;
+        let extracted = "";
+        let foundStart = false;
+
+        for (let k = start; k < content.length; k++) {
+          const char = content[k];
+
+          if (!foundStart) {
+            if (char === '{') {
+              foundStart = true;
+              balance = 1;
+              extracted += char;
+            }
+            continue;
+          }
+
+          // Inside the object
+          extracted += char;
+
+          if (char === '\\') {
+            const nextChar = content[k + 1];
+            // If next char is " we are escaping a quote
+            if (nextChar === '"') {
+              // We just skip the backslash in processing, but keep it in extracted
+              // The loop will naturally pick up the quote next iteration, see below.
+              // IMPORTANT: We need to handle encoded backslashes.
+              // The simple brace counter might fail if we don't handle string internals perfectly.
+              // But for this JSON structure, it's usually standard.
+            }
+            // Skip next char in loop logic to avoid processing escaped quotes
+            k++;
+            if (k < content.length) extracted += content[k];
+            continue;
+          }
+
+          if (char === '"') {
+            inString = !inString;
+          }
+
+          if (!inString) {
+            if (char === '{') balance++;
+            else if (char === '}') balance--;
+          }
+
+          if (balance === 0) {
+            break;
+          }
+        }
+
+        if (foundStart && extracted) {
+          try {
+            const unescaped = extracted.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+            const json = JSON.parse(unescaped);
+            if (json.matches) {
+              matchesData.push(...json.matches);
+            }
+          } catch (e) {
+            // console.log("Failed to parse extracted JSON chunk"); 
+          }
+        }
+        idx = content.indexOf(key, idx + 1);
+      }
+    });
+  } catch (e) {
+    console.error("Error extracting Next.js data:", e.message);
+  }
+  return matchesData;
+}
+
+/**
  * Extract match info from Cricbuzz page (comprehensive version)
  * Includes: team icons, time/date from JSON-LD, matchStatus, matchStartTime
+ * UPDATED: Uses Next.js hydration data as primary source for scores
  */
 function parseMatches($, html) {
   const matches = [];
   const processedLinks = new Set();
 
-  // Extract match times from JSON-LD SportsEvent data
+  // 1. Extract data from Next.js hydration scripts
+  const nextJsMatches = extractMatchesFromNextData(html);
+  const nextJsMap = new Map();
+
+  if (nextJsMatches.length > 0) {
+    console.log(`⚡ Extracted ${nextJsMatches.length} matches from Next.js hydration data`);
+    nextJsMatches.forEach(m => {
+      if (m.match && m.match.matchInfo && m.match.matchInfo.matchId) {
+        nextJsMap.set(m.match.matchInfo.matchId.toString(), m.match);
+      }
+    });
+  }
+
+  // Extract match times from JSON-LD SportsEvent data (keep as fallback/supplement)
   const matchTimeMap = new Map();
   try {
     // Parse JSON-LD script tags
@@ -186,62 +288,13 @@ function parseMatches($, html) {
         // JSON parse error, skip
       }
     });
-
-    // Extract from embedded RSC payload with team names
-    const sportsEventPattern =
-      /"@type":"SportsEvent","name":"([^"]+)"[^]*?"competitor":\[([^\]]+)\][^]*?"startDate":"([^"]+)"[^]*?"eventStatus":"([^"]+)"/g;
-    let eventMatch;
-    while ((eventMatch = sportsEventPattern.exec(html)) !== null) {
-      const name = eventMatch[1];
-      const competitorBlock = eventMatch[2];
-      const startDate = eventMatch[3];
-      const status = eventMatch[4];
-
-      const teamNames = [];
-      const teamPattern = /"name":"([^"]+)"/g;
-      let teamMatch;
-      while ((teamMatch = teamPattern.exec(competitorBlock)) !== null) {
-        teamNames.push(teamMatch[1].toLowerCase());
-      }
-
-      if (name && (startDate || status)) {
-        matchTimeMap.set(name, {
-          startDate: startDate || null,
-          status: status || null,
-          teams: teamNames,
-        });
-      }
-    }
-
-    // Fallback: simpler pattern without competitors
-    const simpleSportsEvents = html.match(
-      /"@type":"SportsEvent","name":"([^"]+)"[^}]*?"startDate":"([^"]+)"[^}]*?"eventStatus":"([^"]+)"/g
-    );
-    if (simpleSportsEvents) {
-      for (const eventStr of simpleSportsEvents) {
-        const nameMatch = eventStr.match(/"name":"([^"]+)"/);
-        const dateMatch = eventStr.match(/"startDate":"([^"]+)"/);
-        const statusMatch = eventStr.match(/"eventStatus":"([^"]+)"/);
-        if (
-          nameMatch &&
-          (dateMatch || statusMatch) &&
-          !matchTimeMap.has(nameMatch[1])
-        ) {
-          matchTimeMap.set(nameMatch[1], {
-            startDate: dateMatch ? dateMatch[1] : null,
-            status: statusMatch ? statusMatch[1] : null,
-            teams: [],
-          });
-        }
-      }
-    }
-
-    console.log(`📅 Found ${matchTimeMap.size} match times from page data`);
   } catch (e) {
     console.log("Time extraction error (non-critical):", e.message);
   }
 
   const matchElements = $("a.w-full.bg-cbWhite.flex.flex-col");
+  // NOTE: Removed "a.block.mb-3" simpler cards as they lack team icons HTML structure
+  // Those are sidebar/header quick links without images. Only use detailed cards.
 
   matchElements.each((index, element) => {
     const $matchCard = $(element);
@@ -258,6 +311,10 @@ function parseMatches($, html) {
     match.title = title.trim();
     match.matchLink = href ? `https://www.cricbuzz.com${href}` : null;
 
+    // Extract matchId
+    const idMatch = href.match(/\/live-cricket-scores\/(\d+)\//);
+    match.matchId = idMatch ? idMatch[1] : null;
+
     const titleParts = title.split(" - ");
     if (titleParts.length >= 2) {
       match.matchDetails = titleParts[0].trim();
@@ -270,34 +327,38 @@ function parseMatches($, html) {
     const locationSpan = $matchCard.find("span.text-xs.text-cbTxtSec").first();
     match.location = locationSpan.length ? locationSpan.text().trim() : "N/A";
 
+    // Data from DOM (Scraped)
     const teams = [];
     const teamAbbr = [];
     const scores = [];
     const teamIcons = [];
 
-    $matchCard
-      .find("div.flex.items-center.gap-4.justify-between")
-      .each((i, row) => {
+    // Try detailed card selectors first
+    let rows = $matchCard.find("div.flex.items-center.gap-4.justify-between");
+    if (rows.length === 0) {
+      // Try to parse simpler card structure if detailed structure fails
+      // e.g. <div class="flex gap-1"><div class="text-white">Team 1 vs Team 2</div></div>
+      const simpleTeamDiv = $matchCard.find("div.text-white").first();
+      if (simpleTeamDiv.length) {
+        const text = simpleTeamDiv.text().trim();
+        if (text.includes(" vs ")) {
+          const parts = text.split(" vs ");
+          teams.push(parts[0].trim());
+          if (parts[1]) teams.push(parts[1].trim());
+        }
+      }
+    } else {
+      rows.each((i, row) => {
         const $row = $(row);
-        const teamFull = $row
-          .find("span.hidden.wb\\:block.whitespace-nowrap")
-          .text()
-          .trim();
+        const teamFull = $row.find("span.hidden.wb\\:block").text().trim(); // Relaxed selector
         if (teamFull) teams.push(teamFull);
 
-        const teamAbb = $row
-          .find("span.block.wb\\:hidden.whitespace-nowrap")
-          .text()
-          .trim();
+        const teamAbb = $row.find("span.block.wb\\:hidden").text().trim(); // Relaxed selector
         if (teamAbb) teamAbbr.push(teamAbb);
 
-        const score = $row
-          .find("span.font-medium.wb\\:font-semibold")
-          .text()
-          .trim();
+        const score = $row.find("span.font-medium.wb\\:font-semibold").text().trim();
         if (score) scores.push(score);
 
-        // Extract team icon
         const iconImg = $row.find("img").first();
         const iconSrc = iconImg.attr("src");
         if (iconSrc) {
@@ -307,6 +368,57 @@ function parseMatches($, html) {
           teamIcons.push(fullIconUrl);
         }
       });
+    }
+
+    // Merge with Next.js data if available (PRIORITY)
+    if (match.matchId && nextJsMap.has(match.matchId)) {
+      const nextData = nextJsMap.get(match.matchId);
+
+      // Update teams if missing
+      if (teams.length < 2 && nextData.matchInfo) {
+        if (nextData.matchInfo.team1) teams[0] = nextData.matchInfo.team1.teamName;
+        if (nextData.matchInfo.team2) teams[1] = nextData.matchInfo.team2.teamName;
+
+        if (nextData.matchInfo.team1) teamAbbr[0] = nextData.matchInfo.team1.teamSName;
+        if (nextData.matchInfo.team2) teamAbbr[1] = nextData.matchInfo.team2.teamSName;
+      }
+
+      // Update scores from Next.js data
+      if (nextData.matchScore) {
+        // Need to format scores: "166-5 (19.6)"
+        const formatScore = (scoreObj) => {
+          if (!scoreObj || !scoreObj.inngs1) return null;
+          const inngs = scoreObj.inngs1;
+          let s = "";
+          if (inngs.runs !== undefined) s += inngs.runs;
+          if (inngs.wickets !== undefined) s += `-${inngs.wickets}`;
+          if (inngs.overs !== undefined) s += ` (${inngs.overs})`;
+          return s || null;
+        };
+
+        const s1 = formatScore(nextData.matchScore.team1Score);
+        const s2 = formatScore(nextData.matchScore.team2Score);
+
+        // Override checks
+        if (s1) {
+          if (scores.length > 0) scores[0] = s1; else scores.push(s1);
+        }
+        if (s2) {
+          if (scores.length > 1) scores[1] = s2; else scores.push(s2);
+        }
+      }
+
+      // Update status/commentary
+      if (nextData.matchInfo.status) {
+        match.liveCommentary = nextData.matchInfo.status;
+        match.status = nextData.matchInfo.stateTitle || nextData.matchInfo.status;
+
+        // Check for result in status
+        if (match.liveCommentary.includes("won") || match.status.includes("won")) {
+          match.result = match.liveCommentary;
+        }
+      }
+    }
 
     if (teams.length >= 2) {
       match.playingTeamBat = teams[0];
@@ -319,6 +431,7 @@ function parseMatches($, html) {
     match.teams = teams.length > 0 ? teams : teamAbbr;
     match.teamAbbr = teamAbbr.length > 0 ? teamAbbr : teams;
 
+    // Use merged scores
     if (scores.length >= 2) {
       match.liveScorebat = scores[0];
       match.liveScoreball = scores[1];
@@ -346,9 +459,13 @@ function parseMatches($, html) {
         'span[class*="text-cbComplete"], span[class*="text-cbLive"], span[class*="text-cbPreview"]'
       )
       .first();
-    match.liveCommentary = resultSpan.length
-      ? resultSpan.text().trim()
-      : match.status || "N/A";
+
+    // Only update liveCommentary from DOM if we didn't get it from Next.js or if it's "N/A"
+    if (!match.liveCommentary || match.liveCommentary === "N/A") {
+      match.liveCommentary = resultSpan.length
+        ? resultSpan.text().trim()
+        : match.status || "N/A";
+    }
 
     // Match format extraction
     const formatMatch = title.match(
@@ -371,6 +488,38 @@ function parseMatches($, html) {
       match.links[
         "Full Commentary"
       ] = `https://www.cricbuzz.com/live-cricket-full-commentary/${basePath}`;
+      match.links[
+        "News"
+      ] = `https://www.cricbuzz.com/cricket-match-news/${basePath}`;
+    }
+
+    match.matchNumberInfo = match.matchNumber;
+
+    // Parse commentary for day/session (Test matches)
+    const dayMatch = match.liveCommentary.match(/Day\s*(\d+)/i);
+    match.day = dayMatch ? parseInt(dayMatch[1]) : null;
+
+    const sessionMatch = match.liveCommentary.match(
+      /(\d+)(?:st|nd|rd|th)?\s*Session/i
+    );
+    match.session = sessionMatch ? parseInt(sessionMatch[1]) : null;
+
+    // Parse target/lead/trail/need from commentary
+    const targetMatch = match.liveCommentary.match(
+      /(?:need|require|target)[:\s]+(\d+)/i
+    );
+    match.target = targetMatch ? parseInt(targetMatch[1]) : null;
+
+    const leadMatch = match.liveCommentary.match(/lead\s+(?:by\s+)?(\d+)/i);
+    match.lead = leadMatch ? parseInt(leadMatch[1]) : null;
+
+    const trailMatch = match.liveCommentary.match(/trail\s+(?:by\s+)?(\d+)/i);
+    match.trail = trailMatch ? parseInt(trailMatch[1]) : null;
+
+    // Parse winner from result (for completed matches)
+    if (!match.winner) {
+      const winnerMatchDom = match.liveCommentary.match(/^(.+?)\s+won\b/i);
+      match.winner = winnerMatchDom ? winnerMatchDom[1].trim() : null;
     }
 
     // ========== TIME AND STATUS EXTRACTION ==========

@@ -10,6 +10,10 @@
     "scrape:cricbuzz": "node scrapers/cricbuzz-news-scraper.js",
     "scrape:espncricinfo": "node scrapers/espncricinfo-news-scraper.js",
     "scrape:espncricinfo:db": "node scrapers/run-espncricinfo-scraper.js",
+    "tweet:test": "node tests/twitter-worker-test.js",
+    "tweet:dry": "node scrapers/tweet-worker.js --dry-run",
+    "tweet:single": "node scrapers/tweet-worker.js --single",
+    "tweet:run": "node scrapers/tweet-worker.js",
     "postinstall": "prisma generate"
   },
   "keywords": [
