@@ -17,6 +17,12 @@ const {
   fetchRecordFilters,
   fetchRecords,
   getRapidAPIQuota,
+  // Cached versions - use these for robust quota protection
+  cachedFetchRankings,
+  cachedFetchStandings,
+  cachedFetchRecordFilters,
+  cachedFetchRecords,
+  CACHE_TTL,
 } = require("./stats");
 const {
   fetchPhotoGalleryList,
@@ -2069,7 +2075,7 @@ router.get("/enhancement-stats", async (req, res) => {
 // =============================================
 
 
-// ICC Rankings endpoint
+// ICC Rankings endpoint - Using robust cached fetch
 router.get("/stats/rankings", async (req, res) => {
   const startTime = Date.now();
   const SCRAPER_NAME = "stats-rankings";
@@ -2085,36 +2091,24 @@ router.get("/stats/rankings", async (req, res) => {
     );
   }
 
-  const cacheKey = `cricket:stats:rankings:${category}:${formatType}`;
-
   try {
-    setCacheHeaders(res, { maxAge: 86400, staleWhileRevalidate: 3600 }); // 24 hours
+    // 7 days cache with stale-while-revalidate
+    setCacheHeaders(res, { maxAge: CACHE_TTL.RANKINGS, staleWhileRevalidate: 86400 });
 
-    // Check cache first
-    const cachedData = await getCache(cacheKey);
-
-    if (cachedData) {
-      return res.json({ ...cachedData, cached: true });
-    }
-
-    // Fetch from RapidAPI
-    const data = await fetchRankings(category, formatType);
-
-    const response = {
-      success: true,
-      data,
-      source: "rapidapi",
-      cached: false,
-      timestamp: new Date().toISOString(),
-    };
-
-    // Cache for 24 hours
-    await setCache(cacheKey, response, 86400);
+    // Use cached fetch - handles all caching logic internally
+    const result = await cachedFetchRankings(category, formatType);
 
     // Record success for health monitoring
-    scraperHealth.recordSuccess(SCRAPER_NAME, Date.now() - startTime);
+    if (!result.cached) {
+      scraperHealth.recordSuccess(SCRAPER_NAME, Date.now() - startTime);
+    }
 
-    res.json(response);
+    res.json({
+      success: true,
+      ...result,
+      source: result.cached ? "cache" : "rapidapi",
+      timestamp: new Date().toISOString(),
+    });
   } catch (error) {
     console.error("Error fetching rankings:", error.message);
 
@@ -2124,22 +2118,6 @@ router.get("/stats/rankings", async (req, res) => {
       error,
       Date.now() - startTime
     );
-
-    // Try to return stale cached data as fallback
-    try {
-      const staleCache = await getCache(cacheKey);
-      if (staleCache) {
-        console.log("Returning stale cache for rankings due to error");
-        return res.json({
-          ...staleCache,
-          cached: true,
-          stale: true,
-          error_note: "Serving cached data due to RapidAPI error",
-        });
-      }
-    } catch (cacheError) {
-      console.error("Cache fallback failed:", cacheError.message);
-    }
 
     return sendError(res, error);
   }
@@ -2160,136 +2138,77 @@ router.get("/stats/standings", async (req, res) => {
     );
   }
 
-  const cacheKey = `cricket:stats:standings:${matchType}`;
-
   try {
-    setCacheHeaders(res, { maxAge: 86400, staleWhileRevalidate: 3600 }); // 24 hours
+    // 7 days cache with stale-while-revalidate
+    setCacheHeaders(res, { maxAge: CACHE_TTL.STANDINGS, staleWhileRevalidate: 86400 });
 
-    // Check cache first
-    const cachedData = await getCache(cacheKey);
-
-    if (cachedData) {
-      return res.json({ ...cachedData, cached: true });
-    }
-
-    // Fetch from RapidAPI
-    const data = await fetchStandings(matchType);
-
-    const response = {
-      success: true,
-      data,
-      source: "rapidapi",
-      cached: false,
-      timestamp: new Date().toISOString(),
-    };
-
-    // Cache for 24 hours
-    await setCache(cacheKey, response, 86400);
+    // Use cached fetch - handles all caching logic internally
+    const result = await cachedFetchStandings(matchType);
 
     // Record success for health monitoring
-    scraperHealth.recordSuccess(SCRAPER_NAME, Date.now() - startTime);
+    if (!result.cached) {
+      scraperHealth.recordSuccess(SCRAPER_NAME, Date.now() - startTime);
+    }
 
-    res.json(response);
+    res.json({
+      success: true,
+      ...result,
+      source: result.cached ? "cache" : "rapidapi",
+      timestamp: new Date().toISOString(),
+    });
   } catch (error) {
     console.error("Error fetching standings:", error.message);
 
-    // Record failure for health monitoring
     await scraperHealth.recordFailure(
       SCRAPER_NAME,
       error,
       Date.now() - startTime
     );
 
-    // Try to return stale cached data as fallback
-    try {
-      const staleCache = await getCache(cacheKey);
-      if (staleCache) {
-        console.log("Returning stale cache for standings due to error");
-        return res.json({
-          ...staleCache,
-          cached: true,
-          stale: true,
-          error_note: "Serving cached data due to RapidAPI error",
-        });
-      }
-    } catch (cacheError) {
-      console.error("Cache fallback failed:", cacheError.message);
-    }
-
     return sendError(res, error);
   }
 });
 
-// Record Filters endpoint
+// Record Filters endpoint - Using robust cached fetch
 router.get("/stats/record-filters", async (req, res) => {
   const startTime = Date.now();
   const SCRAPER_NAME = "stats-record-filters";
-  const cacheKey = "cricket:stats:record-filters";
 
   try {
-    // 7 days cache - filters rarely change, conserve free tier quota
-    setCacheHeaders(res, { maxAge: 604800, staleWhileRevalidate: 86400 });
+    // 30 days cache - filters rarely change
+    setCacheHeaders(res, { maxAge: CACHE_TTL.RECORD_FILTERS, staleWhileRevalidate: 604800 });
 
-    // Check cache first
-    const cachedData = await getCache(cacheKey);
+    // Use cached fetch
+    const result = await cachedFetchRecordFilters();
 
-    if (cachedData) {
-      return res.json({ ...cachedData, cached: true });
+    if (!result.cached) {
+      scraperHealth.recordSuccess(SCRAPER_NAME, Date.now() - startTime);
     }
 
-    // Fetch from RapidAPI
-    const data = await fetchRecordFilters();
-
-    const response = {
+    res.json({
       success: true,
-      data,
-      source: "rapidapi",
-      cached: false,
+      ...result,
+      source: result.cached ? "cache" : "rapidapi",
       timestamp: new Date().toISOString(),
-    };
-
-    // Cache for 7 days (604800 seconds) - static data
-    await setCache(cacheKey, response, 604800);
-
-    // Record success for health monitoring
-    scraperHealth.recordSuccess(SCRAPER_NAME, Date.now() - startTime);
-
-    res.json(response);
+    });
   } catch (error) {
     console.error("Error fetching record filters:", error.message);
 
-    // Record failure for health monitoring
     await scraperHealth.recordFailure(
       SCRAPER_NAME,
       error,
       Date.now() - startTime
     );
 
-    // Try to return stale cached data as fallback
-    try {
-      const staleCache = await getCache(cacheKey);
-      if (staleCache) {
-        console.log("Returning stale cache for record-filters due to error");
-        return res.json({
-          ...staleCache,
-          cached: true,
-          stale: true,
-          error_note: "Serving cached data due to RapidAPI error",
-        });
-      }
-    } catch (cacheError) {
-      console.error("Cache fallback failed:", cacheError.message);
-    }
-
     return sendError(res, error);
   }
 });
 
-// Records endpoint
+// Records endpoint - Using robust cached fetch
 router.get("/stats/records", async (req, res) => {
   const startTime = Date.now();
   const SCRAPER_NAME = "stats-records";
-  const { statsType, id = 0, ...otherFilters } = req.query;
+  const { statsType, id = 0 } = req.query;
 
   if (!statsType) {
     return sendError(
@@ -2300,66 +2219,31 @@ router.get("/stats/records", async (req, res) => {
     );
   }
 
-  // Build cache key from all params
-  const filterStr = Object.entries(otherFilters)
-    .sort()
-    .map(([k, v]) => `${k}=${v}`)
-    .join("&");
-  const cacheKey = `cricket:stats:records:${statsType}:${id}:${filterStr}`;
-
   try {
-    // 48 hours cache - records don't change often, conserve free tier quota
-    setCacheHeaders(res, { maxAge: 172800, staleWhileRevalidate: 43200 });
+    // 3 days cache - records update less frequently
+    setCacheHeaders(res, { maxAge: CACHE_TTL.RECORDS, staleWhileRevalidate: 86400 });
 
-    const cachedData = await getCache(cacheKey);
+    // Use cached fetch
+    const result = await cachedFetchRecords(statsType, id);
 
-    if (cachedData) {
-      return res.json({ ...cachedData, cached: true });
+    if (!result.cached) {
+      scraperHealth.recordSuccess(SCRAPER_NAME, Date.now() - startTime);
     }
 
-    // Fetch from RapidAPI
-    const data = await fetchRecords(statsType, id);
-
-    const response = {
+    res.json({
       success: true,
-      data,
-      source: "rapidapi",
-      cached: false,
+      ...result,
+      source: result.cached ? "cache" : "rapidapi",
       timestamp: new Date().toISOString(),
-    };
-
-    // Cache for 48 hours (172800 seconds)
-    await setCache(cacheKey, response, 172800);
-
-    // Record success for health monitoring
-    scraperHealth.recordSuccess(SCRAPER_NAME, Date.now() - startTime);
-
-    res.json(response);
+    });
   } catch (error) {
     console.error("Error fetching records:", error.message);
 
-    // Record failure for health monitoring
     await scraperHealth.recordFailure(
       SCRAPER_NAME,
       error,
       Date.now() - startTime
     );
-
-    // Try to return stale cached data as fallback
-    try {
-      const staleCache = await getCache(cacheKey);
-      if (staleCache) {
-        console.log("Returning stale cache for records due to error");
-        return res.json({
-          ...staleCache,
-          cached: true,
-          stale: true,
-          error_note: "Serving cached data due to RapidAPI error",
-        });
-      }
-    } catch (cacheError) {
-      console.error("Cache fallback failed:", cacheError.message);
-    }
 
     return sendError(res, error);
   }

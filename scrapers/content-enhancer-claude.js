@@ -44,6 +44,50 @@ const CONFIG = {
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+/**
+ * Generate SEO-friendly slug from AI suggestion + source ID
+ * - Normalizes to lowercase, hyphens only
+ * - Truncates base slug to 50 chars max
+ * - Appends unique suffix to guarantee uniqueness:
+ *   - Numeric IDs: append full ID (e.g., "136890")
+ *   - Descriptive IDs: append short hash (last 8 chars) for uniqueness
+ * @param {string} slugSuggestion - AI-generated slug suggestion
+ * @param {string} sourceId - Original source ID (e.g., "136890" or "descriptive-slug")
+ * @returns {string} SEO slug like "virat-kohli-scores-century-136890"
+ */
+function generateSeoSlug(slugSuggestion, sourceId) {
+    if (!slugSuggestion || typeof slugSuggestion !== 'string') {
+        return sourceId; // Fallback to original if no suggestion
+    }
+
+    // Normalize: lowercase, replace spaces/underscores with hyphens, remove special chars
+    let baseSlug = slugSuggestion
+        .toLowerCase()
+        .trim()
+        .replace(/[\s_]+/g, '-')           // spaces/underscores to hyphens
+        .replace(/[^a-z0-9-]/g, '')        // remove non-alphanumeric except hyphens
+        .replace(/-+/g, '-')               // collapse multiple hyphens
+        .replace(/^-|-$/g, '');            // trim leading/trailing hyphens
+
+    // Truncate base slug to 50 chars max (leaving room for suffix)
+    if (baseSlug.length > 50) {
+        baseSlug = baseSlug.substring(0, 50).replace(/-$/, '');
+    }
+
+    // Generate unique suffix based on source ID type
+    const isNumericId = /^\d+$/.test(sourceId);
+
+    if (isNumericId) {
+        // Numeric IDs (Cricbuzz): append full ID
+        return baseSlug ? `${baseSlug}-${sourceId}` : sourceId;
+    } else {
+        // Descriptive IDs (ESPN/ICC/BBC): append short hash for uniqueness
+        // Use last 8 chars of sourceId as a fingerprint
+        const shortHash = sourceId.slice(-8).replace(/[^a-z0-9]/gi, '').toLowerCase();
+        return baseSlug ? `${baseSlug}-${shortHash}` : sourceId;
+    }
+}
+
 async function callClaudeAPI(systemPrompt, userContent) {
     try {
         const payload = {
@@ -242,14 +286,28 @@ async function main() {
                     console.log(`   🏷️  Updated ${keywords.length} tags on NewsArticle`);
                 }
 
+                // 3. Update NewsArticle slug with SEO version
+                const oldSlug = article.slug;
+                const newSlug = generateSeoSlug(data.slug_suggestion, article.sourceId || oldSlug);
+                if (newSlug !== oldSlug) {
+                    await prisma.newsArticle.update({
+                        where: { id: article.id },
+                        data: { slug: newSlug }
+                    });
+                    console.log(`   🔗 Slug updated: ${oldSlug} → ${newSlug}`);
+                }
+
                 console.log(`   ✅ Saved Enhanced Article: "${data.enhanced_title}"`);
 
-                // Cache Invalidation
-                if (article.slug) {
-                    await invalidateArticleCache(article.slug);
-                    await invalidateNewsCache();
-                    console.log("   🗑️  Cache invalidated");
+                // Cache Invalidation - invalidate both old and new slugs
+                if (oldSlug) {
+                    await invalidateArticleCache(oldSlug);
                 }
+                if (newSlug && newSlug !== oldSlug) {
+                    await invalidateArticleCache(newSlug);
+                }
+                await invalidateNewsCache();
+                console.log("   🗑️  Cache invalidated");
 
             } catch (err) {
                 console.error(`   ❌ Failed to process article: ${err.message}`);
