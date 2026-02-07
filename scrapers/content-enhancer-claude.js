@@ -1,7 +1,7 @@
 /**
- * Content Enhancer - Claude Opus Dual-Pass Pipeline
+ * Content Enhancer - Gemini Flash Dual-Pass Pipeline
  *
- * 1. Enhancement Pass: Generates SEO content, analysis, and metadata using Claude Opus.
+ * 1. Enhancement Pass: Generates SEO content, analysis, and metadata using Gemini Flash.
  * 2. Formatting Pass: Polishes Markdown and ensures production-ready structure.
  *
  * Usage: node scrapers/content-enhancer-claude.js
@@ -26,9 +26,9 @@ const {
 const CONFIG = {
     API_BASE_URL: 'https://ai.urtechy.com',
     API_KEY: 'agp_9dS82kP1J7xWmQZs', // In production, use process.env.ANTIGRAVITY_API_KEY
-    MODEL: 'claude-opus-4-5-thinking',
-    BATCH_SIZE: 5, // High intelligence model, process 5 at a time for stability
-    MAX_TOKENS: 8192,
+    MODEL: 'gemini-3-flash',
+    BATCH_SIZE: 5, // Process 5 at a time for stability
+    MAX_TOKENS: 16384, // Gemini Flash supports larger context
 
     // Artifact Paths
     // Artifact Paths
@@ -110,9 +110,21 @@ async function callClaudeAPI(systemPrompt, userContent) {
             }
         });
 
-        // robustly extract content
-        const rContent = response.data.content?.[0]?.text || JSON.stringify(response.data);
-        // strip markdown code blocks
+        // Robustly extract content - handle both thinking and non-thinking models
+        // Response may have: [{type: 'thinking', thinking: '...'}, {type: 'text', text: '...'}]
+        // or just: [{type: 'text', text: '...'}]
+        const contentBlocks = response.data.content || [];
+
+        // Find the text block (skip thinking blocks)
+        const textBlock = contentBlocks.find(block => block.type === 'text');
+        let rContent = textBlock?.text || '';
+
+        // Fallback: if no text block, try first block's text property
+        if (!rContent && contentBlocks.length > 0) {
+            rContent = contentBlocks[0]?.text || JSON.stringify(response.data);
+        }
+
+        // Strip markdown code blocks if present
         return rContent.replace(/^```json\s*/, '').replace(/\s*```$/, '').trim();
 
     } catch (err) {
@@ -130,7 +142,7 @@ async function callClaudeAPI(systemPrompt, userContent) {
 async function main() {
     console.log(`
 ╔════════════════════════════════════════════════════════════╗
-║     Content Enhancer - Claude Opus Dual-Pass               ║
+║     Content Enhancer - Gemini Flash Dual-Pass              ║
 ╠════════════════════════════════════════════════════════════╣
 ║  Started: ${new Date().toISOString()}              ║
 ╚════════════════════════════════════════════════════════════╝
@@ -230,8 +242,12 @@ async function main() {
 
                 // Get the single item
                 const resultItem = Array.isArray(finalJson) ? finalJson[0] : finalJson;
+
+                // DEBUG: Log structure to understand failures
                 if (!resultItem || !resultItem.enhanced_data) {
                     console.error("   ❌ Invalid final structure. Skipping.");
+                    console.error("   DEBUG resultItem keys:", resultItem ? Object.keys(resultItem) : 'null');
+                    console.error("   DEBUG raw response (first 500 chars):", formattedRaw.substring(0, 500));
                     continue;
                 }
 
