@@ -1,7 +1,7 @@
 # API-Manager Project Context
 
 > **For AI Agents:** Read this file at the start of every conversation to understand the project.
-> **Last Updated:** Feb 07, 2026 | **Status:** 🟢 ACTIVE
+> **Last Updated:** Feb 11, 2026 | **Status:** 🟢 ACTIVE
 
 ---
 
@@ -25,6 +25,7 @@ api-manager/
 ├── scrapers/                 # News scrapers + workers
 │   ├── live-score-worker.js  # PM2: Scrapes every 60s → Redis
 │   ├── tweet-worker.js       # PM2 Cron: Posts to Twitter 4x/day
+│   ├── news-scraper          # PM2 Cron: `vps-scrape.sh` (Every 2h)
 │   ├── content-enhancer-claude.js  # AI enhancement (Gemini 3 Flash)
 │   ├── run-scraper.js        # Cricbuzz
 │   ├── run-espncricinfo-scraper.js
@@ -47,17 +48,17 @@ api-manager/
 
 ## ⚙️ Services & Automation
 
-### PM2 Services (Always Running)
-| Service | Script | Purpose |
-|---------|--------|---------|
-| `api-manager` | server.js | Express API server |
-| `live-score-worker` | scrapers/live-score-worker.js | Scrapes Cricbuzz → Redis every 60s |
-| `tweet-worker` | scrapers/tweet-worker.js | Auto-posts tweets (cron: 4x daily) |
+### PM2 Services (Always Running or Scheduled)
+| Service | Script | Purpose | Schedule (UTC) |
+|---------|--------|---------|----------------|
+| `api-manager` | server.js | Express API server | Always On |
+| `live-score-worker` | scrapers/live-score-worker.js | Scrapes Cricbuzz → Redis (60s) | Always On |
+| `tweet-worker` | scrapers/tweet-worker.js | Auto-posts tweets (4x/day) | `0 3,7,13,16 * * *` |
+| `news-scraper` | scripts/vps-scrape.sh | Full News Pipeline (2h) | `35 0-18/2 * * *` |
 
-### Cron Jobs
-| Schedule (UTC) | IST | Command |
-|----------------|-----|---------|
-| `30 0,6,9,12,15,18,21 * * *` | 6:00, 11:30, 15:00, 18:00, 21:00, 00:00, 3:00 | `vps-scrape.sh` (all scrapers + AI enhancer) |
+### IST Schedule Reference (UTC+5:30)
+- **Tweet Worker:** 8:30 AM, 12:30 PM, 6:30 PM, 9:30 PM
+- **News Scraper:** Every 2 hours from **6:05 AM to 12:05 AM** (Offset by 5m for safety)
 
 ---
 
@@ -169,8 +170,9 @@ pm2 logs                              # PM2 services
 ## ⚠️ Important Notes
 
 1. **Two Projects Exist:**
-   - `api-manager` (this) → PostgreSQL (Supabase)
-   - `news-trading-scrape` (legacy) → SQLite (local)
+   - `api-manager` (PM2 Managed) → PostgreSQL (Supabase)
+   - `news-trading-scrape` (System Cron) → SQLite (local)
+   - **Isolation:** Schedules are offset (xx:35 vs xx:00/30) to prevent CPU/RAM contention.
 
 2. **Rate Limits:**
    - Twitter: 8 tweets/day max (FREE tier)

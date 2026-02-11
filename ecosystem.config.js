@@ -40,6 +40,21 @@ module.exports = {
       env: {
         NODE_ENV: 'production'
       }
+    },
+    {
+      name: 'news-scraper',
+      script: 'scripts/vps-scrape.sh',
+      cwd: '/home/dev/app/api-manager',
+      interpreter: 'bash',
+      instances: 1,
+      autorestart: false,
+      watch: false,
+      // Run at 35 minutes past the hour (Offset for safety)
+      // IST: 6:05AM, 8:05AM, 10:05AM, 12:05PM, 2:05PM, 4:05PM, 6:05PM, 8:05PM, 10:05PM, 12:05AM
+      cron_restart: '35 0,2,4,6,8,10,12,14,16,18 * * *',
+      env: {
+        NODE_ENV: 'production'
+      }
     }
   ]
 };

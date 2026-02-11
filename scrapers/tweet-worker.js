@@ -119,7 +119,7 @@ const CONFIG = {
   // Maximum tweets per day - Conservative limit for Twitter FREE tier
   // Free tier: 500 posts/month = ~16/day max
   // Using 8/day = 240/month (48% usage) leaves 52% buffer
-  MAX_TWEETS_PER_DAY: 8,
+  MAX_TWEETS_PER_DAY: 14,
 
   // Minimum hours between runs (to spread tweets throughout day)
   MIN_HOURS_BETWEEN_RUNS: 2,
@@ -471,9 +471,13 @@ async function main() {
     console.error("\n❌ Fatal error:", error.message);
     console.error(error.stack);
     process.exit(1);
+    process.exit(1);
   } finally {
     await closeDatabase();
     console.log("✅ Tweet worker completed.");
+    // Force exit to prevent zombie processes
+    console.log("👋 Force exiting worker process...");
+    process.exit(0);
   }
 }
 

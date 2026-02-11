@@ -2,13 +2,14 @@
 // Used by GitHub Actions workflow
 
 const CricbuzzNewsScraper = require("./cricbuzz-news-scraper");
+require("dotenv").config();
 const { PrismaClient } = require("@prisma/client");
 const { PrismaPg } = require("@prisma/adapter-pg");
 const { Pool } = require("pg");
 const { parsePublishTime } = require("../utils/timeParser");
 const { generateTags } = require("../utils/perplexityTagger");
 
-// Always use DATABASE_URL (pooler) - DIRECT_URL uses IPv6 which is unreachable from VPS
+// Use DATABASE_URL as confirmed by test-db.js
 const connectionString = process.env.DATABASE_URL;
 
 /**
@@ -41,6 +42,7 @@ async function runScraper() {
     max: 3,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
+    ssl: { rejectUnauthorized: false },
   });
 
   const prisma = new PrismaClient({
@@ -178,7 +180,7 @@ async function runScraper() {
                 ),
                 // Don't overwrite tags if they already exist
                 ...(tags.length > 0 &&
-                (!existingData.tags || existingData.tags.length === 0)
+                  (!existingData.tags || existingData.tags.length === 0)
                   ? { tags }
                   : {}),
                 relatedArticles: details?.relatedArticles || null,
