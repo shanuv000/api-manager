@@ -1,10 +1,12 @@
 /**
- * Upstash Redis Client
- * Wrapper for live score caching with free tier optimization
+ * Local Redis Client (ioredis)
+ * TCP connection to local Redis for live score caching
  */
 
 require("dotenv").config();
-const { Redis } = require("@upstash/redis");
+const Redis = require("ioredis");
+
+const DEBUG = process.env.NODE_ENV !== 'production';
 
 // Redis key constants
 const KEYS = {
@@ -23,24 +25,36 @@ let redisClient = null;
 
 /**
  * Get or create Redis client instance
- * @returns {Redis|null} Redis client or null if not configured
+ * @returns {Redis|null} Redis client or null if connection failed
  */
 function getClient() {
   if (redisClient) return redisClient;
 
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-
-  if (!url || !token) {
-    console.warn(
-      "⚠️ Redis not configured: Missing UPSTASH_REDIS_REST_URL or UPSTASH_REDIS_REST_TOKEN"
-    );
-    return null;
-  }
-
   try {
-    redisClient = new Redis({ url, token });
-    console.log("✅ Upstash Redis client initialized");
+    redisClient = new Redis({
+      host: "127.0.0.1",
+      port: 6379,
+      db: 0,
+      maxRetriesPerRequest: 3,
+      retryStrategy(times) {
+        const delay = Math.min(times * 50, 2000);
+        return delay;
+      },
+      lazyConnect: true,
+    });
+
+    redisClient.on("error", (err) => {
+      console.error("❌ Redis connection error:", err.message);
+    });
+
+    redisClient.on("connect", () => {
+      console.log("✅ Connected to local Redis (127.0.0.1:6379)");
+    });
+
+    redisClient.connect().catch(() => {
+      // Silently handle — retryStrategy handles reconnection
+    });
+
     return redisClient;
   } catch (error) {
     console.error("❌ Failed to initialize Redis client:", error.message);
@@ -59,10 +73,10 @@ async function getLiveScores() {
   try {
     const cached = await client.get(KEYS.LIVE_SCORES);
     if (cached) {
-      console.log("✅ Redis HIT: live_scores_cache");
-      return cached;
+      if (DEBUG) console.log("✅ Redis HIT: live_scores_cache");
+      return JSON.parse(cached);
     }
-    console.log("❌ Redis MISS: live_scores_cache");
+    if (DEBUG) console.log("❌ Redis MISS: live_scores_cache");
     return null;
   } catch (error) {
     console.error("Redis GET error:", error.message);
@@ -86,8 +100,8 @@ async function setLiveScores(matches, ttl = DEFAULT_TTL) {
       timestamp: Date.now(),
       count: matches.length,
     };
-    await client.set(KEYS.LIVE_SCORES, payload, { ex: ttl });
-    console.log(
+    await client.set(KEYS.LIVE_SCORES, JSON.stringify(payload), "EX", ttl);
+    if (DEBUG) console.log(
       `💾 Redis SET: live_scores_cache (${matches.length} matches, TTL: ${ttl}s)`
     );
     return true;
@@ -109,11 +123,12 @@ async function setWorkerStatus(status) {
   try {
     await client.set(
       KEYS.WORKER_STATUS,
-      {
+      JSON.stringify({
         ...status,
         timestamp: Date.now(),
-      },
-      { ex: 300 }
+      }),
+      "EX",
+      300
     ); // 5 min TTL for status
     return true;
   } catch (error) {
@@ -131,7 +146,8 @@ async function getWorkerStatus() {
   if (!client) return null;
 
   try {
-    return await client.get(KEYS.WORKER_STATUS);
+    const data = await client.get(KEYS.WORKER_STATUS);
+    return data ? JSON.parse(data) : null;
   } catch (error) {
     console.error("Redis worker status GET error:", error.message);
     return null;
@@ -151,8 +167,7 @@ async function getMatchScorecard(matchId) {
     const key = `${KEYS.SCORECARD_PREFIX}${matchId}`;
     const cached = await client.get(key);
     if (cached) {
-      // console.log(`✅ Redis HIT: ${key}`);
-      return cached;
+      return JSON.parse(cached);
     }
     return null;
   } catch (error) {
@@ -174,7 +189,7 @@ async function setMatchScorecard(matchId, data, ttl = DEFAULT_TTL) {
 
   try {
     const key = `${KEYS.SCORECARD_PREFIX}${matchId}`;
-    await client.set(key, data, { ex: ttl });
+    await client.set(key, JSON.stringify(data), "EX", ttl);
     return true;
   } catch (error) {
     console.error(`Redis SET scorecard error (${matchId}):`, error.message);
@@ -193,10 +208,10 @@ async function getLiteScores() {
   try {
     const cached = await client.get(KEYS.LIVE_SCORES_LITE);
     if (cached) {
-      console.log("✅ Redis HIT: live_scores_lite");
-      return cached;
+      if (DEBUG) console.log("✅ Redis HIT: live_scores_lite");
+      return JSON.parse(cached);
     }
-    console.log("❌ Redis MISS: live_scores_lite");
+    if (DEBUG) console.log("❌ Redis MISS: live_scores_lite");
     return null;
   } catch (error) {
     console.error("Redis GET lite error:", error.message);
@@ -220,8 +235,8 @@ async function setLiteScores(matches, ttl = DEFAULT_TTL) {
       timestamp: Date.now(),
       count: matches.length,
     };
-    await client.set(KEYS.LIVE_SCORES_LITE, payload, { ex: ttl });
-    console.log(
+    await client.set(KEYS.LIVE_SCORES_LITE, JSON.stringify(payload), "EX", ttl);
+    if (DEBUG) console.log(
       `💾 Redis SET: live_scores_lite (${matches.length} matches, TTL: ${ttl}s)`
     );
     return true;
@@ -244,7 +259,7 @@ async function getMatchCommentary(matchId) {
     const key = `${KEYS.COMMENTARY_PREFIX}${matchId}`;
     const cached = await client.get(key);
     if (cached) {
-      return cached;
+      return JSON.parse(cached);
     }
     return null;
   } catch (error) {
@@ -266,7 +281,7 @@ async function setMatchCommentary(matchId, data, ttl = DEFAULT_TTL) {
 
   try {
     const key = `${KEYS.COMMENTARY_PREFIX}${matchId}`;
-    await client.set(key, data, { ex: ttl });
+    await client.set(key, JSON.stringify(data), "EX", ttl);
     return true;
   } catch (error) {
     console.error(`Redis SET commentary error (${matchId}):`, error.message);

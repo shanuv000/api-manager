@@ -25,7 +25,7 @@ const {
 
 const CONFIG = {
     API_BASE_URL: 'https://ai.urtechy.com',
-    API_KEY: 'agp_9dS82kP1J7xWmQZs', // In production, use process.env.ANTIGRAVITY_API_KEY
+    API_KEY: process.env.ANTIGRAVITY_API_KEY,
     MODEL: 'gemini-3-flash',
     BATCH_SIZE: 5, // Process 5 at a time for stability
     MAX_TOKENS: 16384, // Gemini Flash supports larger context
@@ -35,6 +35,12 @@ const CONFIG = {
     ENHANCER_PROMPT_PATH: path.join(__dirname, 'prompts', 'system_prompt_enhancer.md'),
     FORMATTER_PROMPT_PATH: path.join(__dirname, 'prompts', 'system_prompt_formatter.md'),
 };
+
+// Fail fast if API key is missing
+if (!CONFIG.API_KEY) {
+    console.error('❌ ANTIGRAVITY_API_KEY environment variable is not set. Exiting.');
+    process.exit(1);
+}
 
 // ============================================
 // HELPERS

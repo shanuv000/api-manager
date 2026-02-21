@@ -6,7 +6,7 @@ const setupMiddleware = require("./component/middleware");
 // Consolidated Cricket Routes
 const cricketRoutes = require("./routes/Cricket/index");
 
-// Other routes (commented out to reduce function count for Vercel)
+// Other routes (unused legacy endpoints)
 // const t20WorldCupRoute = require("./routes/Cricket/t20Worldcup");
 // const scheduleRoute = require("./routes/Cricket/schedule");
 // const espnRoute = require("./routes/Cricket/espn");
@@ -14,7 +14,7 @@ const cricketRoutes = require("./routes/Cricket/index");
 const app = express();
 const PORT = process.env.PORT || 5003;
 
-// Set trust proxy to trust the first proxy (like Vercel)
+// Trust the first proxy (Nginx) for correct client IP in rate limiting
 app.set("trust proxy", 1);
 
 // Apply middleware
@@ -28,7 +28,7 @@ app.get("/", (req, res) => {
 // Consolidated Cricket API routes
 app.use("/api/cricket", cricketRoutes);
 
-// Other routes (commented out to reduce function count for Vercel)
+// Other routes (unused legacy endpoints)
 // app.use("/api/cricket", scheduleRoute);
 // app.use("/api/cricket", t20WorldCupRoute);
 // app.use("/api/cricket", espnRoute);
@@ -53,15 +53,35 @@ const server = app.listen(PORT, () => {
 });
 
 // Graceful shutdown handling
-const gracefulShutdown = (signal) => {
+const gracefulShutdown = async (signal) => {
   console.log(`\n${signal} received. Starting graceful shutdown...`);
 
   // Stop accepting new connections
-  server.close(() => {
+  server.close(async () => {
     console.log('HTTP server closed.');
 
-    // Close database connections if any
-    // Add your cleanup code here (e.g., Redis, database connections)
+    // Close Redis connections
+    try {
+      const { redis: getGeneralRedis } = require('./component/redisClient');
+      const generalRedis = getGeneralRedis();
+      if (generalRedis) await generalRedis.quit();
+      console.log('Redis (general) connection closed.');
+    } catch (e) { /* ignore — process is exiting */ }
+
+    try {
+      const { getClient: getLiveRedis } = require('./utils/redis-client');
+      const liveRedis = getLiveRedis();
+      if (liveRedis) await liveRedis.quit();
+      console.log('Redis (live) connection closed.');
+    } catch (e) { /* ignore */ }
+
+    // Close database connections
+    try {
+      const prisma = require('./component/prismaClient');
+      await prisma.$disconnect();
+      if (prisma.pool) await prisma.pool.end();
+      console.log('Database connections closed.');
+    } catch (e) { /* ignore */ }
 
     console.log('Graceful shutdown completed.');
     process.exit(0);

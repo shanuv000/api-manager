@@ -39,7 +39,7 @@ function getCache(type) {
     caches[type] = new NodeCache({
       stdTTL: config.ttl,
       checkperiod: config.checkPeriod,
-      useClones: true,
+      useClones: false, // Read-only data — no need to deep-copy on every cache hit
     });
     console.log(`📦 Created cache for ${type} (TTL: ${config.ttl}s)`);
   }

@@ -14,6 +14,8 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
 
+const DEBUG = process.env.NODE_ENV !== 'production';
+
 // Series page URLs by category
 const SERIES_URLS = {
     all: "https://www.cricbuzz.com/cricket-schedule/series/all",
@@ -65,7 +67,7 @@ function extractSeriesData(html) {
             return seriesData;
         }
 
-        console.warn("⚠️ Could not find seriesScheduleData in page");
+        if (DEBUG) console.log("⚠️ Could not find seriesScheduleData in page");
         return [];
     } catch (error) {
         console.error("❌ Error extracting series data:", error.message);
@@ -87,7 +89,7 @@ function extractPointsTableData(html) {
         const startIdx = html.indexOf(searchStr);
 
         if (startIdx === -1) {
-            console.warn("⚠️ Could not find pointsTableData in page");
+            if (DEBUG) console.log("⚠️ Could not find pointsTableData in page");
             return null;
         }
 
@@ -125,7 +127,7 @@ function extractPointsTableData(html) {
             return data;
         }
 
-        console.warn("⚠️ Could not find complete pointsTableData JSON");
+        if (DEBUG) console.log("⚠️ Could not find complete pointsTableData JSON");
         return null;
     } catch (error) {
         console.error("❌ Error extracting points table:", error.message);

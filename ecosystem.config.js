@@ -7,11 +7,11 @@ module.exports = {
       instances: 1,
       autorestart: true,
       watch: false,
-      max_memory_restart: '500M',
+      max_memory_restart: '300M',
       env: {
         NODE_ENV: 'production'
       },
-      node_args: '--max-old-space-size=512'
+      node_args: '--max-old-space-size=320'
     },
     {
       name: 'live-score-worker',
@@ -20,6 +20,8 @@ module.exports = {
       instances: 1,
       autorestart: true,
       watch: false,
+      max_memory_restart: '250M',
+      node_args: '--max-old-space-size=200',
       env: {
         NODE_ENV: 'production'
       }

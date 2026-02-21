@@ -1,11 +1,43 @@
-require("dotenv").config();
-const { Redis } = require("@upstash/redis");
+/**
+ * Redis Client (ioredis)
+ * General-purpose cache client for API routes (news, articles, cricket data)
+ */
 
-// Initialize Upstash Redis client
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN,
-});
+require("dotenv").config();
+const Redis = require("ioredis");
+
+const DEBUG = process.env.NODE_ENV !== 'production';
+
+// Singleton instance
+let redis = null;
+
+function getRedis() {
+  if (redis) return redis;
+
+  redis = new Redis({
+    host: "127.0.0.1",
+    port: 6379,
+    db: 0,
+    maxRetriesPerRequest: 3,
+    retryStrategy(times) {
+      const delay = Math.min(times * 50, 2000);
+      return delay;
+    },
+    lazyConnect: true,
+  });
+
+  redis.on("error", (err) => {
+    console.error("❌ Redis (general) connection error:", err.message);
+  });
+
+  redis.on("connect", () => {
+    console.log("✅ Redis (general) connected to 127.0.0.1:6379");
+  });
+
+  redis.connect().catch(() => { });
+
+  return redis;
+}
 
 /**
  * Get data from cache
@@ -14,17 +46,17 @@ const redis = new Redis({
  */
 async function getCache(key) {
   try {
-    const data = await redis.get(key);
+    const client = getRedis();
+    const data = await client.get(key);
     if (data) {
-      console.log(`✓ Cache HIT: ${key}`);
-      // Upstash Redis automatically deserializes JSON, so data is already an object
-      return data;
+      if (DEBUG) console.log(`✓ Cache HIT: ${key}`);
+      return JSON.parse(data);
     }
-    console.log(`✗ Cache MISS: ${key}`);
+    if (DEBUG) console.log(`✗ Cache MISS: ${key}`);
     return null;
   } catch (error) {
     console.error(`Redis GET error for ${key}:`, error.message);
-    return null; // Fail gracefully, don't break the API
+    return null; // Fail gracefully
   }
 }
 
@@ -36,12 +68,11 @@ async function getCache(key) {
  */
 async function setCache(key, value, ttl = 300) {
   try {
-    // Upstash Redis automatically serializes objects, use set with EX option
-    await redis.set(key, value, { ex: ttl });
-    console.log(`✓ Cache SET: ${key} (TTL: ${ttl}s)`);
+    const client = getRedis();
+    await client.set(key, JSON.stringify(value), "EX", ttl);
+    if (DEBUG) console.log(`✓ Cache SET: ${key} (TTL: ${ttl}s)`);
   } catch (error) {
     console.error(`Redis SET error for ${key}:`, error.message);
-    // Fail gracefully, don't break the API
   }
 }
 
@@ -51,8 +82,9 @@ async function setCache(key, value, ttl = 300) {
  */
 async function deleteCache(key) {
   try {
-    await redis.del(key);
-    console.log(`✓ Cache DELETE: ${key}`);
+    const client = getRedis();
+    await client.del(key);
+    if (DEBUG) console.log(`✓ Cache DELETE: ${key}`);
   } catch (error) {
     console.error(`Redis DELETE error for ${key}:`, error.message);
   }
@@ -75,34 +107,33 @@ async function invalidateCricketCache() {
 
 /**
  * Invalidate all cricket news cache entries
- * Call this after scraping new articles to ensure fresh content is served
  */
 async function invalidateNewsCache() {
   try {
-    // Upstash Redis scan for keys matching pattern
-    const keys = await redis.keys("cricket:news:*");
+    const client = getRedis();
+    const keys = [];
+    let cursor = '0';
+    do {
+      const [nextCursor, batch] = await client.scan(cursor, 'MATCH', 'cricket:news:*', 'COUNT', 100);
+      cursor = nextCursor;
+      keys.push(...batch);
+    } while (cursor !== '0');
 
     if (keys.length === 0) {
-      console.log("✓ No news cache entries to invalidate");
       return 0;
     }
 
-    for (const key of keys) {
-      await deleteCache(key);
-    }
-
+    await client.del(...keys);
     console.log(`✓ Invalidated ${keys.length} news cache entries`);
     return keys.length;
   } catch (error) {
     console.error("Redis invalidateNewsCache error:", error.message);
-    return 0; // Fail gracefully
+    return 0;
   }
 }
 
 /**
  * Get cached article by slug
- * @param {string} slug - Article slug
- * @returns {Promise<any|null>} - Cached article or null
  */
 async function getArticleCache(slug) {
   const key = `article:${slug}`;
@@ -111,9 +142,6 @@ async function getArticleCache(slug) {
 
 /**
  * Set article cache by slug
- * @param {string} slug - Article slug
- * @param {any} data - Article data to cache
- * @param {number} ttl - TTL in seconds (default 1 hour)
  */
 async function setArticleCache(slug, data, ttl = 3600) {
   const key = `article:${slug}`;
@@ -122,7 +150,6 @@ async function setArticleCache(slug, data, ttl = 3600) {
 
 /**
  * Invalidate article cache by slug
- * @param {string} slug - Article slug
  */
 async function invalidateArticleCache(slug) {
   const key = `article:${slug}`;
@@ -131,38 +158,38 @@ async function invalidateArticleCache(slug) {
 
 /**
  * Invalidate all article caches
- * Call this after content enhancement to ensure fresh enhanced content is served
- * @returns {Promise<number>} - Number of invalidated cache entries
  */
 async function invalidateAllArticleCaches() {
   try {
-    const keys = await redis.keys("article:*");
+    const client = getRedis();
+    const keys = [];
+    let cursor = '0';
+    do {
+      const [nextCursor, batch] = await client.scan(cursor, 'MATCH', 'article:*', 'COUNT', 100);
+      cursor = nextCursor;
+      keys.push(...batch);
+    } while (cursor !== '0');
 
     if (keys.length === 0) {
-      console.log("✓ No article cache entries to invalidate");
       return 0;
     }
 
-    for (const key of keys) {
-      await deleteCache(key);
-    }
-
+    await client.del(...keys);
     console.log(`✓ Invalidated ${keys.length} article cache entries`);
     return keys.length;
   } catch (error) {
     console.error("Redis invalidateAllArticleCaches error:", error.message);
-    return 0; // Fail gracefully
+    return 0;
   }
 }
 
 module.exports = {
-  redis,
+  redis: getRedis,
   getCache,
   setCache,
   deleteCache,
   invalidateCricketCache,
   invalidateNewsCache,
-  // Article-level caching
   getArticleCache,
   setArticleCache,
   invalidateArticleCache,

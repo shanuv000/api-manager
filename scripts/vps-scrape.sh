@@ -91,7 +91,8 @@ fi
 
 # Kill stale Chrome/Chromium processes from previous runs
 echo "🧹 Cleaning up stale browser processes..."
-STALE_COUNT=$(pgrep -c -f "chromium.*--headless" 2>/dev/null | tr -d ' ' || echo "0")
+STALE_COUNT=$(pgrep -c -f "chromium.*--headless" 2>/dev/null || echo "0")
+STALE_COUNT=$(echo "$STALE_COUNT" | tr -d '[:space:]')
 STALE_COUNT=${STALE_COUNT:-0}
 if [ "$STALE_COUNT" -gt 0 ] 2>/dev/null; then
   echo "   Found $STALE_COUNT stale Chromium processes, killing..."
@@ -108,7 +109,7 @@ CRICBUZZ_STATUS="❌ Failed"
 ESPN_STATUS="❌ Failed"
 ICC_STATUS="❌ Failed"
 BBC_STATUS="❌ Failed"
-IPL_STATUS="❌ Failed"
+# IPL_STATUS="❌ Failed"  # IPL scraper disabled (no longer needed)
 CRICBUZZ_NEW=0
 CRICBUZZ_UPDATED=0
 CRICBUZZ_SKIPPED=0
@@ -121,9 +122,9 @@ ICC_SKIPPED=0
 BBC_NEW=0
 BBC_UPDATED=0
 BBC_SKIPPED=0
-IPL_NEW=0
-IPL_UPDATED=0
-IPL_SKIPPED=0
+# IPL_NEW=0             # IPL scraper disabled
+# IPL_UPDATED=0
+# IPL_SKIPPED=0
 DB_TOTAL=0
 ERRORS=""
 
@@ -206,40 +207,41 @@ else
 fi
 echo "$BBC_OUTPUT"
 
-# Run IPL T20 scraper (Puppeteer - with timeout)
-echo "📰 Running IPL T20 scraper..."
-if IPL_OUTPUT=$(timeout $SCRAPER_TIMEOUT node scrapers/run-iplt20-scraper.js 2>&1); then
-  IPL_STATUS="✅ Success"
-  IPL_NEW=$(echo "$IPL_OUTPUT" | grep -oP "New articles saved:\s*\K\d+" || echo "0")
-  IPL_UPDATED=$(echo "$IPL_OUTPUT" | grep -oP "Updated articles:\s*\K\d+" || echo "0")
-  IPL_SKIPPED=$(echo "$IPL_OUTPUT" | grep -oP "Skipped.*duplicate.*:\s*\K\d+" || echo "0")
-  DB_TOTAL=$(echo "$IPL_OUTPUT" | grep -oP "Total articles:\s*\K\d+" || echo "$DB_TOTAL")
-else
-  exit_code=$?
-  if [ $exit_code -eq 124 ]; then
-    ERRORS="${ERRORS}IPL timed out (>${SCRAPER_TIMEOUT}s)\\n"
-    echo "⚠️ IPL scraper timed out after ${SCRAPER_TIMEOUT}s"
-  else
-    ERRORS="${ERRORS}IPL failed (exit: $exit_code)\\n"
-  fi
-fi
-echo "$IPL_OUTPUT"
+# --- IPL T20 scraper disabled (no longer needed) ---
+# echo "📰 Running IPL T20 scraper..."
+# if IPL_OUTPUT=$(timeout $SCRAPER_TIMEOUT node scrapers/run-iplt20-scraper.js 2>&1); then
+#   IPL_STATUS="✅ Success"
+#   IPL_NEW=$(echo "$IPL_OUTPUT" | grep -oP "New articles saved:\s*\K\d+" || echo "0")
+#   IPL_UPDATED=$(echo "$IPL_OUTPUT" | grep -oP "Updated articles:\s*\K\d+" || echo "0")
+#   IPL_SKIPPED=$(echo "$IPL_OUTPUT" | grep -oP "Skipped.*duplicate.*:\s*\K\d+" || echo "0")
+#   DB_TOTAL=$(echo "$IPL_OUTPUT" | grep -oP "Total articles:\s*\K\d+" || echo "$DB_TOTAL")
+# else
+#   exit_code=$?
+#   if [ $exit_code -eq 124 ]; then
+#     ERRORS="${ERRORS}IPL timed out (>${SCRAPER_TIMEOUT}s)\\n"
+#     echo "⚠️ IPL scraper timed out after ${SCRAPER_TIMEOUT}s"
+#   else
+#     ERRORS="${ERRORS}IPL failed (exit: $exit_code)\\n"
+#   fi
+# fi
+# echo "$IPL_OUTPUT"
 
-# Run Claude Opus Content Enhancer (AI enhancement with timeout - batch 1 sequential)
-echo "🤖 Running Claude Opus Content Enhancer..."
+# Run Content Enhancer (AI enhancement with timeout - batch 1 sequential)
+echo "🤖 Running Content Enhancer..."
 ENHANCE_STATUS="❌ Failed"
 ENHANCE_COUNT=0
 if ENHANCE_OUTPUT=$(timeout 1200 node scrapers/content-enhancer-claude.js 2>&1); then
   ENHANCE_STATUS="✅ Success"
-  # Grep for the specific success log from the new script
-  ENHANCE_COUNT=$(echo "$ENHANCE_OUTPUT" | grep -oP "Saved Enhanced Article" | wc -l || echo "0")
+  # Count enhanced articles (pipefail-safe: separate grep from wc to avoid "0\n0" bug)
+  ENHANCE_COUNT=$(echo "$ENHANCE_OUTPUT" | grep -c "Saved Enhanced Article" || true)
+  ENHANCE_COUNT=${ENHANCE_COUNT:-0}
 else
   exit_code=$?
   if [ $exit_code -eq 124 ]; then
-    ERRORS="${ERRORS}Claude enhancer timed out (>600s)\\n"
-    echo "⚠️ Claude enhancer timed out after 600s"
+    ERRORS="${ERRORS}Content enhancer timed out (>1200s)\\n"
+    echo "⚠️ Content enhancer timed out after 1200s"
   else
-    ERRORS="${ERRORS}Claude enhancer failed (exit: $exit_code)\\n"
+    ERRORS="${ERRORS}Content enhancer failed (exit: $exit_code)\\n"
   fi
 fi
 echo "$ENHANCE_OUTPUT"
@@ -260,8 +262,13 @@ echo "✅ Scraping completed at $(date) (${DURATION}s)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Send Discord notification - ALWAYS notify (success or failure)
-TOTAL_NEW=$((CRICBUZZ_NEW + ESPN_NEW + ICC_NEW + BBC_NEW + IPL_NEW))
-TOTAL_UPDATED=$((CRICBUZZ_UPDATED + ESPN_UPDATED + ICC_UPDATED + BBC_UPDATED + IPL_UPDATED))
+TOTAL_NEW=$((CRICBUZZ_NEW + ESPN_NEW + ICC_NEW + BBC_NEW))
+TOTAL_UPDATED=$((CRICBUZZ_UPDATED + ESPN_UPDATED + ICC_UPDATED + BBC_UPDATED))
+
+# Sanitize all numeric vars (pipefail can cause "0\n0" multiline values)
+TOTAL_NEW=$(echo "$TOTAL_NEW" | head -1 | tr -dc '0-9'); TOTAL_NEW=${TOTAL_NEW:-0}
+TOTAL_UPDATED=$(echo "$TOTAL_UPDATED" | head -1 | tr -dc '0-9'); TOTAL_UPDATED=${TOTAL_UPDATED:-0}
+ENHANCE_COUNT=$(echo "$ENHANCE_COUNT" | head -1 | tr -dc '0-9'); ENHANCE_COUNT=${ENHANCE_COUNT:-0}
 
 # Clear API Cache if changes detected
 if [ "$TOTAL_NEW" -gt 0 ] || [ "$TOTAL_UPDATED" -gt 0 ] || [ "$ENHANCE_COUNT" -gt 0 ]; then
@@ -293,7 +300,7 @@ SCRAPER_DETAILS="${SCRAPER_DETAILS}• Cricbuzz: ${CRICBUZZ_STATUS} (${CRICBUZZ_
 SCRAPER_DETAILS="${SCRAPER_DETAILS}• ESPN: ${ESPN_STATUS} (${ESPN_NEW} new)\\n"
 SCRAPER_DETAILS="${SCRAPER_DETAILS}• ICC: ${ICC_STATUS} (${ICC_NEW} new)\\n"
 SCRAPER_DETAILS="${SCRAPER_DETAILS}• BBC: ${BBC_STATUS} (${BBC_NEW} new)\\n"
-SCRAPER_DETAILS="${SCRAPER_DETAILS}• IPL: ${IPL_STATUS} (${IPL_NEW} new)\\n"
+# SCRAPER_DETAILS="${SCRAPER_DETAILS}• IPL: ${IPL_STATUS} (${IPL_NEW} new)\\n"  # IPL disabled
 SCRAPER_DETAILS="${SCRAPER_DETAILS}• AI Enhance: ${ENHANCE_STATUS} (${ENHANCE_COUNT} enhanced)"
 
 # Build coverage section based on alert level

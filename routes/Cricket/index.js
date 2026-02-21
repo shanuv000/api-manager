@@ -63,6 +63,10 @@ const {
   isRateLimited,
 } = require("../../utils/apiErrors");
 const scraperHealth = require("../../utils/scraper-health");
+const { createLimiter } = require("../../utils/concurrency-limiter");
+
+// Limit concurrent outbound HTTP requests to Cricbuzz (prevents IP blocking)
+const scorecardLimiter = createLimiter(5);
 
 const router = express.Router();
 
@@ -1138,7 +1142,9 @@ const enrichMatchesWithScorecard = async (matches) => {
     matches.map(async (match) => {
       if (match.links && match.links["Scorecard"]) {
         try {
-          const details = await getScorecardDetails(match.links["Scorecard"]);
+          const details = await scorecardLimiter(() =>
+            getScorecardDetails(match.links["Scorecard"])
+          );
           if (details) {
             match.scorecard = details;
           }
@@ -1986,7 +1992,8 @@ router.get("/news/:slug", async (req, res) => {
     const prisma = require("../../component/prismaClient");
 
     // Fetch article with enhanced content if available
-    const article = await prisma.newsArticle.findFirst({
+    // Step 1: Try exact slug match (fastest path)
+    let article = await prisma.newsArticle.findFirst({
       where: {
         slug: slug,
         sport: "cricket",
@@ -1995,6 +2002,49 @@ router.get("/news/:slug", async (req, res) => {
         enhancedContent: true, // Include AI-enhanced content
       },
     });
+
+    // Step 2: Fallback — match by trailing ID suffix
+    // Handles mismatched slugs from source URLs (e.g., ESPNcricinfo slug vs internal slug)
+    // Both share the same trailing article ID (e.g., "1525110")
+    if (!article) {
+      const trailingIdMatch = slug.match(/-([a-z0-9]{5,})$/);
+      if (trailingIdMatch) {
+        const trailingId = trailingIdMatch[1];
+        article = await prisma.newsArticle.findFirst({
+          where: {
+            slug: { endsWith: `-${trailingId}` },
+            sport: "cricket",
+          },
+          include: {
+            enhancedContent: true,
+          },
+        });
+
+        // If found via fallback, serve it directly (with canonical slug info)
+        if (article) {
+          console.log(`[News] Slug fallback: "${slug}" -> "${article.slug}" (via trailing ID: ${trailingId})`);
+          // Cache under BOTH slugs for future lookups
+          const enhanced = article.enhancedContent;
+          const rawContent = enhanced?.content || article.content;
+          const normalizedContent = normalizeContent(rawContent, article.sourceName);
+          const response = {
+            success: true,
+            data: {
+              ...article,
+              hasEnhancedContent: !!enhanced,
+              displayTitle: enhanced?.title || article.title,
+              displayContent: normalizedContent,
+              displayMetaDescription: enhanced?.metaDescription || article.metaDesc || article.description,
+              keyTakeaways: enhanced?.keyTakeaways || [],
+              canonicalSlug: article.slug, // Tell frontend the real slug
+            },
+          };
+          await setArticleCache(slug, response, 3600);
+          await setArticleCache(article.slug, response, 3600);
+          return res.json(response);
+        }
+      }
+    }
 
     if (!article) {
       return sendError(res, new NotFoundError("Article"));
@@ -2444,14 +2494,14 @@ router.get("/photos/image/*", async (req, res) => {
     // Fetch directly from Cricbuzz CDN
     const imageData = await fetchPhotoImage(imagePath);
 
-    // Cache the image for 30 days (2592000 seconds) - images never change
+    // Cache the image for 24 hours (86400 seconds) - Redis memory is bounded
     await setCache(
       cacheKey,
       {
         data: imageData.data.toString("base64"),
         contentType: imageData.contentType,
       },
-      2592000
+      86400
     );
 
     // Record success for health monitoring
