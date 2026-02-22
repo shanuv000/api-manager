@@ -35,7 +35,7 @@ api-manager/
 ├── scrapers/                 # News scrapers + workers
 │   ├── live-score-worker.js  # PM2 Always On: Scrapes Cricbuzz → Redis (60s)
 │   ├── tweet-worker.js       # PM2 Cron: Posts to Twitter 4x/day
-│   ├── content-enhancer-claude.js  # AI enhancement (Gemini 3 Flash)
+│   ├── content-enhancer-claude.js  # AI enhancement (Gemini 3.1 Pro High)
 │   ├── prompts/              # System prompts for enhancer/formatter
 │   ├── run-scraper.js        # Cricbuzz news
 │   ├── run-espncricinfo-scraper.js
@@ -232,7 +232,7 @@ cat ~/.pm2/logs/api-manager-error-0.log
 |---------|---------|------------|
 | **Supabase PostgreSQL** | Primary database (pool max: 5) | `DATABASE_URL` |
 | **Local Redis** | Caching (128MB limit, LRU eviction) | `127.0.0.1:6379` (no auth) |
-| **Gemini 3 Flash** | AI content enhancement | `ANTIGRAVITY_API_KEY` → `ai.urtechy.com` proxy |
+| **Gemini 3.1 Pro High** | AI content enhancement | `ANTIGRAVITY_API_KEY` → `ai.urtechy.com` proxy |
 | **Twitter API v2** | Auto-posting | `TWITTER_*` |
 | **RapidAPI Cricbuzz** | Stats/rankings | `RAPIDAPI_CRICBUZZ_KEY*` (5 rotating keys) |
 | **Discord Webhooks** | Error notifications | `DISCORD_WEBHOOK_URL` |
@@ -278,7 +278,7 @@ cat ~/.pm2/logs/api-manager-error-0.log
 
 3. **Content Flow:**
    ```
-   Scrapers → NewsArticle (DB) → Gemini Flash Enhancer → EnhancedContent → Tweet Worker → Twitter
+   Scrapers → NewsArticle (DB) → Gemini 3.1 Pro High Enhancer → EnhancedContent → Tweet Worker → Twitter
    ```
 
 4. **Live Scores Flow:**
@@ -300,6 +300,20 @@ cat ~/.pm2/logs/api-manager-error-0.log
 | No enhanced content | Run `node scrapers/content-enhancer-claude.js` manually |
 | High memory usage | `pm2 monit` — check against 300M/250M limits |
 | `integer expression expected` in vps-scrape.sh | Use `grep -c` instead of `cmd \| grep \| wc -l \|\| echo "0"` under `set -o pipefail`. Fixed Feb 14, 2026. |
+
+---
+
+## 🛡️ Scraper Hardening (Feb 22, 2026)
+
+All 4 news scrapers (ESPN, ICC, Cricbuzz, BBC) hardened against bot detection, timeouts, and Chromium crashes in cron. Verified 100% success rate on 40/40 articles.
+
+| Component | Hardening Applied |
+|-----------|-------------------|
+| **Evasion** | `puppeteer-extra` + `stealth` plugin, `Object.defineProperty(navigator, 'webdriver')` override |
+| **Identity** | Updated User-Agent to Chrome 131, added `--disable-blink-features=AutomationControlled` |
+| **Stability**| `protocolTimeout: 60000` (prevents CDP hangs), prioritized bundled Chrome over `/snap/bin/chromium` for ARM64 |
+| **Speed** | Switched `networkidle2` → `domcontentloaded`, added request interception for ads/trackers |
+| **Recovery** | Added `.on('disconnected')` handler, extended retry catch patterns (Connection closed, detached, Target closed) |
 
 ---
 

@@ -1,5 +1,7 @@
-// Use puppeteer-core for serverless compatibility
-const puppeteer = require("puppeteer-core");
+// Use puppeteer-extra with stealth for bot detection evasion
+const puppeteer = require("puppeteer-extra");
+const StealthPlugin = require("puppeteer-extra-plugin-stealth");
+puppeteer.use(StealthPlugin());
 const chromium = require("@sparticuz/chromium");
 const axios = require("axios");
 
@@ -77,21 +79,23 @@ class CricbuzzNewsScraper {
    */
   async initBrowser() {
     if (!this.browser) {
+      const fs = require("fs");
+
       // Detect if running in serverless environment (Vercel/AWS Lambda)
       const isServerless =
         !!process.env.AWS_LAMBDA_FUNCTION_NAME || !!process.env.VERCEL;
 
-      // Detect ARM64 architecture (Puppeteer bundled Chrome doesn't support ARM64)
-      const os = require("os");
-      const isArm64 = os.arch() === "arm64";
-
       const options = {
         headless: "new",
+        protocolTimeout: 60000, // Prevents CDP connection hangs
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
           "--disable-dev-shm-usage",
           "--disable-gpu",
+          "--disable-blink-features=AutomationControlled", // Hide automation flag
+          "--disable-features=IsolateOrigins,site-per-process",
+          "--no-first-run",
           "--single-process",
           "--no-zygote",
         ],
@@ -104,25 +108,54 @@ class CricbuzzNewsScraper {
         );
         options.executablePath = await chromium.executablePath();
         options.args = [...options.args, ...chromium.args];
-      } else if (isArm64) {
-        // ARM64: Use system Chromium (Puppeteer bundled Chrome is x86_64 only)
-        console.log("💻 Running on ARM64, using system Chromium");
-        options.executablePath = "/snap/bin/chromium";
       } else {
-        // x86_64 Local: Try to find local Chromium from puppeteer package
-        console.log("💻 Running locally, using bundled Chromium");
+        // Find Chromium: prioritize Puppeteer's bundled Chrome (snap fails in cron)
+        let execPath;
         try {
-          const puppeteerLocal = require("puppeteer");
-          options.executablePath = puppeteerLocal.executablePath();
+          const puppeteerFull = require("puppeteer");
+          const bundledPath = puppeteerFull.executablePath();
+          if (fs.existsSync(bundledPath)) {
+            this.log("Using Puppeteer bundled Chrome");
+            execPath = bundledPath;
+          }
         } catch (e) {
-          console.log(
-            "⚠️  Puppeteer not found, will use system Chrome/Chromium"
-          );
-          // Let puppeteer-core try to find Chrome/Chromium automatically
+          // puppeteer not available
         }
+
+        if (!execPath) {
+          // Fallback to system paths (avoid snap — fails in cron)
+          const systemPaths = [
+            process.env.CHROME_PATH,
+            "/usr/bin/chromium-browser",
+            "/usr/bin/chromium",
+            "/usr/bin/google-chrome",
+            "/snap/bin/chromium",  // Last resort
+          ].filter(Boolean);
+
+          for (const p of systemPaths) {
+            if (fs.existsSync(p)) {
+              this.log(`Using system Chromium: ${p}`);
+              execPath = p;
+              break;
+            }
+          }
+        }
+
+        if (!execPath) {
+          throw new Error("Chromium not found. Install chromium-browser or set CHROME_PATH.");
+        }
+        options.executablePath = execPath;
       }
 
       this.browser = await puppeteer.launch(options);
+
+      // Recovery handler for silent CDP disconnects
+      this.browser.on('disconnected', () => {
+        this.log('Browser disconnected unexpectedly', 'warn');
+        this.browser = null;
+      });
+
+      this.log("Browser initialized with stealth ✓");
     }
     return this.browser;
   }
@@ -149,15 +182,14 @@ class CricbuzzNewsScraper {
     // Calculate timeout with exponential backoff on retries
     const currentTimeout = Math.round(
       this.config.PAGE_LOAD_TIMEOUT *
-        Math.pow(this.config.RETRY_TIMEOUT_MULTIPLIER, retryCount)
+      Math.pow(this.config.RETRY_TIMEOUT_MULTIPLIER, retryCount)
     );
 
     try {
       console.log("🏏 Fetching latest cricket news from Cricbuzz...");
       if (retryCount > 0) {
         console.log(
-          `🔄 Retry attempt ${retryCount}/${
-            this.config.MAX_RETRIES
+          `🔄 Retry attempt ${retryCount}/${this.config.MAX_RETRIES
           } (timeout: ${currentTimeout / 1000}s)`
         );
       }
@@ -181,15 +213,41 @@ class CricbuzzNewsScraper {
 
       // Set user agent and viewport
       await page.setUserAgent(
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
       );
       await page.setViewport({ width: 1920, height: 1080 });
-      this.log("Step 2/6: Page created with user agent ✓");
+
+      // Extra webdriver override (redundancy on top of stealth plugin)
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      });
+
+      // Block ads/trackers for speed and stability
+      await page.setRequestInterception(true);
+      page.on('request', (req) => {
+        const type = req.resourceType();
+        const url = req.url();
+        if (
+          ['image', 'font', 'media', 'stylesheet'].includes(type) ||
+          url.includes('google-analytics') ||
+          url.includes('googletagmanager') ||
+          url.includes('facebook') ||
+          url.includes('doubleclick') ||
+          url.includes('adsystem') ||
+          url.includes('taboola') ||
+          url.includes('outbrain')
+        ) {
+          req.abort();
+        } else {
+          req.continue();
+        }
+      });
+
+      this.log("Step 2/6: Page created with stealth user agent ✓");
 
       // Step 3: Navigate to news page
       this.log(
-        `Step 3/6: Navigating to ${this.newsUrl} (timeout: ${
-          currentTimeout / 1000
+        `Step 3/6: Navigating to ${this.newsUrl} (timeout: ${currentTimeout / 1000
         }s)...`
       );
       const navStartTime = Date.now();
@@ -435,6 +493,8 @@ class CricbuzzNewsScraper {
         error.message.includes("Navigation") ||
         error.message.includes("Protocol error") ||
         error.message.includes("Target closed") ||
+        error.message.includes("Connection closed") ||
+        error.message.includes("detached") ||
         error.message.includes("net::");
 
       console.error(
@@ -486,14 +546,37 @@ class CricbuzzNewsScraper {
       page = await browser.newPage();
 
       await page.setUserAgent(
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
       );
       await page.setViewport({ width: 1920, height: 1080 });
+
+      // Extra webdriver override
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      });
+
+      // Block ads/trackers for speed
+      await page.setRequestInterception(true);
+      page.on('request', (req) => {
+        const type = req.resourceType();
+        const url = req.url();
+        if (
+          ['image', 'font', 'media'].includes(type) ||
+          url.includes('google-analytics') ||
+          url.includes('googletagmanager') ||
+          url.includes('doubleclick') ||
+          url.includes('adsystem')
+        ) {
+          req.abort();
+        } else {
+          req.continue();
+        }
+      });
 
       // Calculate timeout with backoff
       const currentTimeout = Math.round(
         this.config.PAGE_LOAD_TIMEOUT *
-          Math.pow(this.config.RETRY_TIMEOUT_MULTIPLIER, retryCount)
+        Math.pow(this.config.RETRY_TIMEOUT_MULTIPLIER, retryCount)
       );
 
       await page.goto(articleUrl, {
@@ -733,8 +816,7 @@ class CricbuzzNewsScraper {
         ? articleDetails.content.split(/\s+/).length
         : 0;
       console.log(
-        `   ✓ ${wordCount} words, published: ${
-          articleDetails.publishedTime || "unknown"
+        `   ✓ ${wordCount} words, published: ${articleDetails.publishedTime || "unknown"
         }`
       );
 
@@ -758,13 +840,14 @@ class CricbuzzNewsScraper {
         error.name === "TimeoutError" ||
         error.message.includes("timeout") ||
         error.message.includes("Navigation") ||
+        error.message.includes("Connection closed") ||
+        error.message.includes("detached") ||
         error.message.includes("net::");
 
       if (isRetryable && retryCount < maxRetries) {
         const retryDelay = this.config.RETRY_DELAY * Math.pow(1.5, retryCount);
         this.log(
-          `Article fetch failed (${error.message}), retrying in ${
-            retryDelay / 1000
+          `Article fetch failed (${error.message}), retrying in ${retryDelay / 1000
           }s...`,
           "warn"
         );

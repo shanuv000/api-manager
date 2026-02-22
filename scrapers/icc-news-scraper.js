@@ -7,7 +7,9 @@
  * Usage: Imported by run-icc-scraper.js for database integration
  */
 
-const puppeteer = require("puppeteer-core");
+const puppeteer = require("puppeteer-extra");
+const StealthPlugin = require("puppeteer-extra-plugin-stealth");
+puppeteer.use(StealthPlugin());
 
 // ===== CONFIGURATION =====
 const CONFIG = {
@@ -55,37 +57,70 @@ class ICCNewsScraper {
 
   async initBrowser() {
     if (!this.browser) {
-      const os = require("os");
-      const isArm64 = os.arch() === "arm64";
+      const fs = require("fs");
+
+      // Find Chromium: prioritize Puppeteer's bundled Chrome (snap fails in cron)
+      let execPath;
+      try {
+        const puppeteerFull = require("puppeteer");
+        const bundledPath = puppeteerFull.executablePath();
+        if (fs.existsSync(bundledPath)) {
+          this.log("Using Puppeteer bundled Chrome");
+          execPath = bundledPath;
+        }
+      } catch (e) {
+        // puppeteer not available
+      }
+
+      if (!execPath) {
+        // Fallback to system paths (avoid snap — fails in cron)
+        const systemPaths = [
+          process.env.CHROME_PATH,
+          "/usr/bin/chromium-browser",
+          "/usr/bin/chromium",
+          "/usr/bin/google-chrome",
+          "/snap/bin/chromium",  // Last resort
+        ].filter(Boolean);
+
+        for (const p of systemPaths) {
+          if (fs.existsSync(p)) {
+            this.log(`Using system Chromium: ${p}`);
+            execPath = p;
+            break;
+          }
+        }
+      }
+
+      if (!execPath) {
+        throw new Error("Chromium not found. Install chromium-browser or set CHROME_PATH.");
+      }
 
       const options = {
         headless: "new",
+        executablePath: execPath,
+        protocolTimeout: 60000, // Prevents CDP connection hangs
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
           "--disable-dev-shm-usage",
           "--disable-gpu",
+          "--disable-blink-features=AutomationControlled", // Hide automation flag
+          "--disable-features=IsolateOrigins,site-per-process",
+          "--no-first-run",
           "--single-process",
           "--no-zygote",
         ],
       };
 
-      if (isArm64) {
-        this.log("Running on ARM64, using system Chromium");
-        options.executablePath = "/snap/bin/chromium";
-      } else {
-        this.log("Running locally, finding Chromium...");
-        try {
-          const puppeteerLocal = require("puppeteer");
-          options.executablePath = puppeteerLocal.executablePath();
-        } catch (e) {
-          this.log("Puppeteer not found, trying system Chromium", "warn");
-          options.executablePath = "/snap/bin/chromium";
-        }
-      }
-
       this.browser = await puppeteer.launch(options);
-      this.log("Browser initialized ✓");
+
+      // Recovery handler for silent CDP disconnects
+      this.browser.on('disconnected', () => {
+        this.log('Browser disconnected unexpectedly', 'warn');
+        this.browser = null;
+      });
+
+      this.log("Browser initialized with stealth ✓");
     }
     return this.browser;
   }
@@ -119,9 +154,35 @@ class ICCNewsScraper {
       page = await browser.newPage();
 
       await page.setUserAgent(
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
       );
       await page.setViewport({ width: 1920, height: 1080 });
+
+      // Extra webdriver override (redundancy on top of stealth plugin)
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      });
+
+      // Block ads/trackers to prevent networkidle hangs
+      await page.setRequestInterception(true);
+      page.on('request', (req) => {
+        const type = req.resourceType();
+        const url = req.url();
+        if (
+          ['image', 'font', 'media', 'stylesheet'].includes(type) ||
+          url.includes('google-analytics') ||
+          url.includes('googletagmanager') ||
+          url.includes('facebook') ||
+          url.includes('doubleclick') ||
+          url.includes('adsystem') ||
+          url.includes('taboola') ||
+          url.includes('outbrain')
+        ) {
+          req.abort();
+        } else {
+          req.continue();
+        }
+      });
 
       page.on("error", (err) =>
         this.log(`Page error: ${err.message}`, "error")
@@ -132,7 +193,7 @@ class ICCNewsScraper {
 
       this.log(`Step 2/5: Navigating to ${this.config.NEWS_URL}...`);
       await page.goto(this.config.NEWS_URL, {
-        waitUntil: "networkidle2",
+        waitUntil: "domcontentloaded",
         timeout: this.config.PAGE_LOAD_TIMEOUT,
       });
 
@@ -312,7 +373,7 @@ class ICCNewsScraper {
       if (page) {
         try {
           await page.close();
-        } catch (e) {}
+        } catch (e) { }
       }
 
       const isRetryable =
@@ -332,7 +393,7 @@ class ICCNewsScraper {
 
         try {
           await this.closeBrowser();
-        } catch (e) {}
+        } catch (e) { }
         return this.fetchLatestNews(retryCount + 1);
       }
 
@@ -354,15 +415,39 @@ class ICCNewsScraper {
       page = await browser.newPage();
 
       await page.setUserAgent(
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
       );
       await page.setViewport({ width: 1920, height: 1080 });
 
+      // Extra webdriver override
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      });
+
+      // Block ads/trackers to prevent hangs
+      await page.setRequestInterception(true);
+      page.on('request', (req) => {
+        const type = req.resourceType();
+        const url = req.url();
+        if (
+          ['image', 'font', 'media'].includes(type) ||
+          url.includes('google-analytics') ||
+          url.includes('googletagmanager') ||
+          url.includes('doubleclick') ||
+          url.includes('adsystem')
+        ) {
+          req.abort();
+        } else {
+          req.continue();
+        }
+      });
+
       await page.goto(articleUrl, {
-        waitUntil: "networkidle2",
+        waitUntil: "domcontentloaded",
         timeout: this.config.PAGE_LOAD_TIMEOUT,
       });
 
+      // Stabilization delay for JS to render content
       await this.delay(this.config.CONTENT_WAIT_TIMEOUT);
 
       const articleDetails = await page.evaluate(() => {
@@ -855,8 +940,7 @@ class ICCNewsScraper {
       await page.close();
 
       console.log(
-        `   ✓ ${articleDetails.wordCount} words, published: ${
-          articleDetails.publishedTime || "unknown"
+        `   ✓ ${articleDetails.wordCount} words, published: ${articleDetails.publishedTime || "unknown"
         }`
       );
 
@@ -868,13 +952,16 @@ class ICCNewsScraper {
       if (page) {
         try {
           await page.close();
-        } catch (e) {}
+        } catch (e) { }
       }
 
       const isRetryable =
         error.name === "TimeoutError" ||
         error.message.includes("timeout") ||
-        error.message.includes("net::");
+        error.message.includes("net::") ||
+        error.message.includes("Connection closed") ||
+        error.message.includes("detached") ||
+        error.message.includes("Navigation");
 
       if (isRetryable && retryCount < maxRetries) {
         const retryDelay = this.config.RETRY_DELAY * Math.pow(1.5, retryCount);

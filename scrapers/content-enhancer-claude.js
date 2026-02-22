@@ -1,7 +1,7 @@
 /**
- * Content Enhancer - Gemini Flash Dual-Pass Pipeline
+ * Content Enhancer - Gemini 3.1 Pro High Dual-Pass Pipeline
  *
- * 1. Enhancement Pass: Generates SEO content, analysis, and metadata using Gemini Flash.
+ * 1. Enhancement Pass: Generates SEO content, analysis, and metadata using Gemini 3.1 Pro High.
  * 2. Formatting Pass: Polishes Markdown and ensures production-ready structure.
  *
  * Usage: node scrapers/content-enhancer-claude.js
@@ -26,11 +26,11 @@ const {
 const CONFIG = {
     API_BASE_URL: 'https://ai.urtechy.com',
     API_KEY: process.env.ANTIGRAVITY_API_KEY,
-    MODEL: 'gemini-3-flash',
+    ENHANCER_MODEL: 'gemini-3.1-pro-high',   // High intelligence for rich editorial content
+    FORMATTER_MODEL: 'gemini-2.5-flash',      // Fast model for JSON validation/cleanup
     BATCH_SIZE: 5, // Process 5 at a time for stability
-    MAX_TOKENS: 16384, // Gemini Flash supports larger context
+    MAX_TOKENS: 16384,
 
-    // Artifact Paths
     // Artifact Paths
     ENHANCER_PROMPT_PATH: path.join(__dirname, 'prompts', 'system_prompt_enhancer.md'),
     FORMATTER_PROMPT_PATH: path.join(__dirname, 'prompts', 'system_prompt_formatter.md'),
@@ -94,10 +94,10 @@ function generateSeoSlug(slugSuggestion, sourceId) {
     }
 }
 
-async function callClaudeAPI(systemPrompt, userContent) {
+async function callClaudeAPI(systemPrompt, userContent, model) {
     try {
         const payload = {
-            model: CONFIG.MODEL,
+            model: model,
             max_tokens: CONFIG.MAX_TOKENS,
             system: systemPrompt,
             messages: [
@@ -113,7 +113,8 @@ async function callClaudeAPI(systemPrompt, userContent) {
                 'x-api-key': CONFIG.API_KEY,
                 'anthropic-version': '2023-06-01',
                 'content-type': 'application/json'
-            }
+            },
+            timeout: 90000 // 90s timeout — prevents hanging API calls from killing the pipeline
         });
 
         // Robustly extract content - handle both thinking and non-thinking models
@@ -148,7 +149,7 @@ async function callClaudeAPI(systemPrompt, userContent) {
 async function main() {
     console.log(`
 ╔════════════════════════════════════════════════════════════╗
-║     Content Enhancer - Gemini Flash Dual-Pass              ║
+║     Content Enhancer - Gemini 3.1 Pro High Dual-Pass       ║
 ╠════════════════════════════════════════════════════════════╣
 ║  Started: ${new Date().toISOString()}              ║
 ╚════════════════════════════════════════════════════════════╝
@@ -223,7 +224,7 @@ async function main() {
                     relatedArticles: relatedArticles
                 });
 
-                const enhancedRaw = await callClaudeAPI(ENHANCER_PROMPT, enhanceInput);
+                const enhancedRaw = await callClaudeAPI(ENHANCER_PROMPT, enhanceInput, CONFIG.ENHANCER_MODEL);
                 let enhancedJson;
                 try {
                     enhancedJson = JSON.parse(enhancedRaw);
@@ -237,7 +238,7 @@ async function main() {
                 // Ensure input is array as expected by formatter
                 const formatterInput = Array.isArray(enhancedJson) ? enhancedJson : [enhancedJson];
 
-                const formattedRaw = await callClaudeAPI(FORMATTER_PROMPT, JSON.stringify(formatterInput));
+                const formattedRaw = await callClaudeAPI(FORMATTER_PROMPT, JSON.stringify(formatterInput), CONFIG.FORMATTER_MODEL);
                 let finalJson;
                 try {
                     finalJson = JSON.parse(formattedRaw);

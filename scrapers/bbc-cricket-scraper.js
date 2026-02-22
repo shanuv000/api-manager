@@ -15,7 +15,9 @@
  * Usage: Can be run standalone or imported for integration
  */
 
-const puppeteer = require("puppeteer-core");
+const puppeteer = require("puppeteer-extra");
+const StealthPlugin = require("puppeteer-extra-plugin-stealth");
+puppeteer.use(StealthPlugin());
 const os = require("os");
 const axios = require("axios");
 
@@ -84,7 +86,7 @@ class BBCCricketScraper {
   log(message, level = "info", context = {}) {
     const timestamp = new Date().toISOString();
     const timeShort = timestamp.split("T")[1].slice(0, 12);
-    
+
     const levelIcons = {
       debug: "🔍",
       info: "📍",
@@ -98,11 +100,11 @@ class BBCCricketScraper {
 
     const icon = levelIcons[level] || "📍";
     const levelUpper = level.toUpperCase().padEnd(7);
-    
+
     // Always log errors, respect VERBOSE_LOGGING for others
     if (level === "error" || this.config.VERBOSE_LOGGING) {
-      const contextStr = Object.keys(context).length > 0 
-        ? ` | ${JSON.stringify(context)}` 
+      const contextStr = Object.keys(context).length > 0
+        ? ` | ${JSON.stringify(context)}`
         : '';
       console.log(`[${timeShort}] ${icon} [${levelUpper}] [${this.sessionId}] ${message}${contextStr}`);
     }
@@ -132,7 +134,7 @@ class BBCCricketScraper {
     const freeMem = os.freemem();
     const totalMem = os.totalmem();
     const loadAvg = os.loadavg();
-    
+
     this.log("System resources", "debug", {
       heapUsedMB: Math.round(memUsage.heapUsed / 1024 / 1024),
       heapTotalMB: Math.round(memUsage.heapTotal / 1024 / 1024),
@@ -168,7 +170,7 @@ class BBCCricketScraper {
     try {
       const freeMem = os.freemem();
       const loadAvg = os.loadavg();
-      
+
       const fields = [
         {
           name: "📊 Session Stats",
@@ -220,7 +222,7 @@ class BBCCricketScraper {
         avatar_url: "https://static.files.bbci.co.uk/core/website/assets/static/icons/favicon/bbc-favicon-196.png",
         embeds: [embed],
       });
-      
+
       this.log("Discord alert sent", "info", { errorType });
     } catch (alertError) {
       this.log(`Failed to send Discord alert: ${alertError.message}`, "error");
@@ -244,7 +246,7 @@ class BBCCricketScraper {
   async initBrowser(forceNew = false) {
     const startTime = Date.now();
     this.log(`initBrowser called`, "browser", { forceNew, hasBrowser: !!this.browser });
-    
+
     // Check if existing browser is still connected
     if (this.browser && !forceNew) {
       try {
@@ -273,23 +275,23 @@ class BBCCricketScraper {
     if (!this.browser) {
       this.stats.browserRestarts++;
       this.logSystemResources();
-      
-      const isArm64 = os.arch() === "arm64";
-      const platform = os.platform();
-      
-      this.log(`Launching new browser`, "browser", { 
-        isArm64, 
-        platform, 
-        restartCount: this.stats.browserRestarts 
+
+      const fs = require("fs");
+
+      this.log(`Launching new browser with stealth`, "browser", {
+        restartCount: this.stats.browserRestarts
       });
 
       const options = {
         headless: "new",
+        protocolTimeout: 60000, // Prevents CDP connection hangs
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
           "--disable-dev-shm-usage",
           "--disable-gpu",
+          "--disable-blink-features=AutomationControlled", // Hide automation flag
+          "--disable-features=IsolateOrigins,site-per-process",
           "--single-process",
           "--no-zygote",
           "--disable-extensions",
@@ -303,36 +305,65 @@ class BBCCricketScraper {
         ],
       };
 
-      if (isArm64) {
-        this.log("Using system Chromium for ARM64", "browser");
-        options.executablePath = "/snap/bin/chromium";
-      } else {
-        this.log("Finding local Chromium...", "browser");
-        try {
-          const puppeteerLocal = require("puppeteer");
-          options.executablePath = puppeteerLocal.executablePath();
-          this.log(`Found Chromium at: ${options.executablePath}`, "browser");
-        } catch (e) {
-          this.log(`Puppeteer not found: ${e.message}, using system Chromium`, "warn");
-          options.executablePath = "/snap/bin/chromium";
+      // Find Chromium: prioritize Puppeteer's bundled Chrome (snap fails in cron)
+      let execPath;
+      try {
+        const puppeteerFull = require("puppeteer");
+        const bundledPath = puppeteerFull.executablePath();
+        if (fs.existsSync(bundledPath)) {
+          this.log("Using Puppeteer bundled Chrome", "browser");
+          execPath = bundledPath;
+        }
+      } catch (e) {
+        // puppeteer not available
+      }
+
+      if (!execPath) {
+        // Fallback to system paths (avoid snap — fails in cron)
+        const systemPaths = [
+          process.env.CHROME_PATH,
+          "/usr/bin/chromium-browser",
+          "/usr/bin/chromium",
+          "/usr/bin/google-chrome",
+          "/snap/bin/chromium",  // Last resort
+        ].filter(Boolean);
+
+        for (const p of systemPaths) {
+          if (fs.existsSync(p)) {
+            this.log(`Using system Chromium: ${p}`, "browser");
+            execPath = p;
+            break;
+          }
         }
       }
+
+      if (!execPath) {
+        throw new Error("Chromium not found. Install chromium-browser or set CHROME_PATH.");
+      }
+      options.executablePath = execPath;
 
       try {
         this.browser = await puppeteer.launch(options);
         const launchTime = Date.now() - startTime;
-        this.log(`Browser launched successfully`, "success", { launchTimeMs: launchTime });
+
+        // Recovery handler for silent CDP disconnects
+        this.browser.on('disconnected', () => {
+          this.log('Browser disconnected unexpectedly', 'warn');
+          this.browser = null;
+        });
+
+        this.log(`Browser launched with stealth`, "success", { launchTimeMs: launchTime });
       } catch (launchError) {
         this.log(`Browser launch failed: ${launchError.message}`, "error", {
           executablePath: options.executablePath,
           stack: launchError.stack?.split('\n').slice(0, 3).join(' | '),
         });
-        
+
         // Send Discord alert for browser crash
         await this.sendDiscordErrorAlert('browser_crash', launchError, {
           chromePath: options.executablePath,
         });
-        
+
         throw launchError;
       }
     }
@@ -369,9 +400,9 @@ class BBCCricketScraper {
       if (retryCount > 0) {
         this.stats.retryAttempts++;
         console.log(`🔄 Retry attempt ${retryCount}/${this.config.MAX_RETRIES}`);
-        this.log(`Retry attempt for news list`, "warn", { 
-          attempt: retryCount, 
-          maxRetries: this.config.MAX_RETRIES 
+        this.log(`Retry attempt for news list`, "warn", {
+          attempt: retryCount,
+          maxRetries: this.config.MAX_RETRIES
         });
       }
 
@@ -382,13 +413,18 @@ class BBCCricketScraper {
       this.log(`Page created`, "debug", { pageId: this.stats.pagesCreated });
 
       await page.setUserAgent(
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
       );
       await page.setViewport({ width: 1920, height: 1080 });
 
+      // Extra webdriver override (redundancy on top of stealth plugin)
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      });
+
       // Enhanced error listeners
       page.on("error", (err) => {
-        this.log(`Page crashed: ${err.message}`, "error", { 
+        this.log(`Page crashed: ${err.message}`, "error", {
           operationId,
           stack: err.stack?.split('\n').slice(0, 2).join(' | ')
         });
@@ -405,7 +441,7 @@ class BBCCricketScraper {
       const navStartTime = Date.now();
       this.log(`Step 2/5: Navigating to ${this.config.CRICKET_URL}...`, "network");
       await page.goto(this.config.CRICKET_URL, {
-        waitUntil: "networkidle2",
+        waitUntil: "domcontentloaded",
         timeout: this.config.PAGE_LOAD_TIMEOUT,
       });
       this.logPerf("Page navigation", Date.now() - navStartTime, { url: this.config.CRICKET_URL });
@@ -633,14 +669,14 @@ class BBCCricketScraper {
       console.log(
         `✅ Successfully fetched ${newsArticles.length} news articles in ${duration}ms`
       );
-      
+
       this.log(`fetchLatestNews completed successfully`, "success", {
         operationId,
         articlesCount: newsArticles.length,
         durationMs: duration,
         retryCount,
       });
-      
+
       // Log article titles for debugging
       if (this.config.DEBUG_LOGGING) {
         newsArticles.forEach((a, i) => {
@@ -651,11 +687,11 @@ class BBCCricketScraper {
           });
         });
       }
-      
+
       return newsArticles;
     } catch (error) {
       const duration = Date.now() - startTime;
-      
+
       if (page) {
         try {
           await page.close();
@@ -665,17 +701,17 @@ class BBCCricketScraper {
         }
       }
 
-      const isConnectionError = 
+      const isConnectionError =
         error.message.includes("Connection closed") ||
         error.message.includes("closed") ||
         error.message.includes("detached") ||
         error.message.includes("Target closed");
 
-      const isTimeoutError = 
+      const isTimeoutError =
         error.name === "TimeoutError" ||
         error.message.includes("timeout");
 
-      const isNetworkError = 
+      const isNetworkError =
         error.message.includes("net::") ||
         error.message.includes("Navigation");
 
@@ -743,22 +779,27 @@ class BBCCricketScraper {
     const operationId = `article-${articleId}-${Date.now().toString(36)}`;
 
     try {
-      this.log(`Fetching article: ${articleId}`, "info", { 
-        operationId, 
+      this.log(`Fetching article: ${articleId}`, "info", {
+        operationId,
         retryCount,
-        url: articleUrl 
+        url: articleUrl
       });
-      
+
       const browser = await this.initBrowser();
       this.stats.pagesCreated++;
       page = await browser.newPage();
       this.log(`Page created for article`, "debug", { articleId, pageId: this.stats.pagesCreated });
 
       await page.setUserAgent(
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
       );
       await page.setViewport({ width: 1920, height: 1080 });
-      
+
+      // Extra webdriver override
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      });
+
       // Block unnecessary resources to speed up page load
       let blockedCount = 0;
       let allowedCount = 0;
@@ -800,8 +841,8 @@ class BBCCricketScraper {
         timeout: this.config.PAGE_LOAD_TIMEOUT,
       });
       const navTime = Date.now() - navStartTime;
-      this.log(`Article page loaded`, "network", { 
-        articleId, 
+      this.log(`Article page loaded`, "network", {
+        articleId,
         navTimeMs: navTime,
         requestsBlocked: blockedCount,
         requestsAllowed: allowedCount,
@@ -1310,8 +1351,7 @@ class BBCCricketScraper {
       });
 
       console.log(
-        `   ✓ ${articleDetails.wordCount} words, published: ${
-          articleDetails.publishedTime || "unknown"
+        `   ✓ ${articleDetails.wordCount} words, published: ${articleDetails.publishedTime || "unknown"
         }`
       );
 
@@ -1321,7 +1361,7 @@ class BBCCricketScraper {
       };
     } catch (error) {
       const duration = Date.now() - startTime;
-      
+
       if (page) {
         try {
           await page.close();
@@ -1331,18 +1371,18 @@ class BBCCricketScraper {
         }
       }
 
-      const isConnectionError = 
+      const isConnectionError =
         error.message.includes("Connection closed") ||
         error.message.includes("closed") ||
         error.message.includes("detached") ||
         error.message.includes("Target closed") ||
         error.message.includes("Protocol error");
 
-      const isTimeoutError = 
+      const isTimeoutError =
         error.name === "TimeoutError" ||
         error.message.includes("timeout");
 
-      const isNetworkError = 
+      const isNetworkError =
         error.message.includes("net::");
 
       const isRetryable = isTimeoutError || isNetworkError || isConnectionError;
@@ -1372,7 +1412,7 @@ class BBCCricketScraper {
           maxRetries,
           reason: isConnectionError ? 'connection' : isTimeoutError ? 'timeout' : 'network',
         });
-        
+
         // On connection errors, restart the browser
         if (isConnectionError) {
           this.log("Connection error - restarting browser before retry", "browser", { articleId });
@@ -1383,7 +1423,7 @@ class BBCCricketScraper {
           }
           await this.delay(1000);
         }
-        
+
         await this.delay(retryDelay);
         return this.fetchArticleDetails(articleUrl, retryCount + 1);
       }
@@ -1498,7 +1538,7 @@ class BBCCricketScraper {
       if (page) {
         try {
           await page.close();
-        } catch (e) {}
+        } catch (e) { }
       }
       console.error(`❌ Error fetching scores: ${error.message}`);
       throw error;
@@ -1511,10 +1551,10 @@ class BBCCricketScraper {
   async fetchLatestNewsWithDetails(limit = 5) {
     const operationStartTime = Date.now();
     const operationId = `batch-${Date.now().toString(36)}`;
-    
+
     this.log(`Starting batch article fetch`, "info", { operationId, limit });
     this.logSystemResources();
-    
+
     try {
       const newsList = await this.fetchLatestNews();
       const detailedNews = [];
@@ -1546,7 +1586,7 @@ class BBCCricketScraper {
       for (let i = 0; i < articlesToFetch.length; i++) {
         const article = articlesToFetch[i];
         const articleStartTime = Date.now();
-        
+
         console.log(
           `[${i + 1}/${articlesToFetch.length}] ${article.title.substring(
             0,
@@ -1562,7 +1602,7 @@ class BBCCricketScraper {
           });
           consecutiveErrors = 0; // Reset on success
           successCount++;
-          
+
           this.log(`Article ${i + 1}/${articlesToFetch.length} fetched`, "debug", {
             articleId: article.id,
             wordCount: details.wordCount,
@@ -1576,14 +1616,14 @@ class BBCCricketScraper {
             error: error.message,
             consecutiveErrors: consecutiveErrors + 1,
           });
-          
+
           detailedNews.push({
             ...article,
             details: null,
             fetchError: error.message,
           });
           consecutiveErrors++;
-          
+
           // If too many consecutive errors, restart browser
           if (consecutiveErrors >= 2) {
             this.log("Multiple consecutive errors - restarting browser", "warn", {
@@ -1607,7 +1647,7 @@ class BBCCricketScraper {
       }
 
       const totalDuration = Date.now() - operationStartTime;
-      
+
       // Log final batch summary
       this.log(`Batch article fetch completed`, "success", {
         operationId,
@@ -1656,7 +1696,7 @@ class BBCCricketScraper {
       });
     }
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-    
+
     // Return stats for potential async alert
     return stats;
   }
@@ -1666,19 +1706,19 @@ class BBCCricketScraper {
    */
   async printStatsSummaryWithAlert() {
     const stats = this.printStatsSummary();
-    
+
     // If there were errors during the session, send a summary alert
     if (stats.errors.length >= 3) {
-      await this.sendDiscordErrorAlert('session_errors', 
-        new Error(`Session had ${stats.errors.length} errors`), 
-        { 
+      await this.sendDiscordErrorAlert('session_errors',
+        new Error(`Session had ${stats.errors.length} errors`),
+        {
           errorCount: stats.errors.length,
           browserRestarts: stats.browserRestarts,
           retryAttempts: stats.retryAttempts,
         }
       );
     }
-    
+
     return stats;
   }
 
@@ -1698,8 +1738,7 @@ class BBCCricketScraper {
     }
     if (article.publishedTime || article.details?.publishedTime) {
       lines.push(
-        `**Published:** ${
-          article.publishedTime || article.details?.publishedTime
+        `**Published:** ${article.publishedTime || article.details?.publishedTime
         }`
       );
     }
@@ -1762,10 +1801,9 @@ class BBCCricketScraper {
     // Footer
     lines.push("---");
     lines.push(
-      `*Scraped at: ${
-        article.scrapedAt ||
-        article.details?.scrapedAt ||
-        new Date().toISOString()
+      `*Scraped at: ${article.scrapedAt ||
+      article.details?.scrapedAt ||
+      new Date().toISOString()
       }*`
     );
 

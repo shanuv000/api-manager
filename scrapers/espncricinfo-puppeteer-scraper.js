@@ -11,7 +11,9 @@
  *   node scrapers/espncricinfo-puppeteer-scraper.js
  */
 
-const puppeteer = require("puppeteer-core");
+const puppeteer = require("puppeteer-extra");
+const StealthPlugin = require("puppeteer-extra-plugin-stealth");
+puppeteer.use(StealthPlugin());
 
 // Find Chrome executable - prioritize Puppeteer's bundled Chrome (works in cron)
 function findChromiumPath() {
@@ -57,6 +59,7 @@ class ESPNCricinfoPuppeteerScraper {
     this.launchOptions = {
       headless: options.headless !== false ? "new" : false,
       executablePath: options.executablePath || findChromiumPath(),
+      protocolTimeout: 60000, // Prevents CDP connection hangs
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -65,6 +68,9 @@ class ESPNCricinfoPuppeteerScraper {
         "--disable-gpu",
         "--disable-extensions",
         "--disable-plugins",
+        "--disable-blink-features=AutomationControlled", // Hide automation flag
+        "--disable-features=IsolateOrigins,site-per-process",
+        "--no-first-run",
         "--disable-images", // Don't load images to speed up
         "--blink-settings=imagesEnabled=false",
         "--single-process", // Required for cron/systemd execution
@@ -80,9 +86,16 @@ class ESPNCricinfoPuppeteerScraper {
 
   async init() {
     if (!this.browser) {
-      console.log("🚀 Launching Puppeteer browser...");
+      console.log("🚀 Launching Puppeteer browser (stealth mode)...");
       this.browser = await puppeteer.launch(this.launchOptions);
-      console.log("✅ Browser initialized");
+
+      // Recovery handler for silent CDP disconnects
+      this.browser.on('disconnected', () => {
+        console.log('⚠️ Browser disconnected unexpectedly');
+        this.browser = null;
+      });
+
+      console.log("✅ Browser initialized with stealth");
     }
     return this;
   }
@@ -176,8 +189,13 @@ class ESPNCricinfoPuppeteerScraper {
     const page = await this.browser.newPage();
 
     await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     );
+
+    // Extra webdriver override (redundancy on top of stealth plugin)
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => false });
+    });
 
     // Block heavy resources
     await page.setRequestInterception(true);
@@ -214,8 +232,13 @@ class ESPNCricinfoPuppeteerScraper {
     const page = await this.browser.newPage();
 
     await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     );
+
+    // Extra webdriver override
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => false });
+    });
 
     // Allow social media resources but block ads and analytics
     await page.setRequestInterception(true);
@@ -263,7 +286,7 @@ class ESPNCricinfoPuppeteerScraper {
     try {
       page = await this.browser.newPage();
       await page.setUserAgent(
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
       );
 
       // Navigate to the Datawrapper iframe

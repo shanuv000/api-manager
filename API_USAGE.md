@@ -28,7 +28,7 @@ This proxy emulates the **Anthropic API**, allowing you to use Claude and Gemini
 | `gemini-3-pro-low` | Gemini | ~3.4s | Cost-efficient |
 | `gemini-3-pro-high` | Gemini | ~7.4s | High intelligence |
 | `gemini-3.1-pro-low` | Gemini | ~0.7s | Cost-efficient (newer) |
-| `gemini-3.1-pro-high` | Gemini | ~0.7s | High intelligence (newer) |
+| `gemini-3.1-pro-high` | Gemini | ~3.9s | High intelligence (newer) |
 | `gemini-3-pro-image` | Gemini | ~15s (T/O)| Vision tasks |
 | `gemini-2.5-pro` | Gemini | ~15s (T/O)| Deep reasoning |
 | `claude-sonnet-4-6` | Claude | ~1.1s | Creative writing |
@@ -40,8 +40,8 @@ This proxy emulates the **Anthropic API**, allowing you to use Claude and Gemini
 > [!TIP]
 > **Model Selection Guide:**
 > - **Speed Priority**: Use `gemini-2.5-flash-lite` or `gemini-2.5-flash`
-> - **Balanced**: Use `gemini-3-flash` or `claude-sonnet-4-5-thinking`
-> - **Deep Reasoning**: Use `claude-opus-4-5-thinking` or `gemini-3-pro-high`
+> - **Balanced**: Use `gemini-3-flash` or `claude-sonnet-4-6`
+> - **Deep Reasoning**: Use `claude-opus-4-6-thinking` or `gemini-3.1-pro-high`
 
 > [!NOTE]
 > All models support streaming with `"stream": true` and thinking with the `thinking` parameter.
