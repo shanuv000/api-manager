@@ -3,25 +3,25 @@ module.exports = {
     {
       name: 'api-manager',
       script: 'server.js',
-      cwd: '/home/dev/app/api-manager',
+      cwd: '/home/ubuntu/apps/api-manager',
       instances: 1,
       autorestart: true,
       watch: false,
-      max_memory_restart: '300M',
+      max_memory_restart: '500M',
       env: {
         NODE_ENV: 'production'
       },
-      node_args: '--max-old-space-size=320'
+      node_args: '--max-old-space-size=512'
     },
     {
       name: 'live-score-worker',
       script: 'scrapers/live-score-worker.js',
-      cwd: '/home/dev/app/api-manager',
+      cwd: '/home/ubuntu/apps/api-manager',
       instances: 1,
       autorestart: true,
       watch: false,
-      max_memory_restart: '250M',
-      node_args: '--max-old-space-size=200',
+      max_memory_restart: '400M',
+      node_args: '--max-old-space-size=320',
       env: {
         NODE_ENV: 'production'
       }
@@ -29,7 +29,7 @@ module.exports = {
     {
       name: 'tweet-worker',
       script: 'scrapers/tweet-worker.js',
-      cwd: '/home/dev/app/api-manager',
+      cwd: '/home/ubuntu/apps/api-manager',
       instances: 1,
       autorestart: false, // Don't restart - runs once per cron
       watch: false,
@@ -46,7 +46,7 @@ module.exports = {
     {
       name: 'news-scraper',
       script: 'scripts/vps-scrape.sh',
-      cwd: '/home/dev/app/api-manager',
+      cwd: '/home/ubuntu/apps/api-manager',
       interpreter: 'bash',
       instances: 1,
       autorestart: false,

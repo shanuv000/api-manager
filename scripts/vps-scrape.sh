@@ -12,7 +12,7 @@
 
 set -o pipefail
 
-SCRIPT_DIR="/home/dev/app/api-manager"
+SCRIPT_DIR="/home/ubuntu/apps/api-manager"
 LOCK_FILE="/tmp/cricket-scraper.lock"
 SCRAPER_TIMEOUT=300  # 5 minutes max per scraper (increased to accommodate retries)
 BBC_TIMEOUT=420      # 7 minutes for BBC (slower page loads)
