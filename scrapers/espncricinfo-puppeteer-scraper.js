@@ -59,7 +59,7 @@ class ESPNCricinfoPuppeteerScraper {
     this.launchOptions = {
       headless: options.headless !== false ? "new" : false,
       executablePath: options.executablePath || findChromiumPath(),
-      protocolTimeout: 60000, // Prevents CDP connection hangs
+      protocolTimeout: 180000, // Match Puppeteer's default — 60s was too tight for heavy pages
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",

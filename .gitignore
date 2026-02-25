@@ -45,3 +45,4 @@ temp_*.json
 *.html
 !public/*.html
 cricbuzz-page.png
+.gemini/

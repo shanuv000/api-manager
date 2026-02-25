@@ -98,7 +98,7 @@ class ICCNewsScraper {
       const options = {
         headless: "new",
         executablePath: execPath,
-        protocolTimeout: 60000, // Prevents CDP connection hangs
+        protocolTimeout: 180000, // Match Puppeteer's default — 60s was too tight for heavy pages
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
