@@ -59,36 +59,44 @@ class ICCNewsScraper {
     if (!this.browser) {
       const fs = require("fs");
 
-      // Find Chromium: prioritize Puppeteer's bundled Chrome (snap fails in cron)
+      // Find Chromium: prioritize CHROME_PATH env var and system Chromium (ARM64 safe)
+      // then fall back to Puppeteer's bundled Chrome
       let execPath;
-      try {
-        const puppeteerFull = require("puppeteer");
-        const bundledPath = puppeteerFull.executablePath();
-        if (fs.existsSync(bundledPath)) {
-          this.log("Using Puppeteer bundled Chrome");
-          execPath = bundledPath;
+
+      // 1. Check CHROME_PATH env var first (set for ARM64 VPS compatibility)
+      const systemPaths = [
+        process.env.CHROME_PATH,
+        "/usr/bin/chromium-browser",
+        "/usr/bin/chromium",
+        "/usr/bin/google-chrome",
+      ].filter(Boolean);
+
+      for (const p of systemPaths) {
+        if (fs.existsSync(p)) {
+          this.log(`Using system Chromium: ${p}`);
+          execPath = p;
+          break;
         }
-      } catch (e) {
-        // puppeteer not available
       }
 
+      // 2. Fall back to Puppeteer's bundled Chrome (may not work on ARM64)
       if (!execPath) {
-        // Fallback to system paths (avoid snap — fails in cron)
-        const systemPaths = [
-          process.env.CHROME_PATH,
-          "/usr/bin/chromium-browser",
-          "/usr/bin/chromium",
-          "/usr/bin/google-chrome",
-          "/snap/bin/chromium",  // Last resort
-        ].filter(Boolean);
-
-        for (const p of systemPaths) {
-          if (fs.existsSync(p)) {
-            this.log(`Using system Chromium: ${p}`);
-            execPath = p;
-            break;
+        try {
+          const puppeteerFull = require("puppeteer");
+          const bundledPath = puppeteerFull.executablePath();
+          if (fs.existsSync(bundledPath)) {
+            this.log("Using Puppeteer bundled Chrome (fallback)");
+            execPath = bundledPath;
           }
+        } catch (e) {
+          // puppeteer not available
         }
+      }
+
+      // 3. Last resort: snap chromium
+      if (!execPath && fs.existsSync("/snap/bin/chromium")) {
+        this.log("Using snap Chromium (last resort)");
+        execPath = "/snap/bin/chromium";
       }
 
       if (!execPath) {

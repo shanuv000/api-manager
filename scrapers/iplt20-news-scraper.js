@@ -63,8 +63,43 @@ class IPLT20Scraper {
 
   async initBrowser() {
     if (!this.browser) {
-      const os = require("os");
-      const isArm64 = os.arch() === "arm64";
+      const fs = require("fs");
+
+      // Find Chromium: prioritize CHROME_PATH env var and system Chromium (ARM64 safe)
+      const systemPaths = [
+        process.env.CHROME_PATH,
+        "/usr/bin/chromium-browser",
+        "/usr/bin/chromium",
+        "/usr/bin/google-chrome",
+      ].filter(Boolean);
+
+      let execPath;
+      for (const p of systemPaths) {
+        if (fs.existsSync(p)) {
+          this.log(`Using system Chromium: ${p}`);
+          execPath = p;
+          break;
+        }
+      }
+
+      // Fall back to Puppeteer's bundled Chrome (may not work on ARM64)
+      if (!execPath) {
+        try {
+          const puppeteerLocal = require("puppeteer");
+          execPath = puppeteerLocal.executablePath();
+        } catch (e) {
+          this.log("Puppeteer not found, trying snap Chromium", "warn");
+        }
+      }
+
+      // Last resort: snap chromium
+      if (!execPath && fs.existsSync("/snap/bin/chromium")) {
+        execPath = "/snap/bin/chromium";
+      }
+
+      if (!execPath) {
+        throw new Error("Chromium not found. Install chromium-browser or set CHROME_PATH.");
+      }
 
       const options = {
         headless: "new",
@@ -76,21 +111,8 @@ class IPLT20Scraper {
           "--single-process",
           "--no-zygote",
         ],
+        executablePath: execPath,
       };
-
-      if (isArm64) {
-        this.log("Running on ARM64, using system Chromium");
-        options.executablePath = "/snap/bin/chromium";
-      } else {
-        this.log("Running locally, finding Chromium...");
-        try {
-          const puppeteerLocal = require("puppeteer");
-          options.executablePath = puppeteerLocal.executablePath();
-        } catch (e) {
-          this.log("Puppeteer not found, trying system Chromium", "warn");
-          options.executablePath = "/snap/bin/chromium";
-        }
-      }
 
       this.browser = await puppeteer.launch(options);
       this.log("Browser initialized ✓");
@@ -293,7 +315,7 @@ class IPLT20Scraper {
       if (page) {
         try {
           await page.close();
-        } catch (e) {}
+        } catch (e) { }
       }
 
       const isRetryable =
@@ -313,7 +335,7 @@ class IPLT20Scraper {
 
         try {
           await this.closeBrowser();
-        } catch (e) {}
+        } catch (e) { }
         return this.fetchLatestNews(retryCount + 1);
       }
 
@@ -584,9 +606,8 @@ class IPLT20Scraper {
               embeddedInstagram.push({
                 id: postMatch[1],
                 type: href.includes("/reel/") ? "reel" : "post",
-                url: `https://www.instagram.com/${
-                  href.includes("/reel/") ? "reel" : "p"
-                }/${postMatch[1]}/`,
+                url: `https://www.instagram.com/${href.includes("/reel/") ? "reel" : "p"
+                  }/${postMatch[1]}/`,
               });
             }
           });
@@ -604,9 +625,8 @@ class IPLT20Scraper {
               embeddedInstagram.push({
                 id: postMatch[1],
                 type: src.includes("/reel/") ? "reel" : "post",
-                url: `https://www.instagram.com/${
-                  src.includes("/reel/") ? "reel" : "p"
-                }/${postMatch[1]}/`,
+                url: `https://www.instagram.com/${src.includes("/reel/") ? "reel" : "p"
+                  }/${postMatch[1]}/`,
               });
             }
           });
@@ -659,8 +679,7 @@ class IPLT20Scraper {
       await page.close();
 
       console.log(
-        `   ✓ ${articleDetails.wordCount} words, ${
-          articleDetails.embeddedInstagram?.length || 0
+        `   ✓ ${articleDetails.wordCount} words, ${articleDetails.embeddedInstagram?.length || 0
         } IG embeds, published: ${articleDetails.publishedTime || "unknown"}`
       );
 
@@ -672,7 +691,7 @@ class IPLT20Scraper {
       if (page) {
         try {
           await page.close();
-        } catch (e) {}
+        } catch (e) { }
       }
 
       const isRetryable =

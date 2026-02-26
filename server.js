@@ -48,8 +48,8 @@ app.use((err, req, res, next) => {
 });
 
 // Start the server
-const server = app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+const server = app.listen(PORT, '127.0.0.1', () => {
+  console.log(`Server running on port ${PORT} at 127.0.0.1`);
 });
 
 // Graceful shutdown handling

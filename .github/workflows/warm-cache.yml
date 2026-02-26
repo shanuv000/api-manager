@@ -1,12 +1,11 @@
 name: Warm Cricket Cache
+# DISABLED: api-sync.vercel.app is dead (402). API is internal-only on Oracle VPS.
+# Cache is warmed by live-score-worker (60s) and user traffic. No external warming needed.
 
 on:
-  # Run every 30 minutes to keep cache fresh
-  schedule:
-    - cron: '*/30 * * * *'  # Every 30 minutes for recent scores
-    - cron: '0 */2 * * *'   # Every 2 hours for upcoming matches
-  
-  # Allow manual triggering
+  # schedule:
+  #   - cron: '*/30 * * * *'
+  #   - cron: '0 */2 * * *'
   workflow_dispatch:
 
 jobs:
