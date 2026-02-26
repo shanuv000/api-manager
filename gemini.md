@@ -163,7 +163,7 @@ model EnhancedContent {
 ## 🔴 Redis Architecture (Local — ioredis)
 
 **Host:** `127.0.0.1:6379` (Redis 7.0, installed via `apt`)
-**Memory Limit:** `128MB` with `allkeys-lru` eviction (set via `CONFIG SET`, persisted)
+**Memory Limit:** `256MB` with `allkeys-lru` eviction (set via `CONFIG SET`, persisted via `redis.conf`)
 
 ### Two Redis Clients
 
@@ -223,7 +223,7 @@ npm run tweet:run                 # Full tweet run
 ```bash
 node scripts/prune-news.js        # Remove >90 day articles
 node scripts/clear_cache.js       # Clear cricket cache keys
-redis-cli INFO memory             # Check Redis memory usage (limit: 128M)
+redis-cli INFO memory             # Check Redis memory usage (limit: 256M)
 redis-cli GET live_scores_lite    # Check live scores
 redis-cli FLUSHALL                # Nuclear option — clear everything
 ```
@@ -244,7 +244,7 @@ cat ~/.pm2/logs/api-manager-error-0.log
 | Service | Purpose | Config Key |
 |---------|---------|------------|
 | **Supabase PostgreSQL** | Primary database (pool max: 5) | `DATABASE_URL` |
-| **Local Redis** | Caching (128MB limit, LRU eviction) | `127.0.0.1:6379` (no auth) |
+| **Local Redis** | Caching (256MB limit, LRU eviction) | `127.0.0.1:6379` (no auth) |
 | **Gemini 3.1 Pro High** | AI content enhancement | `ANTIGRAVITY_API_KEY` → `ai.urtechy.com` proxy |
 | **Twitter API v2** | Auto-posting | `TWITTER_*` |
 | **RapidAPI Cricbuzz** | Stats/rankings | `RAPIDAPI_CRICBUZZ_KEY*` (5 rotating keys) |
@@ -263,30 +263,35 @@ cat ~/.pm2/logs/api-manager-error-0.log
 | **Process Manager** | PM2 (5 services: api-manager, live-score-worker, news-scraper, tweet-worker, sportspulse) |
 | **Reverse Proxy** | Nginx (gzip, security headers, SSL via Cloudflare Origin CA) |
 | **CDN / DNS** | Cloudflare ("Full (Strict)" SSL mode) |
-| **Redis** | Local Redis 7.0 (`apt install redis-server`), 128MB maxmemory |
+| **Redis** | Local Redis 7.0 (`apt install redis-server`), 256MB maxmemory |
 | **Node.js** | v20.20.0 (via NodeSource) |
 | **VPN** | WireGuard on port 51820/udp |
+| **CI/CD** | GitHub Actions — no auto-deploy (manual `git pull` on VPS after merge) |
+| **Security** | All services bound to `127.0.0.1` — no public port exposure. SSH key-only auth. |
 
 ### Key Infrastructure Notes
 - **Express compression is OFF** — Nginx handles gzip globally. Double compression wastes CPU.
 - **Rate limiter:** 60 req/min per real IP. Uses `trust proxy` for correct IP via Nginx.
 - **PM2 memory limits:** api-manager=500M, live-score-worker=400M. (24GB RAM available, limits kept for stability).
+- **Server binding:** `server.js` explicitly binds to `127.0.0.1:5003` — not `0.0.0.0`. Only accessible via Nginx reverse proxy.
 - **All internal calls use `127.0.0.1:5003`** — never the public domain (avoids hairpin NAT).
 - **Graceful shutdown:** SIGTERM closes both Redis clients, Prisma, and PG pool before exit.
 - **PG pool:** max 5 connections, 5s connect timeout, 30s idle timeout.
-- **Redis memory:** 128MB hard limit with `allkeys-lru` eviction.
+- **Redis memory:** 256MB hard limit with `allkeys-lru` eviction.
 - **Concurrency limiter:** Scorecard enrichment capped at 5 concurrent external requests.
 - **Log noise:** Cache HIT/MISS and series warnings gated behind `NODE_ENV !== 'production'`.
+- **GitHub Actions:** `health-check.yml` and `warm-cache.yml` cron schedules are **disabled** (target `api-sync.vercel.app` is dead). Workflows can still be triggered manually via `workflow_dispatch`.
 
 ---
 
 ## ⚠️ Important Notes
 
 1. **Multiple Projects on Same VPS:**
-   - `api-manager` (this project, PM2 managed, port 5003) → PostgreSQL (Supabase)
-   - `sportspulse` (frontend, Next.js standalone, port 3000) → PostgreSQL (Supabase)
-   - `vk-blog` (urTechy blog, Next.js standalone, port 3001) → Hygraph CMS
+   - `api-manager` (this project, PM2 managed, `127.0.0.1:5003`) → PostgreSQL (Supabase)
+   - `sportspulse` (frontend, Next.js standalone, `127.0.0.1:3000`) → PostgreSQL (Supabase)
+   - `vk-blog` (urTechy blog, Next.js standalone, `127.0.0.1:3001`) → Hygraph CMS
    - `chatgpt-bridge` (ChatGPT browser bridge, PM2 managed) → Puppeteer/Playwright
+   - **All services bound to `127.0.0.1`** — only accessible via Nginx. No public port exposure.
    - **Isolation:** 24GB RAM, 4 OCPUs — ample for all services to run concurrently.
 
 2. **Rate Limits:**
@@ -312,7 +317,7 @@ cat ~/.pm2/logs/api-manager-error-0.log
 | Live scores stale | `pm2 logs live-score-worker` — verify iterations completing |
 | Redis not connecting | `redis-cli ping` — should return `PONG` |
 | Tweets not posting | Check `TWEET_ENABLED=true` in `.env.local` |
-| Scraper failing (Chromium) | Verify `CHROME_PATH=/usr/bin/chromium-browser` in `.env`. ARM64 VPS cannot use Puppeteer's bundled Chrome (x86_64). |
+| Scraper failing (Chromium) | All scrapers auto-detect ARM64 Chromium: `CHROME_PATH` env → `/usr/bin/chromium-browser` → `/usr/bin/chromium` → Puppeteer bundled (fallback). Verify with `which chromium-browser`. |
 | Scraper failing (general) | `pm2 logs news-scraper --lines 100` or check Discord webhook alerts |
 | API 500 errors | `pm2 logs api-manager` |
 | No enhanced content | Run `node scrapers/content-enhancer-claude.js` manually |
@@ -324,7 +329,9 @@ cat ~/.pm2/logs/api-manager-error-0.log
 
 ## 🛡️ Scraper Hardening (Feb 22-26, 2026)
 
-All 5 news scrapers (ESPN, ICC, Cricbuzz, BBC, IPL T20) hardened against bot detection, timeouts, and Chromium crashes in cron. Verified 100% success rate. ARM64 Chromium compatibility fix applied Feb 26.
+All 5 news scrapers (ESPN, ICC, Cricbuzz, BBC, IPL T20) hardened against bot detection, timeouts, and Chromium crashes in cron. Verified 100% success rate.
+
+**ARM64 Chromium Detection (Feb 26, 2026):** All scrapers use a priority-based Chromium path detection: `CHROME_PATH` env → `/usr/bin/chromium-browser` → `/usr/bin/chromium` → Puppeteer bundled Chrome (last resort). This ensures compatibility on ARM64 VPS where Puppeteer's bundled Chrome is x86_64-only.
 
 | Component | Hardening Applied |
 |-----------|-------------------|
@@ -336,9 +343,9 @@ All 5 news scrapers (ESPN, ICC, Cricbuzz, BBC, IPL T20) hardened against bot det
 
 ---
 
-## 🛡️ Production Hardening (Feb 21, 2026)
+## 🛡️ Production Hardening (Feb 21 + Feb 26, 2026)
 
-9 fixes applied across 7 files + Redis server config. All verified with 18-endpoint test suite.
+### Phase 1 — Feb 21: 9 fixes applied across 7 files + Redis server config.
 
 | Priority | Fix | File(s) |
 |----------|-----|--------|
@@ -351,3 +358,15 @@ All 5 news scrapers (ESPN, ICC, Cricbuzz, BBC, IPL T20) hardened against bot det
 | P3 | Graceful shutdown (Redis + PG) | `server.js` |
 | P3 | Cache logs gated behind DEBUG flag | `component/redisClient.js`, `utils/redis-client.js` |
 | P3 | pointsTableData warnings gated behind DEBUG | `services/series.js` |
+
+### Phase 2 — Feb 26: Oracle ARM64 migration hardening
+
+| Fix | Detail |
+|-----|--------|
+| Redis `maxmemory 256mb` | Upgraded from 128MB (24GB RAM available) |
+| `server.js` → `127.0.0.1` | Was `0.0.0.0` — now only accessible via Nginx |
+| SSH password auth disabled | Key-only authentication across all SSH configs |
+| ARM64 Chromium detection | All 5 scrapers use priority path detection |
+| CUPS service removed | Unnecessary print service removed from VPS |
+| Oracle port 6080 iptables rule removed | Closed unnecessary open port |
+| Disabled health-check + warm-cache workflows | Target `api-sync.vercel.app` is dead/402 |
