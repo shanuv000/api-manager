@@ -803,6 +803,12 @@ async function scrapeAndCache() {
     }
     console.log(`💾 Saved ${savedScorecards} individual scorecards to Redis`);
 
+    // 3e: Index matches for O(1) direct lookup by matchId
+    const indexedCount = await redisClient.setMatchIndexBatch(
+      matchesWithIds, 'live', CONFIG.REDIS_TTL
+    );
+    console.log(`🔑 Indexed ${indexedCount} matches for O(1) lookup`);
+
     // 3c: Fetch and cache commentary for LIVE matches only
     const liveMatchesForCommentary = matchesWithIds.filter(
       (m) => m.matchStatus === "live" && m.matchLink && m.matchId

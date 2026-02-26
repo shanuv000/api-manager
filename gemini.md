@@ -1,7 +1,7 @@
 # API-Manager — Project Reference
 
 > **For AI Agents:** Read this file at the start of every conversation to understand the project.
-> **Last Updated:** Feb 26, 2026 | **Status:** 🟢 ACTIVE
+> **Last Updated:** Feb 26, 2026 (Redis Match Index) | **Status:** 🟢 ACTIVE
 
 ---
 
@@ -20,7 +20,7 @@
 ```
 api-manager/
 ├── server.js                 # Express entry (Port 5003) + graceful shutdown
-├── ecosystem.config.js       # PM2 configuration (4 services: api-manager, live-score-worker, tweet-worker, news-scraper)
+├── ecosystem.config.js       # PM2 configuration (5 services: api-manager, live-score-worker, recent-score-worker, tweet-worker, news-scraper)
 ├── component/
 │   ├── middleware.js          # CORS, Helmet, Rate Limiter (60/min)
 │   ├── prismaClient.js       # PG pool (max:5, 5s timeout) + Prisma client
@@ -33,7 +33,8 @@ api-manager/
 │   ├── scorecard.js          # Scorecard parsing
 │   └── stats.js              # Stats/rankings (RapidAPI)
 ├── scrapers/                 # News scrapers + workers
-│   ├── live-score-worker.js  # PM2 Always On: Scrapes Cricbuzz → Redis (60s)
+│   ├── live-score-worker.js  # PM2 Always On: Scrapes Cricbuzz → Redis (60s), populates match index
+│   ├── recent-score-worker.js # PM2 Always On: Refreshes recent/upcoming caches (15min), populates match index
 │   ├── tweet-worker.js       # PM2 Cron: Posts to Twitter 4x/day
 │   ├── content-enhancer-claude.js  # AI enhancement (Gemini 3.1 Pro High)
 │   ├── content-enhancer.js   # ChatGPT batch enhancement (alternate)
@@ -58,7 +59,7 @@ api-manager/
 │   ├── series.js             # Cricbuzz series scraper (debug-gated warnings)
 │   └── twitter-service.js    # Twitter API v2 integration
 ├── utils/
-│   ├── redis-client.js       # ioredis — live scores cache (debug-gated logs)
+│   ├── redis-client.js       # ioredis — live scores cache, match index (Lua scripts, O(1) lookup)
 │   ├── concurrency-limiter.js # Async concurrency control (replaces p-limit)
 │   ├── scraper-cache.js      # In-memory NodeCache (scraper responses)
 │   ├── scraper-health.js     # Scraper health monitoring
@@ -73,7 +74,8 @@ api-manager/
 | Service | Script | Purpose | Schedule | Memory Limit |
 |---------|--------|---------|----------|-------------|
 | `api-manager` | `server.js` | Express API server | Always On | 500M (heap: 512MB) |
-| `live-score-worker` | `scrapers/live-score-worker.js` | Scrapes Cricbuzz → Redis (every 60s) | Always On | 400M (heap: 320MB) |
+| `live-score-worker` | `scrapers/live-score-worker.js` | Scrapes Cricbuzz → Redis (60s) + match index | Always On | 400M (heap: 320MB) |
+| `recent-score-worker` | `scrapers/recent-score-worker.js` | Refreshes recent/upcoming → Redis + match index (15min) | Always On | 200M (heap: 192MB) |
 | `tweet-worker` | `scrapers/tweet-worker.js` | Auto-posts tweets 4x/day | `0 3,7,13,16 * * *` UTC | — |
 | `news-scraper` | `scripts/vps-scrape.sh` | Full news scrape pipeline | `35 0,2,4,6,8,10,12,14,16,18 * * *` | — |
 
@@ -97,6 +99,13 @@ Runs sequentially: **Cricbuzz → ESPN Cricinfo → ICC Cricket → BBC Sport** 
 | `GET /live-scores/lite` | Lightweight live scores | 90s (Redis) |
 | `GET /recent-scores` | Recently completed matches | 1 hour |
 | `GET /upcoming-matches` | Scheduled matches | 3 hours |
+
+### Match Lookup (O(1) Redis Index — Feb 26, 2026)
+| Endpoint | Description | Cache TTL |
+|----------|-------------|-----------|
+| `GET /match/:matchId` | **O(1) match lookup** via Redis index, fallback to list scan | Source-inherited (live: 90s, recent: 1800s, upcoming: 3600s) |
+
+> Returns `{ success, data, source }` where `source` is `index-live`, `index-recent`, `index-upcoming`, or `list-fallback-*` (self-healing). Payload ~2KB. TTFB: 1.8-2.7ms.
 
 ### Scorecards & Commentary (from Redis, per-match)
 | Endpoint | Description | Cache TTL |
@@ -178,6 +187,7 @@ model EnhancedContent {
 ```
 live_scores_cache     → Full live match data (TTL: 90s)
 live_scores_lite      → Lightweight scores (TTL: 90s)
+match:{matchId}       → O(1) match index entry (TTL: inherited from source)
 scorecard:{matchId}   → Individual match scorecard (TTL: 60s)
 commentary:{matchId}  → Match commentary (TTL: 60s)
 worker_status         → Worker heartbeat/metadata
@@ -187,6 +197,27 @@ cricket:news:*        → News listing cache (TTL: 1800s)
 article:{slug}        → Individual article cache (TTL: 3600s)
 cricket:photos:*      → Image proxy cache (TTL: 24h, was 30d)
 ```
+
+### Match Index Architecture (Feb 26, 2026)
+
+O(1) Redis-indexed lookup for individual matches. Replaces the old pattern of fetching all 3 lists (live+recent+upcoming ≈137KB) and scanning.
+
+**Key pattern:** `match:<matchId>` → lightweight match object (~2KB) with `_meta: { source, priority, indexedAt }`
+
+**Priority protection (Lua script, atomic):** `live(3) > recent(2) > upcoming(1)`. Lower-priority sources cannot overwrite higher-priority data. Writes use `EVALSHA` for atomicity.
+
+**TTL inheritance:** `match:*` keys inherit TTL from their source (live: 90s, recent: 1800s, upcoming: 3600s) via native Redis `EX`. No stored-TTL anti-pattern.
+
+**Write strategy:** Lua-in-Pipeline (`setMatchIndexBatch`) — each match write is an individual Lua `EVALSHA` call batched inside a pipeline. ~1.34ms for 40 matches.
+
+**Populated by:**
+1. `live-score-worker` — every 60s cycle (source: `live`, TTL: 90s)
+2. `recent-score-worker` — every 15min (source: `recent`/`upcoming`, TTL: 1800s/3600s)
+3. `GET /recent-scores` and `GET /upcoming-matches` — on cache-miss scrapes
+
+**Fallback (self-healing):** If `match:<id>` is missing, the `/match/:matchId` endpoint scans `live_scores_lite`, `cricket:recent-scores`, `cricket:upcoming-matches` lists. If found, it auto-re-indexes the match for future O(1) access.
+
+**Verified performance:** 1.8-2.7ms TTFB, 1946 bytes payload, ~40 active keys.
 
 ### In-Memory Cache (NodeCache)
 - `scraper-cache.js` — per-scraper type caches with `useClones: false` for performance
@@ -260,7 +291,7 @@ cat ~/.pm2/logs/api-manager-error-0.log
 |-----------|---------|
 | **VPS** | Oracle Cloud ARM64 24GB RAM, 4 OCPU (Ubuntu 24.04 Noble) |
 | **Architecture** | `aarch64` (ARM64) — system Chromium required for Puppeteer |
-| **Process Manager** | PM2 (5 services: api-manager, live-score-worker, news-scraper, tweet-worker, sportspulse) |
+| **Process Manager** | PM2 (6 services: api-manager, live-score-worker, recent-score-worker, news-scraper, tweet-worker, sportspulse) |
 | **Reverse Proxy** | Nginx (gzip, security headers, SSL via Cloudflare Origin CA) |
 | **CDN / DNS** | Cloudflare ("Full (Strict)" SSL mode) |
 | **Redis** | Local Redis 7.0 (`apt install redis-server`), 256MB maxmemory |
@@ -306,6 +337,12 @@ cat ~/.pm2/logs/api-manager-error-0.log
 4. **Live Scores Flow:**
    ```
    live-score-worker (60s) → Local Redis → /live-scores endpoint → Frontend
+   ```
+
+5. **Match Detail Flow (O(1)):**
+   ```
+   Frontend /match/:id → api-manager /match/:matchId → Redis GET match:<id> (index) → Response (~2ms)
+                                                     ↘ fallback: scan lists → auto-re-index → Response
    ```
 
 ---

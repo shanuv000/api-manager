@@ -1237,6 +1237,12 @@ router.get("/recent-scores", async (req, res) => {
     };
     await setCache(cacheKey, fullResponse, 1800); // 30min (reduced for match days)
 
+    // Index matches for O(1) direct lookup
+    try {
+      const redisClient = require("../../utils/redis-client");
+      await redisClient.setMatchIndexBatch(enrichedMatches, 'recent', 1800);
+    } catch (e) { /* non-critical */ }
+
     // Apply limit/offset for this request
     const slicedMatches = limit
       ? enrichedMatches.slice(offset, offset + limit)
@@ -1511,6 +1517,113 @@ router.get("/live-scores/worker-status", async (req, res) => {
   }
 });
 
+// =====================================================================
+// Direct match lookup endpoint - O(1) Redis index lookup
+// Returns a single match by matchId without scanning full lists
+// =====================================================================
+
+/**
+ * Search cached lists for a match by matchId (fallback for index misses)
+ * Checks live → recent → upcoming in priority order
+ */
+async function findMatchInCachedLists(matchId) {
+  // Import redis-client dynamically (consistent with existing pattern)
+  let redisClient;
+  try {
+    redisClient = require("../../utils/redis-client");
+  } catch (e) {
+    return null;
+  }
+
+  const sources = [
+    { getter: () => redisClient.getLiteScores(), source: "live" },
+    { getter: () => getCache("cricket:recent-scores"), source: "recent" },
+    { getter: () => getCache("cricket:upcoming-matches"), source: "upcoming" },
+  ];
+
+  for (const { getter, source } of sources) {
+    try {
+      const cached = await getter();
+      if (!cached?.data) continue;
+
+      const match = cached.data.find((m) => {
+        const id = redisClient.extractMatchId(m);
+        return id === matchId;
+      });
+
+      if (match) {
+        // Ensure matchId is set on the match object
+        match.matchId = matchId;
+        match._meta = { source };
+        return match;
+      }
+    } catch (e) {
+      // Continue to next source
+    }
+  }
+  return null;
+}
+
+router.get("/match/:matchId", async (req, res) => {
+  const { matchId } = req.params;
+
+  // Validate matchId (numeric only, as per Cricbuzz URL pattern)
+  if (!matchId || !/^\d+$/.test(matchId)) {
+    return res
+      .status(400)
+      .json({ success: false, error: "Invalid matchId — must be numeric" });
+  }
+
+  setCacheHeaders(res, { maxAge: 30, staleWhileRevalidate: 60 });
+
+  try {
+    // Import redis-client dynamically (consistent with existing pattern)
+    let redisClient;
+    try {
+      redisClient = require("../../utils/redis-client");
+    } catch (e) {
+      return res
+        .status(503)
+        .json({ success: false, error: "Redis client unavailable" });
+    }
+
+    // Step 1: O(1) index lookup (~0.17ms)
+    const indexed = await redisClient.getMatchIndex(matchId);
+    if (indexed) {
+      return res.json({
+        success: true,
+        data: indexed,
+        source: `index-${indexed._meta?.source || "unknown"}`,
+      });
+    }
+
+    // Step 2: Fallback — scan cached lists (server-side, not client-side)
+    const match = await findMatchInCachedLists(matchId);
+    if (match) {
+      // Self-heal: index for next request (~0.17ms)
+      const ttlMap = { live: 90, recent: 1800, upcoming: 3600 };
+      const ttl = ttlMap[match._meta?.source] || 300;
+      await redisClient.setMatchIndexBatch([match], match._meta?.source || "recent", ttl);
+
+      return res.json({
+        success: true,
+        data: match,
+        source: `list-fallback-${match._meta?.source || "unknown"}`,
+      });
+    }
+
+    // Step 3: Not found
+    return res.status(404).json({
+      success: false,
+      error: "Match not found",
+      matchId,
+    });
+  } catch (error) {
+    console.error(`Error in /match/${matchId}:`, error.message);
+    return sendError(res, error);
+  }
+});
+
 // Individual scorecard endpoint - fetches scorecard for a single match
 // This allows clients to load scorecards on-demand instead of all at once
 router.get("/scorecard/:matchId", async (req, res) => {
@@ -1763,6 +1876,12 @@ router.get("/upcoming-matches", async (req, res) => {
       data: enrichedMatches,
     };
     await setCache(cacheKey, fullResponse, 3600); // 1hr (reduced for match days)
+
+    // Index matches for O(1) direct lookup
+    try {
+      const redisClient = require("../../utils/redis-client");
+      await redisClient.setMatchIndexBatch(enrichedMatches, 'upcoming', 3600);
+    } catch (e) { /* non-critical */ }
 
     // Apply limit/offset for this request
     const slicedMatches = limit
