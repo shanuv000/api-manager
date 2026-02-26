@@ -15,37 +15,43 @@ const puppeteer = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 puppeteer.use(StealthPlugin());
 
-// Find Chrome executable - prioritize Puppeteer's bundled Chrome (works in cron)
+// Find Chrome executable - prioritize system Chromium (ARM64 safe) over bundled Chrome
 function findChromiumPath() {
   const fs = require("fs");
 
-  // First, try Puppeteer's bundled Chrome (not a snap, works in cron)
-  try {
-    const puppeteerFull = require("puppeteer");
-    const bundledPath = puppeteerFull.executablePath();
-    if (fs.existsSync(bundledPath)) {
-      console.log("📍 Using Puppeteer bundled Chrome");
-      return bundledPath;
-    }
-  } catch (e) {
-    // puppeteer not available, try system paths
-  }
-
-  // Fallback to system Chromium paths
-  const CHROMIUM_PATHS = [
+  // 1. Check CHROME_PATH env var and system paths first (ARM64 VPS compatibility)
+  const systemPaths = [
     process.env.CHROME_PATH,
     "/usr/bin/chromium-browser",
     "/usr/bin/chromium",
     "/usr/bin/google-chrome",
-    "/snap/bin/chromium", // LAST - snap fails in cron!
   ].filter(Boolean);
 
-  for (const path of CHROMIUM_PATHS) {
+  for (const path of systemPaths) {
     if (fs.existsSync(path)) {
       console.log(`📍 Using system Chromium: ${path}`);
       return path;
     }
   }
+
+  // 2. Fall back to Puppeteer's bundled Chrome (may not work on ARM64)
+  try {
+    const puppeteerFull = require("puppeteer");
+    const bundledPath = puppeteerFull.executablePath();
+    if (fs.existsSync(bundledPath)) {
+      console.log("📍 Using Puppeteer bundled Chrome (fallback)");
+      return bundledPath;
+    }
+  } catch (e) {
+    // puppeteer not available, try snap
+  }
+
+  // 3. Last resort: snap chromium
+  if (fs.existsSync("/snap/bin/chromium")) {
+    console.log("📍 Using snap Chromium (last resort)");
+    return "/snap/bin/chromium";
+  }
+
   throw new Error(
     "Chromium not found. Please install chromium-browser or set CHROME_PATH."
   );

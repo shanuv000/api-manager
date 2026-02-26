@@ -1,11 +1,10 @@
 name: API Health Check
+# DISABLED: api-sync.vercel.app is dead (402). API is internal-only on Oracle VPS.
+# Re-enable when a public API domain (e.g. drop.urtechy.com) is configured.
 
 on:
-  # Run every 6 hours to monitor API health
-  schedule:
-    - cron: '0 */6 * * *'
-  
-  # Allow manual triggering
+  # schedule:
+  #   - cron: '0 */6 * * *'
   workflow_dispatch:
 
 jobs:

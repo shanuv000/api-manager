@@ -1,7 +1,7 @@
 # API-Manager — Project Reference
 
 > **For AI Agents:** Read this file at the start of every conversation to understand the project.
-> **Last Updated:** Feb 21, 2026 | **Status:** 🟢 ACTIVE
+> **Last Updated:** Feb 26, 2026 | **Status:** 🟢 ACTIVE
 
 ---
 
@@ -20,7 +20,7 @@
 ```
 api-manager/
 ├── server.js                 # Express entry (Port 5003) + graceful shutdown
-├── ecosystem.config.js       # PM2 configuration (4 services)
+├── ecosystem.config.js       # PM2 configuration (4 services: api-manager, live-score-worker, tweet-worker, news-scraper)
 ├── component/
 │   ├── middleware.js          # CORS, Helmet, Rate Limiter (60/min)
 │   ├── prismaClient.js       # PG pool (max:5, 5s timeout) + Prisma client
@@ -36,11 +36,19 @@ api-manager/
 │   ├── live-score-worker.js  # PM2 Always On: Scrapes Cricbuzz → Redis (60s)
 │   ├── tweet-worker.js       # PM2 Cron: Posts to Twitter 4x/day
 │   ├── content-enhancer-claude.js  # AI enhancement (Gemini 3.1 Pro High)
+│   ├── content-enhancer.js   # ChatGPT batch enhancement (alternate)
 │   ├── prompts/              # System prompts for enhancer/formatter
-│   ├── run-scraper.js        # Cricbuzz news
-│   ├── run-espncricinfo-scraper.js
-│   ├── run-icc-scraper.js
-│   └── run-bbc-scraper.js
+│   ├── cricbuzz-news-scraper.js    # Cricbuzz scraper (Puppeteer + stealth)
+│   ├── espncricinfo-puppeteer-scraper.js  # ESPN Cricinfo scraper
+│   ├── icc-news-scraper.js         # ICC Cricket scraper
+│   ├── bbc-cricket-scraper.js      # BBC Sport scraper
+│   ├── iplt20-news-scraper.js      # IPL T20 scraper (disabled in pipeline)
+│   ├── cricbuzz-photos-scraper.js  # Cricbuzz photo galleries
+│   ├── run-scraper.js              # Cricbuzz runner
+│   ├── run-espncricinfo-scraper.js # ESPN runner
+│   ├── run-icc-scraper.js          # ICC runner
+│   ├── run-bbc-scraper.js          # BBC runner
+│   └── run-iplt20-scraper.js       # IPL runner
 ├── scripts/
 │   ├── vps-scrape.sh         # CRON: Master news orchestrator
 │   ├── prune-news.js         # Delete >90 day articles
@@ -64,14 +72,19 @@ api-manager/
 
 | Service | Script | Purpose | Schedule | Memory Limit |
 |---------|--------|---------|----------|-------------|
-| `api-manager` | `server.js` | Express API server | Always On | 300M (heap: 320MB) |
-| `live-score-worker` | `scrapers/live-score-worker.js` | Scrapes Cricbuzz → Redis (every 60s) | Always On | 250M (heap: 200MB) |
+| `api-manager` | `server.js` | Express API server | Always On | 500M (heap: 512MB) |
+| `live-score-worker` | `scrapers/live-score-worker.js` | Scrapes Cricbuzz → Redis (every 60s) | Always On | 400M (heap: 320MB) |
 | `tweet-worker` | `scrapers/tweet-worker.js` | Auto-posts tweets 4x/day | `0 3,7,13,16 * * *` UTC | — |
 | `news-scraper` | `scripts/vps-scrape.sh` | Full news scrape pipeline | `35 0,2,4,6,8,10,12,14,16,18 * * *` | — |
 
 ### IST Schedule Reference (UTC+5:30)
 - **Tweet Worker:** 8:30 AM, 12:30 PM, 6:30 PM, 9:30 PM IST
 - **News Scraper:** Every 2 hours from 6:05 AM to 12:05 AM IST (offset by 5m for safety)
+
+### News Scraper Pipeline (vps-scrape.sh)
+Runs sequentially: **Cricbuzz → ESPN Cricinfo → ICC Cricket → BBC Sport** → Gemini Content Enhancer → Pruner
+
+> **Note:** IPL T20 scraper exists (`run-iplt20-scraper.js`) but is currently **commented out** in `vps-scrape.sh`. Enable during IPL season.
 
 ---
 
@@ -245,17 +258,19 @@ cat ~/.pm2/logs/api-manager-error-0.log
 
 | Component | Details |
 |-----------|---------|
-| **VPS** | DigitalOcean 4GB (Ubuntu 24.04 Noble) |
-| **Process Manager** | PM2 (4 services, memory-limited) |
-| **Reverse Proxy** | Nginx (gzip, security headers, SSL) |
-| **CDN / DNS** | Cloudflare ("Full" SSL mode) |
-| **Redis** | Local Redis 7.0 (`apt install redis-server`) |
-| **Node.js** | v20.x (via NodeSource) |
+| **VPS** | Oracle Cloud ARM64 24GB RAM, 4 OCPU (Ubuntu 24.04 Noble) |
+| **Architecture** | `aarch64` (ARM64) — system Chromium required for Puppeteer |
+| **Process Manager** | PM2 (5 services: api-manager, live-score-worker, news-scraper, tweet-worker, sportspulse) |
+| **Reverse Proxy** | Nginx (gzip, security headers, SSL via Cloudflare Origin CA) |
+| **CDN / DNS** | Cloudflare ("Full (Strict)" SSL mode) |
+| **Redis** | Local Redis 7.0 (`apt install redis-server`), 128MB maxmemory |
+| **Node.js** | v20.20.0 (via NodeSource) |
+| **VPN** | WireGuard on port 51820/udp |
 
 ### Key Infrastructure Notes
 - **Express compression is OFF** — Nginx handles gzip globally. Double compression wastes CPU.
 - **Rate limiter:** 60 req/min per real IP. Uses `trust proxy` for correct IP via Nginx.
-- **PM2 memory limits:** api-manager=300M, live-score-worker=250M. Prevents swap on 4GB VPS.
+- **PM2 memory limits:** api-manager=500M, live-score-worker=400M. (24GB RAM available, limits kept for stability).
 - **All internal calls use `127.0.0.1:5003`** — never the public domain (avoids hairpin NAT).
 - **Graceful shutdown:** SIGTERM closes both Redis clients, Prisma, and PG pool before exit.
 - **PG pool:** max 5 connections, 5s connect timeout, 30s idle timeout.
@@ -267,10 +282,12 @@ cat ~/.pm2/logs/api-manager-error-0.log
 
 ## ⚠️ Important Notes
 
-1. **Two Projects on Same VPS:**
-   - `api-manager` (this project, PM2 managed) → PostgreSQL (Supabase)
-   - `news-trading-scrape` (separate project, system cron) → SQLite (local)
-   - **Isolation:** Schedules offset (xx:35 vs xx:00/30) to prevent CPU/RAM contention.
+1. **Multiple Projects on Same VPS:**
+   - `api-manager` (this project, PM2 managed, port 5003) → PostgreSQL (Supabase)
+   - `sportspulse` (frontend, Next.js standalone, port 3000) → PostgreSQL (Supabase)
+   - `vk-blog` (urTechy blog, Next.js standalone, port 3001) → Hygraph CMS
+   - `chatgpt-bridge` (ChatGPT browser bridge, PM2 managed) → Puppeteer/Playwright
+   - **Isolation:** 24GB RAM, 4 OCPUs — ample for all services to run concurrently.
 
 2. **Rate Limits:**
    - Twitter: 8 tweets/day max (FREE tier)
@@ -295,23 +312,25 @@ cat ~/.pm2/logs/api-manager-error-0.log
 | Live scores stale | `pm2 logs live-score-worker` — verify iterations completing |
 | Redis not connecting | `redis-cli ping` — should return `PONG` |
 | Tweets not posting | Check `TWEET_ENABLED=true` in `.env.local` |
-| Scraper failing | Check `/var/log/cricket-scraper.log` |
+| Scraper failing (Chromium) | Verify `CHROME_PATH=/usr/bin/chromium-browser` in `.env`. ARM64 VPS cannot use Puppeteer's bundled Chrome (x86_64). |
+| Scraper failing (general) | `pm2 logs news-scraper --lines 100` or check Discord webhook alerts |
 | API 500 errors | `pm2 logs api-manager` |
 | No enhanced content | Run `node scrapers/content-enhancer-claude.js` manually |
-| High memory usage | `pm2 monit` — check against 300M/250M limits |
+| High memory usage | `pm2 monit` — check against 500M/400M limits |
+| `prisma migrate` fails on VPS | `DIRECT_URL` is unreachable from VPS (Supabase direct connection DNS fails). Run migrations from local machine or CI instead. Runtime queries via `DATABASE_URL` (pooler) work fine. |
 | `integer expression expected` in vps-scrape.sh | Use `grep -c` instead of `cmd \| grep \| wc -l \|\| echo "0"` under `set -o pipefail`. Fixed Feb 14, 2026. |
 
 ---
 
-## 🛡️ Scraper Hardening (Feb 22, 2026)
+## 🛡️ Scraper Hardening (Feb 22-26, 2026)
 
-All 4 news scrapers (ESPN, ICC, Cricbuzz, BBC) hardened against bot detection, timeouts, and Chromium crashes in cron. Verified 100% success rate on 40/40 articles.
+All 5 news scrapers (ESPN, ICC, Cricbuzz, BBC, IPL T20) hardened against bot detection, timeouts, and Chromium crashes in cron. Verified 100% success rate. ARM64 Chromium compatibility fix applied Feb 26.
 
 | Component | Hardening Applied |
 |-----------|-------------------|
 | **Evasion** | `puppeteer-extra` + `stealth` plugin, `Object.defineProperty(navigator, 'webdriver')` override |
 | **Identity** | Updated User-Agent to Chrome 131, added `--disable-blink-features=AutomationControlled` |
-| **Stability**| `protocolTimeout: 60000` (prevents CDP hangs), prioritized bundled Chrome over `/snap/bin/chromium` for ARM64 |
+| **Stability**| `protocolTimeout: 60000` (prevents CDP hangs), system Chromium (`/usr/bin/chromium-browser`) prioritized over bundled Chrome (bundled is x86_64, incompatible with ARM64 VPS). `CHROME_PATH` env var checked first. |
 | **Speed** | Switched `networkidle2` → `domcontentloaded`, added request interception for ads/trackers |
 | **Recovery** | Added `.on('disconnected')` handler, extended retry catch patterns (Connection closed, detached, Target closed) |
 
