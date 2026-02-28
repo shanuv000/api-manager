@@ -25,6 +25,10 @@ const {
   CACHE_TTL,
 } = require("./stats");
 const {
+  fetchPlayerProfile: fetchAggregatedPlayerProfile,
+  CACHE_TTL: PLAYER_CACHE_TTL,
+} = require("./player");
+const {
   fetchPhotoGalleryList,
   fetchPhotoGalleryById,
   fetchImage: fetchPhotoImage,
@@ -47,6 +51,7 @@ const {
   getSeriesDetails,
   getSeriesPointsTable,
 } = require("../../services/series");
+const { getMatchIndexBatch } = require("../../utils/redis-client");
 const {
   ApiError,
   ValidationError,
@@ -2292,6 +2297,55 @@ router.get("/stats/rankings", async (req, res) => {
   }
 });
 
+// ============================================
+// PLAYER PROFILE - Aggregated endpoint
+// ============================================
+router.get("/player/:id", async (req, res) => {
+  const startTime = Date.now();
+  const SCRAPER_NAME = "player-profile";
+  const { id } = req.params;
+
+  // Validate ID is numeric
+  if (!id || !/^\d+$/.test(id)) {
+    return sendError(
+      res,
+      new ValidationError("Player ID must be a numeric value")
+    );
+  }
+
+  try {
+    // Cache headers: 48h primary, 7d stale (matches batting/bowling TTL)
+    setCacheHeaders(res, {
+      maxAge: PLAYER_CACHE_TTL.PLAYER_BATTING,
+      staleWhileRevalidate: 86400,
+    });
+
+    const result = await fetchAggregatedPlayerProfile(id);
+
+    // Record success for health monitoring (only if at least info was fetched fresh)
+    if (!result._meta.infoCached) {
+      scraperHealth.recordSuccess(SCRAPER_NAME, Date.now() - startTime);
+    }
+
+    res.json({
+      success: true,
+      data: result,
+      source: result._meta.infoCached ? "cache" : "rapidapi",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("Error fetching player profile:", error.message);
+
+    await scraperHealth.recordFailure(
+      SCRAPER_NAME,
+      error,
+      Date.now() - startTime
+    );
+
+    return sendError(res, error);
+  }
+});
+
 // ICC Standings endpoint
 router.get("/stats/standings", async (req, res) => {
   const startTime = Date.now();
@@ -2957,124 +3011,73 @@ router.get("/series/:seriesId", async (req, res) => {
       return sendError(res, new NotFoundError(`Series ${seriesId} not found`));
     }
 
-    // Get all match types from existing cached endpoints
-    const [liveCache, recentCache, upcomingCache] = await Promise.all([
-      getCache("cricbuzz:live-scores"),
-      getCache("cricbuzz:recent-matches"),
-      getCache("cricbuzz:upcoming-matches"),
-    ]);
+    // --- Pipeline-based match enrichment (Stage 3) ---
+    const matchIds = seriesInfo.matches?.map(m => m.matchId).filter(Boolean) || [];
+    const indexMap = await getMatchIndexBatch(matchIds);
 
-    // If caches exist, filter matches by series
-    const seriesSlug = seriesInfo.name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "");
+    const live = [], upcoming = [], completed = [];
+    const bareMatches = []; // Matches not found in index
+    let hasLiveMatch = false;
+    let indexHitCount = 0, indexMissCount = 0;
 
-    // Helper to filter matches by series
-    const filterBySeriesId = (matches) => {
-      if (!matches || !Array.isArray(matches)) return [];
-      return matches.filter(m => {
-        // Check if matchLink contains either series ID or slug
-        const link = m.matchLink || "";
-        return link.includes(`/${seriesId}/`) ||
-          link.includes(`-${seriesSlug}`) ||
-          link.includes(seriesSlug.replace(/-/g, "-"));
-      });
-    };
+    for (const matchRef of (seriesInfo.matches || [])) {
+      const id = matchRef.matchId;
+      const indexed = indexMap.get(id);
 
-    // Also check by matching against the match list from series page
-    const seriesMatchIds = new Set(
-      seriesInfo.matches?.map(m => m.matchId) || []
-    );
+      if (indexed) {
+        indexHitCount++;
+        const entry = light ? {
+          matchId: id,
+          title: indexed.title || matchRef.title,
+          status: indexed.matchStatus,
+          statusText: indexed.status,
+          teams: indexed.teams || [],
+          score1: indexed.liveScorebat || null,
+          score2: indexed.liveScoreball || null,
+          venue: indexed.location || null,
+          time: indexed.time || null,
+        } : indexed;
 
-    const filterByMatchIds = (matches) => {
-      if (!matches || !Array.isArray(matches)) return [];
-      return matches.filter(m => {
-        // Extract matchId from matchLink
-        const matchIdMatch = (m.matchLink || "").match(/\/(\d+)\//);
-        return matchIdMatch && seriesMatchIds.has(matchIdMatch[1]);
-      });
-    };
-
-    // Combine both filtering approaches
-    const filterMatches = (matches) => {
-      const bySlug = filterBySeriesId(matches);
-      const byId = filterByMatchIds(matches);
-
-      // Merge and dedupe
-      const seen = new Set();
-      const result = [];
-      [...bySlug, ...byId].forEach(m => {
-        const matchIdMatch = (m.matchLink || "").match(/\/(\d+)\//);
-        const id = matchIdMatch ? matchIdMatch[1] : m.matchLink;
-        if (!seen.has(id)) {
-          seen.add(id);
-          result.push(m);
-        }
-      });
-      return result;
-    };
-
-    // Transform match for lighter response
-    const transformMatch = (match) => {
-      if (light) {
-        return {
-          matchId: (match.matchLink?.match(/\/(\d+)\//) || [])[1],
-          title: match.title,
-          status: match.matchStatus,
-          statusText: match.status,
-          teams: match.teams || [],
-          score1: match.liveScorebat || null,
-          score2: match.liveScoreball || null,
-          venue: match.location || null,
-          time: match.time || null,
-        };
+        if (indexed.matchStatus === 'live') { live.push(entry); hasLiveMatch = true; }
+        else if (indexed.matchStatus === 'completed') { completed.push(entry); }
+        else { upcoming.push(entry); }
+      } else {
+        indexMissCount++;
+        bareMatches.push({
+          matchId: id,
+          title: matchRef.title,
+          matchLink: matchRef.url,
+          scorecardUrl: matchRef.scorecardUrl,
+        });
       }
-      return match;
-    };
-
-    // Filter from caches
-    const live = (liveCache?.data || [])
-      .filter(m => filterMatches([m]).length > 0)
-      .map(transformMatch);
-
-    const completed = (recentCache?.data || [])
-      .filter(m => filterMatches([m]).length > 0)
-      .map(transformMatch);
-
-    const upcoming = (upcomingCache?.data || [])
-      .filter(m => filterMatches([m]).length > 0)
-      .map(transformMatch);
-
-    // If no cached data, use the matches from series page
-    let fallbackMatches = [];
-    if (live.length === 0 && completed.length === 0 && upcoming.length === 0) {
-      fallbackMatches = seriesInfo.matches?.map(m => ({
-        matchId: m.matchId,
-        title: m.title,
-        matchLink: m.url,
-        scorecardUrl: m.scorecardUrl,
-      })) || [];
     }
+
+    // Diagnostic logging
+    console.log(`[Series ${seriesId}] Pipeline: ${indexHitCount} hits, ${indexMissCount} misses, ${hasLiveMatch ? 'HAS LIVE' : 'no live'}`);
+
+    // Dynamic TTL: near-real-time for live series, longer for stable data
+    const ttl = hasLiveMatch ? 90 : 600;
 
     const result = {
       success: true,
       seriesId: parseInt(seriesId),
       seriesName: seriesInfo.name,
       matchCount: seriesInfo.matchCount,
-      count: live.length + completed.length + upcoming.length,
+      count: live.length + upcoming.length + completed.length,
       data: {
         live,
         upcoming,
         completed,
       },
-      // Include fallback if no filtered matches found
-      ...(fallbackMatches.length > 0 && { matches: fallbackMatches }),
+      enrichedCount: indexHitCount,
+      totalCount: matchIds.length,
+      // Include bare fallback matches for any not in the index
+      ...(bareMatches.length > 0 && { matches: bareMatches }),
       pointsTableUrl: `/api/cricket/series/${seriesId}/points-table`,
     };
 
-    // Cache for 5 minutes
-    await setCache(cacheKey, result, 300);
+    // Cache with dynamic TTL
+    await setCache(cacheKey, result, ttl);
 
     res.json({
       ...result,

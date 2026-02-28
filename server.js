@@ -3,6 +3,9 @@ const path = require("path");
 const setupMiddleware = require("./component/middleware");
 
 
+// Health Monitoring Routes
+const healthRoutes = require("./routes/health");
+
 // Consolidated Cricket Routes
 const cricketRoutes = require("./routes/Cricket/index");
 
@@ -24,6 +27,9 @@ setupMiddleware(app);
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
+
+// Health Monitoring endpoints
+app.use("/api/health", healthRoutes);
 
 // Consolidated Cricket API routes
 app.use("/api/cricket", cricketRoutes);

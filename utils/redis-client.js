@@ -417,6 +417,46 @@ async function setMatchIndexBatch(matches, source, ttl) {
   }
 }
 
+/**
+ * Batch-read match index entries via pipeline
+ * Returns Map<matchId, indexEntry|null>
+ * ~2ms for 20 keys (pipeline, single round-trip)
+ * @param {string[]} matchIds - Array of match IDs to look up
+ * @returns {Promise<Map<string, Object|null>>}
+ */
+async function getMatchIndexBatch(matchIds) {
+  const client = getClient();
+  if (!client || !matchIds || matchIds.length === 0) return new Map();
+
+  try {
+    const pipe = client.pipeline();
+    for (const id of matchIds) {
+      pipe.get(`${KEYS.MATCH_INDEX_PREFIX}${id}`);
+    }
+    const results = await pipe.exec();
+
+    const map = new Map();
+    matchIds.forEach((id, i) => {
+      const [err, val] = results[i];
+      if (!err && val) {
+        try { map.set(id, JSON.parse(val)); }
+        catch { map.set(id, null); }
+      } else {
+        map.set(id, null);
+      }
+    });
+
+    if (DEBUG) {
+      const hits = [...map.values()].filter(Boolean).length;
+      console.log(`🔍 Match index batch: ${hits}/${matchIds.length} hits`);
+    }
+    return map;
+  } catch (error) {
+    console.error(`Redis match index batch GET error:`, error.message);
+    return new Map();
+  }
+}
+
 module.exports = {
   getClient,
   getLiveScores,
@@ -430,6 +470,7 @@ module.exports = {
   getMatchCommentary,
   setMatchCommentary,
   getMatchIndex,
+  getMatchIndexBatch,
   setMatchIndexBatch,
   extractMatchId,
   KEYS,

@@ -1,7 +1,7 @@
 # API-Manager — Project Reference
 
 > **For AI Agents:** Read this file at the start of every conversation to understand the project.
-> **Last Updated:** Feb 26, 2026 (Redis Match Index) | **Status:** 🟢 ACTIVE
+> **Last Updated:** Feb 28, 2026 (Series Enrichment + Player Profiles) | **Status:** 🟢 ACTIVE
 
 ---
 
@@ -26,12 +26,13 @@ api-manager/
 │   ├── prismaClient.js       # PG pool (max:5, 5s timeout) + Prisma client
 │   └── redisClient.js        # ioredis — general cache (debug-gated logs)
 ├── routes/Cricket/
-│   ├── index.js              # All API endpoints (~3342 lines)
+│   ├── index.js              # All API endpoints (~3500 lines)
 │   ├── ipl.js                # IPL data (JSONP API: schedule, points, teams)
 │   ├── liveScoresNew.js      # Live scores using Redis worker
 │   ├── commentaryRouter.js   # Match commentary
 │   ├── scorecard.js          # Scorecard parsing
-│   └── stats.js              # Stats/rankings (RapidAPI)
+│   ├── stats.js              # Stats/rankings (RapidAPI)
+│   └── player.js             # Player profiles (batting + bowling + info, aggregated)
 ├── scrapers/                 # News scrapers + workers
 │   ├── live-score-worker.js  # PM2 Always On: Scrapes Cricbuzz → Redis (60s), populates match index
 │   ├── recent-score-worker.js # PM2 Always On: Refreshes recent/upcoming caches (15min), populates match index
@@ -107,6 +108,13 @@ Runs sequentially: **Cricbuzz → ESPN Cricinfo → ICC Cricket → BBC Sport** 
 
 > Returns `{ success, data, source }` where `source` is `index-live`, `index-recent`, `index-upcoming`, or `list-fallback-*` (self-healing). Payload ~2KB. TTFB: 1.8-2.7ms.
 
+### Player Profiles (Aggregated, Feb 28, 2026)
+| Endpoint | Description | Cache TTL |
+|----------|-------------|-----------|
+| `GET /player/:id` | Aggregated player profile (info + batting + bowling stats) | 48h (per-section) |
+
+> Returns `{ success, data }` with `data.info`, `data.batting`, `data.bowling`, `data._meta` (cache status per section). Uses RapidAPI Cricbuzz. Each section cached independently.
+
 ### Scorecards & Commentary (from Redis, per-match)
 | Endpoint | Description | Cache TTL |
 |----------|-------------|-----------|
@@ -126,6 +134,16 @@ Runs sequentially: **Cricbuzz → ESPN Cricinfo → ICC Cricket → BBC Sport** 
 | `GET /stats/standings?matchType=1` | ICC standings | 24 hours |
 | `GET /stats/record-filters` | Available filter options | 24 hours |
 | `GET /stats/records?statsType=mostRuns` | Cricket records | 24 hours |
+
+### Series (Enriched, Feb 28, 2026)
+| Endpoint | Description | Cache TTL |
+|----------|-------------|-----------|
+| `GET /series` | All series grouped by month (category filter) | 1 hour |
+| `GET /series/current` | Currently running series | 30 min |
+| `GET /series/:seriesId` | **Enriched** series detail with match index pipeline | Dynamic (live: 90s, upcoming: 600s, completed: 1800s) |
+| `GET /series/:seriesId/points-table` | Points table for a series | 10 min |
+
+> `/series/:seriesId` uses `getMatchIndexBatch()` pipeline to enrich `matchIds` from series page with scores/teams/venue from the match index. Graceful degradation: unindexed matches return as bare `{matchId, title}` objects.
 
 ### Photos
 | Endpoint | Description | Cache TTL |
@@ -210,6 +228,8 @@ O(1) Redis-indexed lookup for individual matches. Replaces the old pattern of fe
 
 **Write strategy:** Lua-in-Pipeline (`setMatchIndexBatch`) — each match write is an individual Lua `EVALSHA` call batched inside a pipeline. ~1.34ms for 40 matches.
 
+**Read strategy (Feb 28):** `getMatchIndexBatch(matchIds)` — pipeline-based `MGET` via ioredis `pipeline().get()` calls. Returns `Map<matchId, indexEntry|null>`. ~2ms for 20 keys. Used by `/series/:seriesId` for enrichment.
+
 **Populated by:**
 1. `live-score-worker` — every 60s cycle (source: `live`, TTL: 90s)
 2. `recent-score-worker` — every 15min (source: `recent`/`upcoming`, TTL: 1800s/3600s)
@@ -218,6 +238,18 @@ O(1) Redis-indexed lookup for individual matches. Replaces the old pattern of fe
 **Fallback (self-healing):** If `match:<id>` is missing, the `/match/:matchId` endpoint scans `live_scores_lite`, `cricket:recent-scores`, `cricket:upcoming-matches` lists. If found, it auto-re-indexes the match for future O(1) access.
 
 **Verified performance:** 1.8-2.7ms TTFB, 1946 bytes payload, ~40 active keys.
+
+### Series Enrichment Flow (Feb 28, 2026)
+```
+/series/:seriesId → composite cache check → MISS?
+  → getSeriesDetails(seriesId) → extract matchIds from series page
+  → getMatchIndexBatch(matchIds) → O(1) pipeline lookup
+  → Merge enriched (teams, scores, venue) + bare (title only)
+  → Dynamic TTL: live series → 90s, upcoming → 600s, completed → 1800s
+  → setCache() composite
+```
+
+**Slug extraction fix:** `services/series.js` now uses canonical URL → match-link frequency analysis → title fallback (was title-only, broke on apostrophes/special chars).
 
 ### In-Memory Cache (NodeCache)
 - `scraper-cache.js` — per-scraper type caches with `useClones: false` for performance

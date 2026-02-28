@@ -360,40 +360,103 @@ async function getSeriesDetails(seriesId) {
             pageTitle.replace(/ matches,.*$/i, "").replace(/ \| Cricbuzz.*$/i, "").trim() ||
             `Series ${seriesId}`;
 
-        // Generate series slug from name
-        const seriesSlug = seriesName
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, "-")
-            .replace(/^-|-$/g, "");
+        // Strategy: Extract the canonical series slug from the page content
+        // Priority 1: <link rel="canonical"> tag (most reliable)
+        // Priority 2: Most common URL suffix across match links
+        // Priority 3: Title-based slug (least reliable, may have apostrophe issues)
+        let seriesSlug = "";
 
-        // Extract matches from the page - ONLY those matching this series
-        const matches = [];
+        // Try canonical link first
+        const canonicalHref = $('link[rel="canonical"]').attr("href") || "";
+        const canonicalSlugMatch = canonicalHref.match(/cricket-series\/\d+\/([^/]+)/);
+        if (canonicalSlugMatch && canonicalSlugMatch[1] !== "matches") {
+            seriesSlug = canonicalSlugMatch[1].toLowerCase();
+        }
 
+        // Try extracting from URL if Cricbuzz redirected with slug in path
+        if (!seriesSlug) {
+            const finalUrl = response.request?.res?.responseUrl || response.config?.url || "";
+            const urlSlugMatch = finalUrl.match(/cricket-series\/\d+\/([^/]+)/);
+            if (urlSlugMatch && urlSlugMatch[1] !== "matches") {
+                seriesSlug = urlSlugMatch[1].toLowerCase();
+            }
+        }
+
+        // Collect ALL match links from the page (two-pass approach)
+        // Pass 1: gather all match links with their hrefs, extract match IDs
+        const allMatchLinks = [];
         $('a[href*="/live-cricket-scores/"]').each((i, el) => {
-            const $match = $(el);
-            const href = $match.attr("href") || "";
-            const title = $match.attr("title") || $match.text().trim();
-
-            // Only include matches that belong to this series (check slug in URL)
-            // The match URL ends with the series slug, e.g., "...-sa20-2025-26"
-            const hrefLower = href.toLowerCase();
-            const matchBelongsToSeries = hrefLower.endsWith(seriesSlug) ||
-                hrefLower.includes(`-${seriesSlug}`);
-
-            if (href && title && title.includes("vs") && matchBelongsToSeries) {
-                const matchIdMatch = href.match(/\/(\d+)\//);
-                const matchId = matchIdMatch ? matchIdMatch[1] : null;
-
-                if (matchId && !matches.find((m) => m.matchId === matchId)) {
-                    matches.push({
-                        matchId,
-                        title: title.trim(),
-                        url: `https://www.cricbuzz.com${href}`,
-                        scorecardUrl: `/api/cricket/scorecard/${matchId}`,
-                    });
-                }
+            const href = ($(el).attr("href") || "").toLowerCase();
+            const title = $(el).attr("title") || $(el).text().trim();
+            const matchIdMatch = href.match(/\/(\d+)\//);
+            if (href && matchIdMatch) {
+                allMatchLinks.push({ href, title, matchId: matchIdMatch[1] });
             }
         });
+
+        // If no slug yet, derive it from match link hrefs
+        // Extract the common suffix pattern from match URLs
+        if (!seriesSlug && allMatchLinks.length > 0) {
+            // Count frequency of URL suffixes (last path segment after the match description)
+            const suffixCounts = {};
+            for (const { href } of allMatchLinks) {
+                // Match URLs look like: /live-cricket-scores/139415/wi-vs-rsa-47th-match-...-icc-mens-t20-world-cup-2026
+                // The series slug is the last hyphen-separated segment: extract last N words
+                const pathPart = href.split("/").pop() || "";
+                // Try progressively longer suffixes to find the common series slug
+                const parts = pathPart.split("-");
+                for (let len = 3; len <= Math.min(8, parts.length); len++) {
+                    const suffix = parts.slice(-len).join("-");
+                    suffixCounts[suffix] = (suffixCounts[suffix] || 0) + 1;
+                }
+            }
+            // Find the longest suffix that appears in the majority of match links
+            const threshold = Math.ceil(allMatchLinks.length * 0.5);
+            let bestSlug = "";
+            let bestLen = 0;
+            for (const [suffix, count] of Object.entries(suffixCounts)) {
+                if (count >= threshold && suffix.length > bestLen) {
+                    bestSlug = suffix;
+                    bestLen = suffix.length;
+                }
+            }
+            if (bestSlug) {
+                seriesSlug = bestSlug;
+            }
+        }
+
+        // Final fallback: generate from title
+        if (!seriesSlug) {
+            seriesSlug = seriesName
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, "-")
+                .replace(/^-|-$/g, "");
+        }
+
+        console.log(`  Canonical slug: "${seriesSlug}" (${canonicalSlugMatch ? 'canonical link' : seriesSlug === seriesName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") ? 'title fallback' : 'derived from match hrefs'})`);
+
+        // Pass 2: Filter to only matches belonging to this series
+        const matches = [];
+        const seen = new Set();
+
+        for (const { href, title, matchId } of allMatchLinks) {
+            if (seen.has(matchId)) continue;
+            if (!title.includes("vs")) continue;
+
+            // Check if match belongs to this series via slug match
+            const matchBelongsToSeries = href.endsWith(seriesSlug) ||
+                href.includes(`-${seriesSlug}`);
+
+            if (matchBelongsToSeries) {
+                seen.add(matchId);
+                matches.push({
+                    matchId,
+                    title: title.trim(),
+                    url: `https://www.cricbuzz.com${href}`,
+                    scorecardUrl: `/api/cricket/scorecard/${matchId}`,
+                });
+            }
+        }
 
         console.log(`✅ Found ${matches.length} matches for series ${seriesId} (slug: ${seriesSlug})`);
 
