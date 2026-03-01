@@ -59,6 +59,22 @@ module.exports = {
       }
     },
     {
+      name: 'content-enhancer',
+      script: 'scrapers/content-enhancer-claude.js',
+      cwd: '/home/ubuntu/apps/api-manager',
+      exec_mode: 'fork',  // Must be fork for one-shot cron scripts to exit cleanly
+      autorestart: false,  // One-shot: runs, finishes, waits for next cron
+      watch: false,
+      max_memory_restart: '300M',
+      node_args: '--max-old-space-size=256',
+      // Run 10 min after scrapers (:35 → :45), every 4 hours
+      // IST: 6:15AM, 10:15AM, 2:15PM, 6:15PM, 10:15PM, 2:15AM
+      cron_restart: '45 0,4,8,12,16,20 * * *',
+      env: {
+        NODE_ENV: 'production'
+      }
+    },
+    {
       name: 'recent-score-worker',
       script: 'scrapers/recent-score-worker.js',
       cwd: '/home/ubuntu/apps/api-manager',

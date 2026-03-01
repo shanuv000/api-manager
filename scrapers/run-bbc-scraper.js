@@ -195,16 +195,19 @@ async function runBBCScraper() {
       );
     }
 
-    // STEP 1: Fetch articles with details
-    console.log("\n📡 Fetching news with detailed content...");
+    // PHASE 1: Fetch article listing only (1 page load)
+    console.log("\n📡 Phase 1: Fetching article listing...");
     const limit = 10;
-    const articlesWithDetails = await scraper.fetchLatestNewsWithDetails(limit);
+    const LISTING_BUFFER = 2;
+    const articleList = await scraper.fetchLatestNews();
+    const limitedList = articleList.slice(0, limit + LISTING_BUFFER);
     console.log(
-      `   Fetched ${articlesWithDetails.length} articles with details\n`
+      `   Found ${articleList.length} articles in listing, processing top ${limitedList.length}\n`
     );
 
-    // STEP 2: Pre-fetch existing articles from DB
-    const sourceIds = articlesWithDetails.map((a) => generateSourceId(a));
+    // PHASE 2: DB pre-scan to identify new/changed articles
+    console.log("🔍 Phase 2: DB pre-scan...");
+    const sourceIds = limitedList.map((a) => generateSourceId(a));
     const existingArticles = await prisma.newsArticle.findMany({
       where: {
         sourceId: { in: sourceIds },
@@ -220,16 +223,59 @@ async function runBBCScraper() {
         tags: article.tags,
       });
     }
-    console.log(`   Found ${existingMap.size} existing articles in DB\n`);
+    console.log(`   Found ${existingMap.size} existing articles in DB`);
 
-    // STEP 3: Process articles
+    // Filter to only articles needing detail fetch
+    const articlesNeedingDetails = limitedList.filter((article) => {
+      const sourceId = generateSourceId(article);
+      const existing = existingMap.get(sourceId);
+      return !existing || existing.title !== article.title;
+    });
+
+    // Count pre-filtered duplicates
+    let skippedDuplicate = limitedList.length - articlesNeedingDetails.length;
+    console.log(
+      `   ${articlesNeedingDetails.length} articles need detail fetching (${skippedDuplicate} unchanged duplicates skipped)\n`
+    );
+
+    // PHASE 3: Fetch details ONLY for new/changed articles
+    const articlesWithDetails = [];
+    if (articlesNeedingDetails.length > 0) {
+      console.log(
+        `📚 Phase 3: Fetching details for ${articlesNeedingDetails.length} articles...\n`
+      );
+      for (let i = 0; i < articlesNeedingDetails.length; i++) {
+        const article = articlesNeedingDetails[i];
+        console.log(
+          `   [${i + 1}/${articlesNeedingDetails.length}] ${article.title.substring(0, 60)}...`
+        );
+        try {
+          const details = await scraper.fetchArticleDetails(article.link);
+          articlesWithDetails.push({ ...article, details });
+          if (i < articlesNeedingDetails.length - 1) {
+            await scraper.delay(3000); // Rate limiting between detail fetches
+          }
+        } catch (error) {
+          console.error(`   ⚠️ Failed to fetch details: ${error.message}`);
+          // Skip articles without details - don't save incomplete data
+        }
+      }
+      console.log(
+        `   Fetched details for ${articlesWithDetails.length}/${articlesNeedingDetails.length} articles\n`
+      );
+    } else {
+      console.log("✅ All articles already exist and are unchanged — no detail fetching needed\n");
+    }
+
+    // STEP 4: Process articles with details
     let savedCount = 0;
     let skippedNoContent = 0;
-    let skippedDuplicate = 0;
     let updatedCount = 0;
     let errorCount = 0;
 
-    console.log("📝 Processing articles...\n");
+    if (articlesWithDetails.length > 0) {
+      console.log("📝 Processing articles...\n");
+    }
 
     for (let i = 0; i < articlesWithDetails.length; i++) {
       const article = articlesWithDetails[i];

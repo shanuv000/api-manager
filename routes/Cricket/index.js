@@ -1242,10 +1242,31 @@ router.get("/recent-scores", async (req, res) => {
     };
     await setCache(cacheKey, fullResponse, 1800); // 30min (reduced for match days)
 
-    // Index matches for O(1) direct lookup
+    // Index matches for O(1) direct lookup + write individual scorecards
     try {
       const redisClient = require("../../utils/redis-client");
       await redisClient.setMatchIndexBatch(enrichedMatches, 'recent', 1800);
+
+      // Write-through: store individual scorecard:{matchId} entries
+      // so GET /scorecard/:matchId finds completed match scorecards
+      // (same Redis keys the live-score-worker uses for live matches)
+      let scorecardCount = 0;
+      for (const match of enrichedMatches) {
+        const id = redisClient.extractMatchId(match);
+        if (id && match.scorecard && match.scorecard.length > 0) {
+          await redisClient.setMatchScorecard(id, {
+            matchId: id,
+            title: match.title,
+            teams: match.teams,
+            innings: match.scorecard,
+            timestamp: Date.now(),
+          }, 1800); // 30min TTL, same as recent-scores cache
+          scorecardCount++;
+        }
+      }
+      if (scorecardCount > 0) {
+        console.log(`📝 Cached ${scorecardCount} recent match scorecards`);
+      }
     } catch (e) { /* non-critical */ }
 
     // Apply limit/offset for this request
@@ -1690,6 +1711,35 @@ router.get("/scorecard/:matchId", async (req, res) => {
           },
           fromCache: true,
           cacheSource: "redis-full-fallback",
+          responseTime: Date.now() - startTime,
+        });
+      }
+    }
+
+    // Fallback 2: Search recent-scores cache (completed matches)
+    const recentCache = await getCache("cricket:recent-scores");
+    if (recentCache && recentCache.data) {
+      const recentMatch = recentCache.data.find((m) => {
+        const id = redisClient.extractMatchId(m);
+        return id === matchId;
+      });
+      if (recentMatch && recentMatch.scorecard) {
+        // Cache-on-read: store in scorecard:{matchId} for future O(1) hits
+        const scorecardData = {
+          matchId,
+          title: recentMatch.title,
+          teams: recentMatch.teams,
+          innings: recentMatch.scorecard,
+          timestamp: Date.now(),
+        };
+        await redisClient.setMatchScorecard(matchId, scorecardData, 1800);
+
+        return res.json({
+          success: true,
+          matchId,
+          data: scorecardData,
+          fromCache: true,
+          cacheSource: "recent-scores-fallback",
           responseTime: Date.now() - startTime,
         });
       }

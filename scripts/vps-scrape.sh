@@ -35,6 +35,31 @@ send_discord() {
   fi
 }
 
+# ============================================
+# NORMALIZED ERROR HASHING (order-independent, whitespace-safe)
+# ============================================
+STATE_FILE="/tmp/news_scraper_state.json"
+
+compute_error_hash() {
+  local input="$1"
+  # 1. Trim leading/trailing whitespace per line
+  # 2. Remove empty lines
+  # 3. Sort alphabetically (order-independent)
+  # 4. Deduplicate identical entries (-u)
+  # 5. Hash the canonical form
+  local signature
+  signature=$(printf '%s' "$input" \
+    | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+    | grep -v '^$' \
+    | sort -u)
+  if [ -z "$signature" ]; then
+    # md5 of empty string — deterministic sentinel
+    echo "d41d8cd98f00b204e9800998ecf8427e"
+    return
+  fi
+  echo "$signature" | md5sum | awk '{print $1}'
+}
+
 # Trap for unexpected exits - send Discord notification on crash
 cleanup_on_exit() {
   local exit_code=$?
@@ -126,7 +151,8 @@ BBC_SKIPPED=0
 # IPL_UPDATED=0
 # IPL_SKIPPED=0
 DB_TOTAL=0
-ERRORS=""
+SCRAPER_ERRORS=""
+WARNINGS=""
 
 # Cleanup stale articles (with timeout)
 echo "🧹 Cleaning up stale articles..."
@@ -134,19 +160,18 @@ timeout 30 node scripts/cleanup-stale.js 2>&1 || echo "⚠️ Cleanup skipped or
 
 # Run Cricbuzz scraper (with timeout)
 echo "📰 Running Cricbuzz scraper..."
-if CRICBUZZ_OUTPUT=$(timeout $SCRAPER_TIMEOUT node scrapers/run-scraper.js 2>&1); then
+if CRICBUZZ_OUTPUT=$(timeout $SCRAPER_TIMEOUT node scrapers/run-cricbuzz-scraper.js 2>&1); then
   CRICBUZZ_STATUS="✅ Success"
-  # Note: Cricbuzz outputs "New articles:" not "New articles saved:"
-  CRICBUZZ_NEW=$(echo "$CRICBUZZ_OUTPUT" | grep -oP "New articles:\s*\K\d+" || echo "0")
-  CRICBUZZ_UPDATED=$(echo "$CRICBUZZ_OUTPUT" | grep -oP "Updated:\s*\K\d+" || echo "0")
-  CRICBUZZ_SKIPPED=$(echo "$CRICBUZZ_OUTPUT" | grep -oP "Skipped.*:\s*\K\d+" | tail -1 || echo "0")
+  CRICBUZZ_NEW=$(echo "$CRICBUZZ_OUTPUT" | grep -oP "New articles saved:\s*\K\d+" || echo "0")
+  CRICBUZZ_UPDATED=$(echo "$CRICBUZZ_OUTPUT" | grep -oP "Updated articles:\s*\K\d+" || echo "0")
+  CRICBUZZ_SKIPPED=$(echo "$CRICBUZZ_OUTPUT" | grep -oP "Skipped.*duplicate.*:\s*\K\d+" || echo "0")
 else
   exit_code=$?
   if [ $exit_code -eq 124 ]; then
-    ERRORS="${ERRORS}Cricbuzz timed out (>${SCRAPER_TIMEOUT}s)\\n"
+    SCRAPER_ERRORS="${SCRAPER_ERRORS}Cricbuzz timed out (>${SCRAPER_TIMEOUT}s)\\n"
     echo "⚠️ Cricbuzz scraper timed out after ${SCRAPER_TIMEOUT}s"
   else
-    ERRORS="${ERRORS}Cricbuzz failed (exit: $exit_code)\\n"
+    SCRAPER_ERRORS="${SCRAPER_ERRORS}Cricbuzz failed (exit: $exit_code)\\n"
   fi
 fi
 echo "$CRICBUZZ_OUTPUT"
@@ -161,10 +186,10 @@ if ESPN_OUTPUT=$(timeout $SCRAPER_TIMEOUT node scrapers/run-espncricinfo-scraper
 else
   exit_code=$?
   if [ $exit_code -eq 124 ]; then
-    ERRORS="${ERRORS}ESPN timed out (>${SCRAPER_TIMEOUT}s)\\n"
+    SCRAPER_ERRORS="${SCRAPER_ERRORS}ESPN timed out (>${SCRAPER_TIMEOUT}s)\\n"
     echo "⚠️ ESPN scraper timed out after ${SCRAPER_TIMEOUT}s"
   else
-    ERRORS="${ERRORS}ESPN failed (exit: $exit_code)\\n"
+    SCRAPER_ERRORS="${SCRAPER_ERRORS}ESPN failed (exit: $exit_code)\\n"
   fi
 fi
 echo "$ESPN_OUTPUT"
@@ -180,10 +205,10 @@ if ICC_OUTPUT=$(timeout $SCRAPER_TIMEOUT node scrapers/run-icc-scraper.js 2>&1);
 else
   exit_code=$?
   if [ $exit_code -eq 124 ]; then
-    ERRORS="${ERRORS}ICC timed out (>${SCRAPER_TIMEOUT}s)\\n"
+    SCRAPER_ERRORS="${SCRAPER_ERRORS}ICC timed out (>${SCRAPER_TIMEOUT}s)\\n"
     echo "⚠️ ICC scraper timed out after ${SCRAPER_TIMEOUT}s"
   else
-    ERRORS="${ERRORS}ICC failed (exit: $exit_code)\\n"
+    SCRAPER_ERRORS="${SCRAPER_ERRORS}ICC failed (exit: $exit_code)\\n"
   fi
 fi
 echo "$ICC_OUTPUT"
@@ -199,10 +224,10 @@ if BBC_OUTPUT=$(timeout $BBC_TIMEOUT node scrapers/run-bbc-scraper.js 2>&1); the
 else
   exit_code=$?
   if [ $exit_code -eq 124 ]; then
-    ERRORS="${ERRORS}BBC timed out (>${BBC_TIMEOUT}s)\\n"
+    SCRAPER_ERRORS="${SCRAPER_ERRORS}BBC timed out (>${BBC_TIMEOUT}s)\\n"
     echo "⚠️ BBC scraper timed out after ${BBC_TIMEOUT}s"
   else
-    ERRORS="${ERRORS}BBC failed (exit: $exit_code)\\n"
+    SCRAPER_ERRORS="${SCRAPER_ERRORS}BBC failed (exit: $exit_code)\\n"
   fi
 fi
 echo "$BBC_OUTPUT"
@@ -226,25 +251,8 @@ echo "$BBC_OUTPUT"
 # fi
 # echo "$IPL_OUTPUT"
 
-# Run Content Enhancer (AI enhancement with timeout - batch 1 sequential)
-echo "🤖 Running Content Enhancer..."
-ENHANCE_STATUS="❌ Failed"
-ENHANCE_COUNT=0
-if ENHANCE_OUTPUT=$(timeout 1200 node scrapers/content-enhancer-claude.js 2>&1); then
-  ENHANCE_STATUS="✅ Success"
-  # Count enhanced articles (pipefail-safe: separate grep from wc to avoid "0\n0" bug)
-  ENHANCE_COUNT=$(echo "$ENHANCE_OUTPUT" | grep -c "Saved Enhanced Article" || true)
-  ENHANCE_COUNT=${ENHANCE_COUNT:-0}
-else
-  exit_code=$?
-  if [ $exit_code -eq 124 ]; then
-    ERRORS="${ERRORS}Content enhancer timed out (>1200s)\\n"
-    echo "⚠️ Content enhancer timed out after 1200s"
-  else
-    ERRORS="${ERRORS}Content enhancer failed (exit: $exit_code)\\n"
-  fi
-fi
-echo "$ENHANCE_OUTPUT"
+# Content enhancer runs independently via PM2 cron (see ecosystem.config.js)
+# It processes all pending articles in a loop-until-done pattern
 
 # Prune old articles (with timeout)
 echo "🗑️ Pruning articles older than 90 days..."
@@ -268,10 +276,9 @@ TOTAL_UPDATED=$((CRICBUZZ_UPDATED + ESPN_UPDATED + ICC_UPDATED + BBC_UPDATED))
 # Sanitize all numeric vars (pipefail can cause "0\n0" multiline values)
 TOTAL_NEW=$(echo "$TOTAL_NEW" | head -1 | tr -dc '0-9'); TOTAL_NEW=${TOTAL_NEW:-0}
 TOTAL_UPDATED=$(echo "$TOTAL_UPDATED" | head -1 | tr -dc '0-9'); TOTAL_UPDATED=${TOTAL_UPDATED:-0}
-ENHANCE_COUNT=$(echo "$ENHANCE_COUNT" | head -1 | tr -dc '0-9'); ENHANCE_COUNT=${ENHANCE_COUNT:-0}
 
 # Clear API Cache if changes detected
-if [ "$TOTAL_NEW" -gt 0 ] || [ "$TOTAL_UPDATED" -gt 0 ] || [ "$ENHANCE_COUNT" -gt 0 ]; then
+if [ "$TOTAL_NEW" -gt 0 ] || [ "$TOTAL_UPDATED" -gt 0 ]; then
   echo "🧹 Changes detected. clearing API cache..."
   node scripts/clear_news_cache.js || echo "⚠️ Cache clear failed"
 else
@@ -301,7 +308,7 @@ SCRAPER_DETAILS="${SCRAPER_DETAILS}• ESPN: ${ESPN_STATUS} (${ESPN_NEW} new)\\n
 SCRAPER_DETAILS="${SCRAPER_DETAILS}• ICC: ${ICC_STATUS} (${ICC_NEW} new)\\n"
 SCRAPER_DETAILS="${SCRAPER_DETAILS}• BBC: ${BBC_STATUS} (${BBC_NEW} new)\\n"
 # SCRAPER_DETAILS="${SCRAPER_DETAILS}• IPL: ${IPL_STATUS} (${IPL_NEW} new)\\n"  # IPL disabled
-SCRAPER_DETAILS="${SCRAPER_DETAILS}• AI Enhance: ${ENHANCE_STATUS} (${ENHANCE_COUNT} enhanced)"
+SCRAPER_DETAILS="${SCRAPER_DETAILS}• AI Enhance: Runs independently (pm2 logs content-enhancer)"
 
 # Build coverage section based on alert level
 if [ "$COVERAGE_LEVEL" = "critical" ]; then
@@ -315,9 +322,57 @@ fi
 # System status
 SYSTEM_INFO="\\n\\n**System:**\\n💾 Disk: ${DISK_FINAL} | 🧠 Memory: ${MEM_FINAL}MB | ⏱️ Duration: ${DURATION}s"
 
-if [ -z "$ERRORS" ]; then
-  # Check if coverage is critical - override to warning color
-  if [ "$COVERAGE_LEVEL" = "critical" ]; then
+# ============================================
+# 3-TIER SEVERITY CLASSIFICATION
+# ============================================
+if [ -n "$SCRAPER_ERRORS" ]; then
+  CURRENT_STATUS="critical"
+elif [ -n "$WARNINGS" ]; then
+  CURRENT_STATUS="degraded"
+else
+  CURRENT_STATUS="healthy"
+fi
+
+# Compute order-independent, whitespace-safe error hash
+ERROR_SIGNATURE=$(printf "%s\n%s" "$SCRAPER_ERRORS" "$WARNINGS")
+CURRENT_HASH=$(compute_error_hash "$ERROR_SIGNATURE")
+echo "🔑 Error hash: $CURRENT_HASH (status: $CURRENT_STATUS)"
+
+# ============================================
+# STATE-CHANGE DETECTION (suppress duplicate alerts)
+# ============================================
+SHOULD_NOTIFY="true"
+PREV_STATUS=""
+PREV_HASH=""
+
+if [ -f "$STATE_FILE" ] && [ -r "$STATE_FILE" ]; then
+  # Use jq for safe JSON parsing (available on this VPS)
+  if PREV_STATUS=$(jq -r '.status // empty' "$STATE_FILE" 2>/dev/null) \
+     && PREV_HASH=$(jq -r '.errors_hash // empty' "$STATE_FILE" 2>/dev/null) \
+     && [ -n "$PREV_STATUS" ] && [ -n "$PREV_HASH" ]; then
+    # Suppress ONLY if both status AND hash are identical
+    if [ "$CURRENT_STATUS" = "$PREV_STATUS" ] && [ "$CURRENT_HASH" = "$PREV_HASH" ]; then
+      SHOULD_NOTIFY="false"
+      echo "📱 State unchanged ($CURRENT_STATUS, hash=$CURRENT_HASH) — notification suppressed"
+    else
+      echo "📱 State changed: $PREV_STATUS→$CURRENT_STATUS (hash: ${PREV_HASH:0:8}→${CURRENT_HASH:0:8})"
+    fi
+  else
+    echo "⚠️ State file corrupt or unreadable — will notify (fail-open)"
+  fi
+else
+  echo "📱 No previous state file — will notify (first run)"
+fi
+
+# ============================================
+# BUILD DISCORD MESSAGE
+# ============================================
+if [ "$CURRENT_STATUS" = "healthy" ]; then
+  # Check if this is a recovery from a previous bad state
+  if [ "$PREV_STATUS" = "critical" ] || [ "$PREV_STATUS" = "degraded" ]; then
+    TITLE="🏏 Cricket Scraper ✅ Recovered"
+    COLOR="3066993"  # Green
+  elif [ "$COVERAGE_LEVEL" = "critical" ]; then
     TITLE="🏏 Cricket Scraper ⚠️ Coverage Critical"
     COLOR="15158332"  # Red
   elif [ "$COVERAGE_LEVEL" = "warning" ]; then
@@ -327,16 +382,48 @@ if [ -z "$ERRORS" ]; then
     TITLE="🏏 Cricket Scraper ✅ Success"
     COLOR="3066993"  # Green
   fi
-  DESC="📰 **New:** ${TOTAL_NEW} | 🔄 **Updated:** ${TOTAL_UPDATED} | 🤖 **Enhanced:** ${ENHANCE_COUNT}\\n\\n${SCRAPER_DETAILS}${COVERAGE_SECTION}\\n\\n📊 **Total in DB:** ${DB_TOTAL}${SYSTEM_INFO}"
+  DESC="📰 **New:** ${TOTAL_NEW} | 🔄 **Updated:** ${TOTAL_UPDATED}\\n\\n${SCRAPER_DETAILS}${COVERAGE_SECTION}\\n\\n📊 **Total in DB:** ${DB_TOTAL}${SYSTEM_INFO}"
+elif [ "$CURRENT_STATUS" = "degraded" ]; then
+  TITLE="🏏 Cricket Scraper ⚠️ Degraded"
+  DESC="${SCRAPER_DETAILS}${COVERAGE_SECTION}\\n\\n⚠️ **Warnings:**\\n${WARNINGS}${SYSTEM_INFO}"
+  COLOR="16776960"  # Yellow
 else
-  # FAILURE - Red notification
-  TITLE="⚠️ Cricket Scraper Issues"
-  DESC="${SCRAPER_DETAILS}${COVERAGE_SECTION}\\n\\n❌ **Errors:**\\n${ERRORS}${SYSTEM_INFO}"
-  COLOR="15158332"
+  # critical
+  TITLE="🚨 Cricket Scraper Issues"
+  COMBINED_ISSUES=""
+  [ -n "$SCRAPER_ERRORS" ] && COMBINED_ISSUES="❌ **Errors:**\\n${SCRAPER_ERRORS}"
+  [ -n "$WARNINGS" ] && COMBINED_ISSUES="${COMBINED_ISSUES}\\n⚠️ **Warnings:**\\n${WARNINGS}"
+  DESC="${SCRAPER_DETAILS}${COVERAGE_SECTION}\\n\\n${COMBINED_ISSUES}${SYSTEM_INFO}"
+  COLOR="15158332"  # Red
 fi
 
-send_discord "$TITLE" "$DESC" "$COLOR"
+# ============================================
+# SEND (or suppress) + WRITE STATE
+# ============================================
+if [ "$SHOULD_NOTIFY" = "true" ]; then
+  send_discord "$TITLE" "$DESC" "$COLOR"
+  NOTIFICATION_SENT="true"
+  echo "📱 Discord notification sent: $TITLE"
+else
+  NOTIFICATION_SENT="true"  # Prevent trap from firing
+  echo "📱 Notification suppressed (no state change)"
+fi
 
-NOTIFICATION_SENT="true"
-echo "📱 Discord notification sent: $TITLE"
+# Write state file AFTER send decision (crash before here = re-evaluate next run)
+cat > "$STATE_FILE" <<STATEEOF
+{
+  "status": "$CURRENT_STATUS",
+  "errors_hash": "$CURRENT_HASH",
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+STATEEOF
+echo "💾 State saved: $CURRENT_STATUS ($CURRENT_HASH)"
 
+# ═══════════════════════════════════════
+# UPTIME-KUMA PUSH HEARTBEAT
+# ═══════════════════════════════════════
+# Signal successful completion to Uptime-Kuma push monitor.
+# If this line is never reached (script crash/hang), the push monitor
+# will detect the missed heartbeat and fire an alert.
+curl -s "http://127.0.0.1:3999/api/push/d181f8aada07d841?status=up&msg=OK&ping=${DURATION}" > /dev/null 2>&1 || true
+echo "💓 Uptime-Kuma heartbeat sent"

@@ -1,7 +1,11 @@
 # API-Manager — Project Reference
 
 > **For AI Agents:** Read this file at the start of every conversation to understand the project.
-> **Last Updated:** Feb 28, 2026 (Series Enrichment + Player Profiles) | **Status:** 🟢 ACTIVE
+> **🚨 MANDATORY — When investigating ANY service issue, health problem, or scraper failure:**
+> 1. **PM2 logs first:** `pm2 logs news-scraper --lines 100` and `pm2 logs content-enhancer --lines 50`
+> 2. **Uptime-Kuma monitor status:** `docker exec uptime-kuma sqlite3 /app/data/kuma.db "SELECT m.name, h.status, h.msg, h.time FROM heartbeat h JOIN monitor m ON h.monitor_id=m.id WHERE h.id IN (SELECT MAX(id) FROM heartbeat GROUP BY monitor_id) ORDER BY h.status ASC, m.name;" | head -30`
+> 3. **Recent DOWN events:** `docker exec uptime-kuma sqlite3 /app/data/kuma.db "SELECT m.name, h.msg, h.time FROM heartbeat h JOIN monitor m ON h.monitor_id=m.id WHERE h.status=0 ORDER BY h.time DESC LIMIT 10;"`
+> **Last Updated:** Mar 1, 2026 (Uptime-Kuma Hardening — Push heartbeats, DB health endpoint, AI proxy interval) | **Status:** 🟢 ACTIVE
 
 ---
 
@@ -20,7 +24,7 @@
 ```
 api-manager/
 ├── server.js                 # Express entry (Port 5003) + graceful shutdown
-├── ecosystem.config.js       # PM2 configuration (5 services: api-manager, live-score-worker, recent-score-worker, tweet-worker, news-scraper)
+├── ecosystem.config.js       # PM2 configuration (6 services: api-manager, live-score-worker, recent-score-worker, tweet-worker, news-scraper, content-enhancer)
 ├── component/
 │   ├── middleware.js          # CORS, Helmet, Rate Limiter (60/min)
 │   ├── prismaClient.js       # PG pool (max:5, 5s timeout) + Prisma client
@@ -37,7 +41,7 @@ api-manager/
 │   ├── live-score-worker.js  # PM2 Always On: Scrapes Cricbuzz → Redis (60s), populates match index
 │   ├── recent-score-worker.js # PM2 Always On: Refreshes recent/upcoming caches (15min), populates match index
 │   ├── tweet-worker.js       # PM2 Cron: Posts to Twitter 4x/day
-│   ├── content-enhancer-claude.js  # AI enhancement (Gemini 3.1 Pro High)
+│   ├── content-enhancer-claude.js  # PM2 Cron (fork mode): AI enhancement (Gemini 3.1 Pro High) — loop-until-done, 55min max, process.exit(0) on completion
 │   ├── content-enhancer.js   # ChatGPT batch enhancement (alternate)
 │   ├── prompts/              # System prompts for enhancer/formatter
 │   ├── cricbuzz-news-scraper.js    # Cricbuzz scraper (Puppeteer + stealth)
@@ -46,10 +50,11 @@ api-manager/
 │   ├── bbc-cricket-scraper.js      # BBC Sport scraper
 │   ├── iplt20-news-scraper.js      # IPL T20 scraper (disabled in pipeline)
 │   ├── cricbuzz-photos-scraper.js  # Cricbuzz photo galleries
-│   ├── run-scraper.js              # Cricbuzz runner
-│   ├── run-espncricinfo-scraper.js # ESPN runner
-│   ├── run-icc-scraper.js          # ICC runner
-│   ├── run-bbc-scraper.js          # BBC runner
+│   ├── run-cricbuzz-scraper.js      # Cricbuzz runner (2-phase)
+│   ├── run-espncricinfo-scraper.js # ESPN runner (2-phase)
+│   ├── run-icc-scraper.js          # ICC runner (2-phase)
+│   ├── run-bbc-scraper.js          # BBC runner (2-phase)
+│   ├── run-scraper.js              # Old Cricbuzz runner (deprecated)
 │   └── run-iplt20-scraper.js       # IPL runner
 ├── scripts/
 │   ├── vps-scrape.sh         # CRON: Master news orchestrator
@@ -79,15 +84,58 @@ api-manager/
 | `recent-score-worker` | `scrapers/recent-score-worker.js` | Refreshes recent/upcoming → Redis + match index (15min) | Always On | 200M (heap: 192MB) |
 | `tweet-worker` | `scrapers/tweet-worker.js` | Auto-posts tweets 4x/day | `0 3,7,13,16 * * *` UTC | — |
 | `news-scraper` | `scripts/vps-scrape.sh` | Full news scrape pipeline | `35 0,2,4,6,8,10,12,14,16,18 * * *` | — |
+| `content-enhancer` | `scrapers/content-enhancer-claude.js` | AI article enhancement (fork mode) | `45 0,4,8,12,16,20 * * *` | 300M (heap: 256MB) |
 
 ### IST Schedule Reference (UTC+5:30)
 - **Tweet Worker:** 8:30 AM, 12:30 PM, 6:30 PM, 9:30 PM IST
 - **News Scraper:** Every 2 hours from 6:05 AM to 12:05 AM IST (offset by 5m for safety)
+- **Content Enhancer:** Every 4 hours at :45 (10min after scrapers): 6:15 AM, 10:15 AM, 2:15 PM, 6:15 PM, 10:15 PM, 2:15 AM IST
 
 ### News Scraper Pipeline (vps-scrape.sh)
-Runs sequentially: **Cricbuzz → ESPN Cricinfo → ICC Cricket → BBC Sport** → Gemini Content Enhancer → Pruner
+Runs sequentially: **Cricbuzz → ESPN Cricinfo → ICC Cricket → BBC Sport** → Pruner
+
+> **Note:** Content enhancer runs independently via PM2 cron (`content-enhancer`). It processes ALL pending articles in a loop-until-done pattern (newest first, 55min max runtime). Uses `exec_mode: 'fork'` (NOT cluster) to ensure clean exit via `process.exit(0)`. See `pm2 logs content-enhancer` for status.
 
 > **Note:** IPL T20 scraper exists (`run-iplt20-scraper.js`) but is currently **commented out** in `vps-scrape.sh`. Enable during IPL season.
+
+### Discord Notification System (vps-scrape.sh)
+
+State-change-based notifications with deduplication:
+
+```
+Run completes → Classify status (healthy/critical)
+  → Compute error hash (md5, order-independent via sort -u)
+  → Load prev state from /tmp/news_scraper_state.json
+  → Compare (status, hash) — suppress if identical
+  → Build Discord embed → Send only if state changed
+  → Write new state file
+```
+
+- **Healthy → Critical:** Sends "🚨 Issues" (red embed)
+- **Critical → Healthy:** Sends "✅ Recovered" (green embed)
+- **Same state + same hash:** Suppressed (no spam)
+- **Critical → Critical (different error):** Sends new "Issues" (different hash)
+- **Disk/Memory alerts:** Sent independently, do not affect scraper classification
+- **Crash trap:** EXIT handler sends "CRASHED" notification with duration + exit code
+- **Timeout thresholds:** Cricbuzz/ESPN/ICC = 300s, BBC = 420s
+
+### 2-Phase Scraper Optimization (Feb 28, 2026)
+
+All 4 active runners use a 2-phase architecture to eliminate wasteful Puppeteer detail page loads:
+
+```
+Phase 1: fetchLatestNews()               → 1 page load (listing only)
+Phase 2: DB pre-scan (by sourceId)        → Identify new/changed articles
+Phase 3: fetchArticleDetails() ONLY for   → 0-N detail page loads (typically 0-2)
+         articles that are new or changed
+Phase 4: Validate + merge + save/update   → DB writes + Redis cache invalidation
+```
+
+**LISTING_BUFFER:** Each runner processes `limit + 2 = 12` articles (10 target + 2 buffer) to prevent missing articles if list ordering shifts between runs.
+
+**Title comparison:** Cricbuzz/ICC/BBC use exact `existing.title !== article.title`. ESPN uses `startsWith()` because ESPN listing titles have junk concatenated (description+timestamps+author).
+
+**Performance:** ~40 detail page loads per cron cycle → ~2 (only genuinely new/changed articles). Steady-state runs complete in ~10 seconds vs ~3-4 minutes previously.
 
 ---
 
@@ -270,9 +318,16 @@ pm2 logs live-score-worker        # Check live score worker
 
 ### Manual Scraping
 ```bash
-./scripts/vps-scrape.sh           # Full pipeline (scrape + enhance)
-node scrapers/run-scraper.js      # Cricbuzz only
-node scrapers/content-enhancer-claude.js  # AI enhance unprocessed articles
+# ⚠️ vps-scrape.sh is a BASH script — run with bash or ./, NOT with node!
+bash scripts/vps-scrape.sh               # Full pipeline (scrape only, no enhancer)
+./scripts/vps-scrape.sh                  # Same thing (uses shebang #!/bin/bash)
+
+# Individual scrapers are Node.js scripts — run with node:
+node scrapers/run-cricbuzz-scraper.js     # Cricbuzz only (2-phase)
+node scrapers/run-espncricinfo-scraper.js # ESPN only (2-phase)
+node scrapers/run-icc-scraper.js          # ICC only (2-phase)
+node scrapers/run-bbc-scraper.js          # BBC only (2-phase)
+node scrapers/content-enhancer-claude.js  # Enhancer (processes all pending, newest first)
 ```
 
 ### Twitter
@@ -293,11 +348,13 @@ redis-cli FLUSHALL                # Nuclear option — clear everything
 
 ### Logs
 ```bash
-tail -f /var/log/cricket-scraper.log  # Cron output
 pm2 logs                              # All PM2 services
 pm2 logs --lines 100                  # Last 100 lines
+pm2 logs news-scraper --lines 50      # Scraper run logs
+pm2 logs content-enhancer --lines 30  # Enhancer logs (fork mode, exits after run)
 # Error log should be clean (warnings gated behind NODE_ENV)
 cat ~/.pm2/logs/api-manager-error-0.log
+# Note: /var/log/cricket-scraper.log is NOT used — PM2 manages all logs internally
 ```
 
 ---
@@ -323,7 +380,7 @@ cat ~/.pm2/logs/api-manager-error-0.log
 |-----------|---------|
 | **VPS** | Oracle Cloud ARM64 24GB RAM, 4 OCPU (Ubuntu 24.04 Noble) |
 | **Architecture** | `aarch64` (ARM64) — system Chromium required for Puppeteer |
-| **Process Manager** | PM2 (6 services: api-manager, live-score-worker, recent-score-worker, news-scraper, tweet-worker, sportspulse) |
+| **Process Manager** | PM2 (7 services: api-manager, live-score-worker, recent-score-worker, news-scraper, tweet-worker, content-enhancer, sportspulse) |
 | **Reverse Proxy** | Nginx (gzip, security headers, SSL via Cloudflare Origin CA) |
 | **CDN / DNS** | Cloudflare ("Full (Strict)" SSL mode) |
 | **Redis** | Local Redis 7.0 (`apt install redis-server`), 256MB maxmemory |
@@ -345,6 +402,21 @@ cat ~/.pm2/logs/api-manager-error-0.log
 - **Log noise:** Cache HIT/MISS and series warnings gated behind `NODE_ENV !== 'production'`.
 - **GitHub Actions:** `health-check.yml` and `warm-cache.yml` cron schedules are **disabled** (target `api-sync.vercel.app` is dead). Workflows can still be triggered manually via `workflow_dispatch`.
 
+### Uptime-Kuma Monitoring (Docker — port 3999)
+
+**28 active monitors** (19 HTTP, 5 TCP, 1 Ping, 2 Push, 1 DB Health). Notifications: Discord webhook (default) + Gmail backup (`smattyvaibhav@gmail.com` → `urtechy000@gmail.com`).
+
+| Key Monitor | Type | Interval |
+|-------------|------|----------|
+| content-enhancer — Heartbeat | Push (`6b6488ca218fbd79`) | 14400s (4h) |
+| news-scraper — Heartbeat | Push (`d181f8aada07d841`) | 7200s (2h) |
+| api-manager — Database | HTTP (`/api/health/db`) | 60s |
+| SSL — ai.urtechy.com | HTTP | 300s (was 86400s) |
+
+**Push monitors:** If the cron job doesn't send a heartbeat within the interval, Uptime-Kuma fires an alert. Heartbeat calls are in `content-enhancer-claude.js` (finally block) and `vps-scrape.sh` (end of script).
+
+**Health endpoints:** `/api/health` (summary), `/system`, `/redis`, `/workers`, `/match-index`, `/disk`, `/db` (PostgreSQL probe + pool stats + enhancement backlog).
+
 ---
 
 ## ⚠️ Important Notes
@@ -361,9 +433,10 @@ cat ~/.pm2/logs/api-manager-error-0.log
    - Twitter: 8 tweets/day max (FREE tier)
    - RapidAPI: 5 keys rotating for rankings
 
-3. **Content Flow:**
+3. **Content Flow (2-Phase):**
    ```
-   Scrapers → NewsArticle (DB) → Gemini 3.1 Pro High Enhancer → EnhancedContent → Tweet Worker → Twitter
+   fetchLatestNews() → DB pre-scan → fetchArticleDetails() (new/changed only) → NewsArticle (DB)
+   → Gemini 3.1 Pro High Enhancer → EnhancedContent → Tweet Worker → Twitter
    ```
 
 4. **Live Scores Flow:**
@@ -388,7 +461,10 @@ cat ~/.pm2/logs/api-manager-error-0.log
 | Tweets not posting | Check `TWEET_ENABLED=true` in `.env.local` |
 | Scraper failing (Chromium) | All scrapers auto-detect ARM64 Chromium: `CHROME_PATH` env → `/usr/bin/chromium-browser` → `/usr/bin/chromium` → Puppeteer bundled (fallback). Verify with `which chromium-browser`. |
 | Scraper failing (general) | `pm2 logs news-scraper --lines 100` or check Discord webhook alerts |
+| `SyntaxError` running `vps-scrape.sh` | You ran `node vps-scrape.sh` — it's a **bash** script! Use `bash scripts/vps-scrape.sh` or `./scripts/vps-scrape.sh`. Only `scrapers/*.js` files are run with `node`. |
 | API 500 errors | `pm2 logs api-manager` |
+| Content-enhancer stuck `online` | Must use `exec_mode: 'fork'` in ecosystem.config.js (NOT cluster). Cluster mode keeps an IPC channel alive that prevents `process.exit()` from working. Fixed Mar 1, 2026. |
+| Content-enhancer not running | Check `pm2 list` — should show `stopped` between cron runs. If missing entirely: `pm2 start ecosystem.config.js --only content-enhancer && pm2 save` |
 | No enhanced content | Run `node scrapers/content-enhancer-claude.js` manually |
 | High memory usage | `pm2 monit` — check against 500M/400M limits |
 | `prisma migrate` fails on VPS | `DIRECT_URL` is unreachable from VPS (Supabase direct connection DNS fails). Run migrations from local machine or CI instead. Runtime queries via `DATABASE_URL` (pooler) work fine. |
@@ -439,3 +515,15 @@ All 5 news scrapers (ESPN, ICC, Cricbuzz, BBC, IPL T20) hardened against bot det
 | CUPS service removed | Unnecessary print service removed from VPS |
 | Oracle port 6080 iptables rule removed | Closed unnecessary open port |
 | Disabled health-check + warm-cache workflows | Target `api-sync.vercel.app` is dead/402 |
+
+---
+
+## 📌 Known Issues & TODOs
+
+| Priority | Item | Notes |
+|----------|------|-------|
+| 🚨 HIGH | `scrapers/run-scraper.js` is **deprecated** | Old single-phase Cricbuzz runner. Replaced by `run-cricbuzz-scraper.js`. Delete or rename to `.deprecated` to prevent accidental use. |
+| 🟡 LOW | `degraded` state is dead code in `vps-scrape.sh` | `$WARNINGS` variable is never populated. The `degraded` branch (line ~386) never triggers. Disk/memory warnings are sent as independent alerts (correct behavior). Harmless but could be cleaned up. |
+| ✅ FIXED | Content-enhancer missing from PM2 | Was not registered. Fixed Mar 1, 2026: deployed with `exec_mode: 'fork'`, `process.exit(0)` in finally block, `pm2 save` persisted. |
+| ✅ FIXED | Content-enhancer hung in `online` state | `instances: 1` defaulted PM2 to cluster mode, keeping IPC channel alive. Changed to `exec_mode: 'fork'`. Fixed Mar 1, 2026. |
+| ✅ FIXED | Discord `ENHANCE_COUNT` undefined | Discord success message referenced undefined variable. Removed from template. Fixed Mar 1, 2026. |

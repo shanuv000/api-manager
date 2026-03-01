@@ -181,20 +181,23 @@ async function runESPNCricinfoScraper() {
     console.log("🏏 ESPN Cricinfo News Scraper - Database Integration");
     console.log("━".repeat(60));
 
-    // STEP 1: Fetch articles with details
-    console.log("\n📡 Fetching news with detailed content...");
-    const limit = 10; // Fetch top 10 articles
-    const articlesWithDetails = await scraper.fetchLatestNewsWithDetails(limit);
+    // PHASE 1: Fetch article listing only (1 page load)
+    console.log("\n📡 Phase 1: Fetching article listing...");
+    const limit = 10;
+    const LISTING_BUFFER = 2;
+    const articleList = await scraper.fetchLatestNews();
+    const limitedList = articleList.slice(0, limit + LISTING_BUFFER);
     console.log(
-      `   Fetched ${articlesWithDetails.length} articles with details\n`
+      `   Found ${articleList.length} articles in listing, processing top ${limitedList.length}\n`
     );
 
-    // STEP 2: Pre-fetch existing articles from DB
-    const sourceIds = articlesWithDetails.map((a) => generateSourceId(a));
+    // PHASE 2: DB pre-scan to identify new/changed articles
+    console.log("🔍 Phase 2: DB pre-scan...");
+    const sourceIds = limitedList.map((a) => generateSourceId(a));
     const existingArticles = await prisma.newsArticle.findMany({
       where: {
         sourceId: { in: sourceIds },
-        sourceName: "ESPN Cricinfo", // Optimize: only scan ESPN articles
+        sourceName: "ESPN Cricinfo",
       },
       select: { sourceId: true, title: true, tags: true },
     });
@@ -206,24 +209,79 @@ async function runESPNCricinfoScraper() {
         tags: article.tags,
       });
     }
-    console.log(`   Found ${existingMap.size} existing articles in DB\n`);
+    console.log(`   Found ${existingMap.size} existing articles in DB`);
 
-    // STEP 3: Process articles with content validation
+    // Filter to only articles needing detail fetch
+    const articlesNeedingDetails = limitedList.filter((article) => {
+      const sourceId = generateSourceId(article);
+      const existing = existingMap.get(sourceId);
+      if (!existing) return true; // New article
+      // ESPN listing titles have junk concatenated (description+time+author).
+      // DB stores cleaned title. Use startsWith: if listing title begins with DB title, it's unchanged.
+      const listTitle = article.title.trim();
+      const dbTitle = existing.title.trim();
+      return !listTitle.startsWith(dbTitle);
+    });
+
+    // Count pre-filtered duplicates
+    let skippedDuplicate = limitedList.length - articlesNeedingDetails.length;
+    console.log(
+      `   ${articlesNeedingDetails.length} articles need detail fetching (${skippedDuplicate} unchanged duplicates skipped)\n`
+    );
+
+    // PHASE 3: Fetch details ONLY for new/changed articles
+    const articlesWithDetails = [];
+    if (articlesNeedingDetails.length > 0) {
+      console.log(
+        `📚 Phase 3: Fetching details for ${articlesNeedingDetails.length} articles...\n`
+      );
+      for (let i = 0; i < articlesNeedingDetails.length; i++) {
+        const article = articlesNeedingDetails[i];
+        const shortTitle = article.title.substring(0, 50);
+        console.log(
+          `   [${i + 1}/${articlesNeedingDetails.length}] ${shortTitle}...`
+        );
+        try {
+          const details = await scraper.fetchArticleDetails(article.link);
+          articlesWithDetails.push({
+            ...article,
+            // Override with cleaned title from details (ESPN behavior)
+            title: details.title || article.title,
+            details,
+          });
+          if (i < articlesNeedingDetails.length - 1) {
+            await scraper.delay(3000); // Rate limiting - ESPN is stricter
+          }
+        } catch (error) {
+          console.error(`   ⚠️ Failed to fetch details: ${error.message}`);
+          // Skip articles without details - don't save incomplete data
+        }
+      }
+      console.log(
+        `   Fetched details for ${articlesWithDetails.length}/${articlesNeedingDetails.length} articles\n`
+      );
+    } else {
+      console.log("✅ All articles already exist and are unchanged — no detail fetching needed\n");
+    }
+
+    // STEP 4: Process articles with details
     let savedCount = 0;
     let skippedNoContent = 0;
-    let skippedDuplicate = 0;
+    // skippedDuplicate is already initialized and counted in Phase 2
     let updatedCount = 0;
     let errorCount = 0;
 
-    console.log("📝 Processing articles...\n");
+    if (articlesWithDetails.length > 0) {
+      console.log("📝 Processing articles...\n");
+    }
 
     for (let i = 0; i < articlesWithDetails.length; i++) {
       const article = articlesWithDetails[i];
       const sourceId = generateSourceId(article);
-      const cleanedTitle = cleanTitle(article.title);
+      const title = cleanTitle(article.title); // Use the cleaned title for processing
 
       console.log(
-        `${i + 1}/${articlesWithDetails.length} - ${cleanedTitle.substring(
+        `${i + 1}/${articlesWithDetails.length} - ${title.substring(
           0,
           50
         )}...`
@@ -241,7 +299,7 @@ async function runESPNCricinfoScraper() {
         const existing = existingMap.get(sourceId);
 
         // Check for unchanged duplicates
-        if (existing && existing.title === cleanedTitle) {
+        if (existing && existing.title === title) {
           console.log(`   ⏭️  Skipped: Already exists (unchanged)`);
           skippedDuplicate++;
           continue;
@@ -252,7 +310,7 @@ async function runESPNCricinfoScraper() {
         const content = details.content || "";
         const description = details.description || article.description || "";
         const metaDescription = generateMetaDescription(
-          cleanedTitle,
+          title,
           content,
           description
         );
@@ -264,7 +322,7 @@ async function runESPNCricinfoScraper() {
           tags = existing.tags;
         } else if (useAutoTagging) {
           // Always generate with AI for consistent SEO tags
-          tags = await generateTags(cleanedTitle, content || description);
+          tags = await generateTags(title, content || description);
           if (tags.length > 0) {
             console.log(`   🏷️  AI tags: ${tags.join(", ")}`);
           }
@@ -275,7 +333,7 @@ async function runESPNCricinfoScraper() {
           await prisma.newsArticle.update({
             where: { sourceId: sourceId },
             data: {
-              title: cleanedTitle,
+              title: title,
               description: description.substring(0, 500),
               content: content,
               imageUrl: details.mainImage || article.imageUrl,
@@ -305,7 +363,7 @@ async function runESPNCricinfoScraper() {
               sport: "cricket",
               category: "news",
               sourceName: "ESPN Cricinfo",
-              title: cleanedTitle,
+              title: title,
               description: description.substring(0, 500),
               content: content,
               imageUrl: details.mainImage || article.imageUrl,
@@ -315,7 +373,7 @@ async function runESPNCricinfoScraper() {
                 parsePublishTime(
                   details.publishedTime || article.publishedTime
                 ) || extractPublishedTimeFromTitle(article.title),
-              metaTitle: cleanedTitle,
+              metaTitle: title,
               metaDesc: metaDescription,
               tags: tags,
               relatedArticles: details.relatedArticles || null,

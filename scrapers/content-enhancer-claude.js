@@ -28,7 +28,8 @@ const CONFIG = {
     API_KEY: process.env.ANTIGRAVITY_API_KEY,
     ENHANCER_MODEL: 'gemini-3.1-pro-high',   // High intelligence for rich editorial content
     FORMATTER_MODEL: 'gemini-2.5-flash',      // Fast model for JSON validation/cleanup
-    BATCH_SIZE: 5, // Process 5 at a time for stability
+    BATCH_SIZE: 5, // Articles per DB query (memory-efficient batching)
+    MAX_RUNTIME_MS: 55 * 60 * 1000, // 55 min max (safe within 4h cron cycle)
     MAX_TOKENS: 16384,
 
     // Artifact Paths
@@ -335,211 +336,252 @@ async function main() {
     const ENHANCER_PROMPT = fs.readFileSync(CONFIG.ENHANCER_PROMPT_PATH, 'utf-8');
     const FORMATTER_PROMPT = fs.readFileSync(CONFIG.FORMATTER_PROMPT_PATH, 'utf-8');
 
+    const enhancerStartTime = Date.now();
+    let totalProcessed = 0;
+    let totalFailed = 0;
+
     try {
-        // 1. Fetch Candidates
-        const articles = await prisma.newsArticle.findMany({
-            where: {
-                enhancedContent: null,
-                content: { not: null }
-            },
-            take: CONFIG.BATCH_SIZE,
-            orderBy: { createdAt: 'desc' }
-        });
-
-        if (articles.length === 0) {
-            console.log("✅ No articles to enhance.");
-            return;
-        }
-
-        console.log(`Processing ${articles.length} articles...`);
-
-        for (const article of articles) {
-            console.log(`\n🔹 Processing: ${article.slug}`);
-
-            try {
-                // --- FETCH RELATED ARTICLES FOR INTERNAL LINKING ---
-                let relatedArticles = [];
-                if (article.tags && article.tags.length > 0) {
-                    const related = await prisma.newsArticle.findMany({
-                        where: {
-                            id: { not: article.id },
-                            enhancedContent: { isNot: null },
-                            tags: { hasSome: article.tags }
-                        },
-                        take: 5,
-                        select: { title: true, slug: true },
-                        orderBy: { createdAt: 'desc' }
-                    });
-                    relatedArticles = related.map(a => ({
-                        title: a.title,
-                        url: `/news/${a.slug}`
-                    }));
-                    if (relatedArticles.length > 0) {
-                        console.log(`   🔗 Found ${relatedArticles.length} related articles for internal linking`);
-                    }
-                }
-
-                // --- BUILD CONTEXT PACKET FOR INFORMATIONAL GAIN ---
-                console.log("   \ud83d\udcca Building context packet...");
-                const contextPacket = await buildContextPacket(article, prisma);
-                const contextSummary = [
-                    contextPacket.historicalArticles.length + ' historical',
-                    contextPacket.rankings ? 'rankings \u2713' : 'no rankings',
-                    contextPacket.crossSourceCoverage.length + ' cross-source',
-                ].join(', ');
-                console.log(`   \ud83d\udcca Context: ${contextSummary}`);
-
-                // --- PASS 1: ENHANCEMENT ---
-                console.log("   Brain: Enhancing content...");
-                const enhanceInput = JSON.stringify({
-                    id: article.id,
-                    title: article.title,
-                    body: article.content,
-                    date: article.publishedTime || article.createdAt,
-                    sourceUrl: article.sourceUrl,
-                    sourceName: article.sourceName,
-                    embeddedTweets: article.embeddedTweets || [],
-                    embeddedInstagram: article.embeddedInstagram || [],
-                    relatedArticles: relatedArticles,
-                    // Context for original analysis (informational gain)
-                    context: {
-                        recentCoverage: contextPacket.historicalArticles,
-                        rankings: contextPacket.rankings,
-                        otherSourcePerspectives: contextPacket.crossSourceCoverage,
-                    },
-                });
-
-                const enhancedRaw = await callClaudeAPI(ENHANCER_PROMPT, enhanceInput, CONFIG.ENHANCER_MODEL);
-                let enhancedJson;
-                try {
-                    enhancedJson = JSON.parse(enhancedRaw);
-                } catch (e) {
-                    console.error("   ❌ Enhancement JSON parse failed. Skipping.");
-                    continue;
-                }
-
-                // --- PASS 2: FORMATTING ---
-                console.log("   Brain: Formatting & Polishing...");
-                // Ensure input is array as expected by formatter
-                const formatterInput = Array.isArray(enhancedJson) ? enhancedJson : [enhancedJson];
-
-                const formattedRaw = await callClaudeAPI(FORMATTER_PROMPT, JSON.stringify(formatterInput), CONFIG.FORMATTER_MODEL);
-                let finalJson;
-                try {
-                    finalJson = JSON.parse(formattedRaw);
-                } catch (e) {
-                    console.error("   ❌ Formatting JSON parse failed. Skipping.");
-                    continue;
-                }
-
-                // Get the single item
-                const resultItem = Array.isArray(finalJson) ? finalJson[0] : finalJson;
-
-                // DEBUG: Log structure to understand failures
-                if (!resultItem || !resultItem.enhanced_data) {
-                    console.error("   ❌ Invalid final structure. Skipping.");
-                    console.error("   DEBUG resultItem keys:", resultItem ? Object.keys(resultItem) : 'null');
-                    console.error("   DEBUG raw response (first 500 chars):", formattedRaw.substring(0, 500));
-                    continue;
-                }
-
-                const data = resultItem.enhanced_data;
-                console.log("   \ud83d\udd0d Raw Enhancer Output:");
-                console.log("      tags:", JSON.stringify(data.tags));
-                console.log("      key_takeaways:", JSON.stringify(data.key_takeaways));
-
-                // --- QUALITY GATE ---
-                const wordCount = (data.full_blog_post_markdown || '').split(/\s+/).length;
-                if (wordCount < 600) {
-                    console.error(`   \u274c QUALITY GATE: ${wordCount}w (min 600). Skipping.`);
-                    continue;
-                }
-                console.log(`   \ud83d\udccf Quality: ${wordCount} words`);
-
-                // --- SAVE TO DB ---
-                // 1. Update EnhancedContent
-                await prisma.enhancedContent.upsert({
-                    where: { articleId: article.id },
-                    update: {
-                        title: data.enhanced_title,
-                        content: data.full_blog_post_markdown,
-                        metaDescription: data.seo_meta_description,
-                        keyTakeaways: data.key_takeaways || data.tags || [], // Fallback to tags if key_takeaways missing (old prompt)
-                        status: "published",
-                    },
-                    create: {
-                        articleId: article.id,
-                        title: data.enhanced_title,
-                        content: data.full_blog_post_markdown,
-                        metaDescription: data.seo_meta_description,
-                        keyTakeaways: data.key_takeaways || data.tags || [],
-                        status: "published"
-                    }
-                });
-
-                // 2. Update NewsArticle tags if provided
-                // The new prompt provides data.tags as keywords.
-                // We check if data.tags contains emojis to distinguish from old prompt format just in case.
-                const hasEmojis = (str) => /[\u{1F300}-\u{1F6FF}]/u.test(str);
-
-                // If we have distinct key_takeaways, then data.tags are likely the real keywords
-                let keywords = [];
-                if (data.key_takeaways && Array.isArray(data.tags)) {
-                    keywords = data.tags;
-                } else if (Array.isArray(data.tags)) {
-                    // Fallback: mixed bag. Filter out emoji strings for tags
-                    keywords = data.tags.filter(t => !hasEmojis(t));
-                }
-
-                if (keywords.length > 0) {
-                    await prisma.newsArticle.update({
-                        where: { id: article.id },
-                        data: {
-                            tags: keywords
-                        }
-                    });
-                    console.log(`   🏷️  Updated ${keywords.length} tags on NewsArticle`);
-                }
-
-                // 3. Update NewsArticle slug with SEO version
-                const oldSlug = article.slug;
-                const newSlug = generateSeoSlug(data.slug_suggestion, article.sourceId || oldSlug);
-                if (newSlug !== oldSlug) {
-                    await prisma.newsArticle.update({
-                        where: { id: article.id },
-                        data: { slug: newSlug }
-                    });
-                    console.log(`   🔗 Slug updated: ${oldSlug} → ${newSlug}`);
-                }
-
-                console.log(`   ✅ Saved Enhanced Article: "${data.enhanced_title}"`);
-
-                // Cache Invalidation - invalidate both old and new slugs
-                if (oldSlug) {
-                    await invalidateArticleCache(oldSlug);
-                }
-                if (newSlug && newSlug !== oldSlug) {
-                    await invalidateArticleCache(newSlug);
-                }
-                await invalidateNewsCache();
-                console.log("   🗑️  Cache invalidated");
-
-            } catch (err) {
-                console.error(`   ❌ Failed to process article: ${err.message}`);
+        // Loop until all pending articles are processed or max runtime reached
+        while (true) {
+            // Guard: max runtime
+            const elapsed = Date.now() - enhancerStartTime;
+            if (elapsed > CONFIG.MAX_RUNTIME_MS) {
+                console.log(`\n⏱️ Max runtime (${Math.round(CONFIG.MAX_RUNTIME_MS / 60000)}min) reached. Stopping.`);
+                break;
             }
 
-            // Sleep 30s between items (not after the last one)
-            if (article !== articles[articles.length - 1]) {
+            // Fetch next batch (newest first)
+            const articles = await prisma.newsArticle.findMany({
+                where: {
+                    enhancedContent: null,
+                    content: { not: null }
+                },
+                take: CONFIG.BATCH_SIZE,
+                orderBy: { createdAt: 'desc' }
+            });
+
+            if (articles.length === 0) {
+                console.log("\n✅ No more articles to enhance.");
+                break;
+            }
+
+            console.log(`\n📦 Batch: ${articles.length} articles (${totalProcessed} processed so far)`);
+
+            for (const article of articles) {
+                console.log(`\n🔹 Processing: ${article.slug}`);
+
+                try {
+                    // --- FETCH RELATED ARTICLES FOR INTERNAL LINKING ---
+                    let relatedArticles = [];
+                    if (article.tags && article.tags.length > 0) {
+                        const related = await prisma.newsArticle.findMany({
+                            where: {
+                                id: { not: article.id },
+                                enhancedContent: { isNot: null },
+                                tags: { hasSome: article.tags }
+                            },
+                            take: 5,
+                            select: { title: true, slug: true },
+                            orderBy: { createdAt: 'desc' }
+                        });
+                        relatedArticles = related.map(a => ({
+                            title: a.title,
+                            url: `/news/${a.slug}`
+                        }));
+                        if (relatedArticles.length > 0) {
+                            console.log(`   🔗 Found ${relatedArticles.length} related articles for internal linking`);
+                        }
+                    }
+
+                    // --- BUILD CONTEXT PACKET FOR INFORMATIONAL GAIN ---
+                    console.log("   \ud83d\udcca Building context packet...");
+                    const contextPacket = await buildContextPacket(article, prisma);
+                    const contextSummary = [
+                        contextPacket.historicalArticles.length + ' historical',
+                        contextPacket.rankings ? 'rankings \u2713' : 'no rankings',
+                        contextPacket.crossSourceCoverage.length + ' cross-source',
+                    ].join(', ');
+                    console.log(`   \ud83d\udcca Context: ${contextSummary}`);
+
+                    // --- PASS 1: ENHANCEMENT ---
+                    console.log("   Brain: Enhancing content...");
+                    const enhanceInput = JSON.stringify({
+                        id: article.id,
+                        title: article.title,
+                        body: article.content,
+                        date: article.publishedTime || article.createdAt,
+                        sourceUrl: article.sourceUrl,
+                        sourceName: article.sourceName,
+                        embeddedTweets: article.embeddedTweets || [],
+                        embeddedInstagram: article.embeddedInstagram || [],
+                        relatedArticles: relatedArticles,
+                        // Context for original analysis (informational gain)
+                        context: {
+                            recentCoverage: contextPacket.historicalArticles,
+                            rankings: contextPacket.rankings,
+                            otherSourcePerspectives: contextPacket.crossSourceCoverage,
+                        },
+                    });
+
+                    const enhancedRaw = await callClaudeAPI(ENHANCER_PROMPT, enhanceInput, CONFIG.ENHANCER_MODEL);
+                    let enhancedJson;
+                    try {
+                        enhancedJson = JSON.parse(enhancedRaw);
+                    } catch (e) {
+                        console.error("   ❌ Enhancement JSON parse failed. Skipping.");
+                        continue;
+                    }
+
+                    // --- PASS 2: FORMATTING ---
+                    console.log("   Brain: Formatting & Polishing...");
+                    // Ensure input is array as expected by formatter
+                    const formatterInput = Array.isArray(enhancedJson) ? enhancedJson : [enhancedJson];
+
+                    const formattedRaw = await callClaudeAPI(FORMATTER_PROMPT, JSON.stringify(formatterInput), CONFIG.FORMATTER_MODEL);
+                    let finalJson;
+                    try {
+                        finalJson = JSON.parse(formattedRaw);
+                    } catch (e) {
+                        console.error("   ❌ Formatting JSON parse failed. Skipping.");
+                        continue;
+                    }
+
+                    // Get the single item
+                    const resultItem = Array.isArray(finalJson) ? finalJson[0] : finalJson;
+
+                    // DEBUG: Log structure to understand failures
+                    if (!resultItem || !resultItem.enhanced_data) {
+                        console.error("   ❌ Invalid final structure. Skipping.");
+                        console.error("   DEBUG resultItem keys:", resultItem ? Object.keys(resultItem) : 'null');
+                        console.error("   DEBUG raw response (first 500 chars):", formattedRaw.substring(0, 500));
+                        continue;
+                    }
+
+                    const data = resultItem.enhanced_data;
+                    console.log("   \ud83d\udd0d Raw Enhancer Output:");
+                    console.log("      tags:", JSON.stringify(data.tags));
+                    console.log("      key_takeaways:", JSON.stringify(data.key_takeaways));
+
+                    // --- QUALITY GATE ---
+                    const wordCount = (data.full_blog_post_markdown || '').split(/\s+/).length;
+                    if (wordCount < 600) {
+                        console.error(`   \u274c QUALITY GATE: ${wordCount}w (min 600). Skipping.`);
+                        continue;
+                    }
+                    console.log(`   \ud83d\udccf Quality: ${wordCount} words`);
+
+                    // --- SAVE TO DB ---
+                    // 1. Update EnhancedContent
+                    await prisma.enhancedContent.upsert({
+                        where: { articleId: article.id },
+                        update: {
+                            title: data.enhanced_title,
+                            content: data.full_blog_post_markdown,
+                            metaDescription: data.seo_meta_description,
+                            keyTakeaways: data.key_takeaways || data.tags || [], // Fallback to tags if key_takeaways missing (old prompt)
+                            status: "published",
+                        },
+                        create: {
+                            articleId: article.id,
+                            title: data.enhanced_title,
+                            content: data.full_blog_post_markdown,
+                            metaDescription: data.seo_meta_description,
+                            keyTakeaways: data.key_takeaways || data.tags || [],
+                            status: "published"
+                        }
+                    });
+
+                    // 2. Update NewsArticle tags if provided
+                    // The new prompt provides data.tags as keywords.
+                    // We check if data.tags contains emojis to distinguish from old prompt format just in case.
+                    const hasEmojis = (str) => /[\u{1F300}-\u{1F6FF}]/u.test(str);
+
+                    // If we have distinct key_takeaways, then data.tags are likely the real keywords
+                    let keywords = [];
+                    if (data.key_takeaways && Array.isArray(data.tags)) {
+                        keywords = data.tags;
+                    } else if (Array.isArray(data.tags)) {
+                        // Fallback: mixed bag. Filter out emoji strings for tags
+                        keywords = data.tags.filter(t => !hasEmojis(t));
+                    }
+
+                    if (keywords.length > 0) {
+                        await prisma.newsArticle.update({
+                            where: { id: article.id },
+                            data: {
+                                tags: keywords
+                            }
+                        });
+                        console.log(`   🏷️  Updated ${keywords.length} tags on NewsArticle`);
+                    }
+
+                    // 3. Update NewsArticle slug with SEO version
+                    const oldSlug = article.slug;
+                    const newSlug = generateSeoSlug(data.slug_suggestion, article.sourceId || oldSlug);
+                    if (newSlug !== oldSlug) {
+                        await prisma.newsArticle.update({
+                            where: { id: article.id },
+                            data: { slug: newSlug }
+                        });
+                        console.log(`   🔗 Slug updated: ${oldSlug} → ${newSlug}`);
+                    }
+
+                    console.log(`   ✅ Saved Enhanced Article: "${data.enhanced_title}"`);
+
+                    // Cache Invalidation - invalidate both old and new slugs
+                    if (oldSlug) {
+                        await invalidateArticleCache(oldSlug);
+                    }
+                    if (newSlug && newSlug !== oldSlug) {
+                        await invalidateArticleCache(newSlug);
+                    }
+                    await invalidateNewsCache();
+                    console.log("   🗑️  Cache invalidated");
+
+                } catch (err) {
+                    console.error(`   ❌ Failed to process article: ${err.message}`);
+                    totalFailed++;
+                }
+
+                totalProcessed++;
+
+                // Sleep 30s between items (API rate limiting)
                 console.log("   ⏳ Sleeping 30s before next article...");
                 await sleep(30000);
             }
-        }
+        } // end while loop
+
+        // Summary
+        const totalElapsed = ((Date.now() - enhancerStartTime) / 1000).toFixed(0);
+        console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+        console.log(`📊 ENHANCER SUMMARY:`);
+        console.log(`   ✅ Processed:  ${totalProcessed}`);
+        console.log(`   ❌ Failed:     ${totalFailed}`);
+        console.log(`   ⏱️  Duration:   ${totalElapsed}s`);
+        console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
 
     } catch (error) {
         console.error("Fatal Error:", error);
     } finally {
         await prisma.$disconnect();
         await pool.end();
+
+        // Ping Uptime-Kuma push heartbeat (non-blocking — must not prevent exit)
+        try {
+            const durationSec = enhancerStartTime
+                ? Math.round((Date.now() - enhancerStartTime) / 1000)
+                : 0;
+            await axios.get(
+                `http://127.0.0.1:3999/api/push/6b6488ca218fbd79?status=up&msg=OK&ping=${durationSec}`,
+                { timeout: 5000 }
+            );
+            console.log('💓 Uptime-Kuma heartbeat sent');
+        } catch (e) {
+            console.warn('⚠️ Uptime-Kuma heartbeat failed (non-critical):', e.message);
+        }
+
+        // Force clean exit — one-shot scripts must not leave handles open
+        process.exit(0);
     }
 }
 

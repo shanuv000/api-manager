@@ -9,6 +9,7 @@
  *   GET /api/health/workers  → PM2 process status via `pm2 jlist`
  *   GET /api/health/match-index → Verify Redis match index with real key lookup
  *   GET /api/health/disk      → Disk usage, inodes, log directories, writable test
+ *   GET /api/health/db        → PostgreSQL connectivity, pool stats, enhancement backlog
  */
 
 const express = require('express');
@@ -16,6 +17,8 @@ const os = require('os');
 const { execSync } = require('child_process');
 const { getClient, KEYS, getMatchIndex } = require('../utils/redis-client');
 const { redis: getGeneralRedis } = require('../component/redisClient');
+const prisma = require('../component/prismaClient');
+const { pool: dbPool } = prisma;
 
 const router = express.Router();
 
@@ -487,6 +490,79 @@ router.get('/disk', (req, res) => {
     }
 
     if (warnings.length > 0) checks.warnings = warnings;
+
+    const httpStatus = status === 'ok' || status === 'warning' ? 200 : 503;
+    res.setHeader('Cache-Control', 'no-cache, no-store');
+    res.status(httpStatus).json({
+        status,
+        timestamp: new Date().toISOString(),
+        responseMs: Date.now() - startTime,
+        checks,
+    });
+});
+
+// ─── 7. GET /api/health/db — PostgreSQL connectivity + enhancement backlog ───
+router.get('/db', async (req, res) => {
+    const startTime = Date.now();
+    let status = 'ok';
+    const checks = {};
+
+    // ── Direct DB probe ──
+    try {
+        const probeStart = Date.now();
+        await prisma.$queryRawUnsafe('SELECT 1');
+        const latencyMs = Date.now() - probeStart;
+        checks.query = {
+            status: 'ok',
+            latencyMs,
+        };
+        if (latencyMs > 1000) {
+            checks.query.warning = 'high_latency';
+            if (status === 'ok') status = 'warning';
+        }
+    } catch (e) {
+        checks.query = { status: 'error', error: e.message };
+        status = 'degraded';
+    }
+
+    // ── Connection pool stats ──
+    try {
+        checks.pool = {
+            totalCount: dbPool.totalCount,
+            idleCount: dbPool.idleCount,
+            waitingCount: dbPool.waitingCount,
+        };
+        if (dbPool.waitingCount > 0) {
+            checks.pool.warning = 'connections_waiting';
+            if (status === 'ok') status = 'warning';
+        }
+    } catch {
+        checks.pool = { status: 'unavailable' };
+    }
+
+    // ── Enhancement backlog ──
+    try {
+        const backlogCount = await prisma.newsArticle.count({
+            where: { enhancedContent: null },
+        });
+        checks.backlog = {
+            unenhancedArticles: backlogCount,
+        };
+        if (backlogCount > 50) {
+            checks.backlog.status = 'degraded';
+            checks.backlog.warning = `backlog_high: ${backlogCount} articles unenhanced`;
+            if (status === 'ok' || status === 'warning') status = 'degraded';
+        } else if (backlogCount > 20) {
+            checks.backlog.status = 'warning';
+            checks.backlog.warning = `backlog_growing: ${backlogCount} articles unenhanced`;
+            if (status === 'ok') status = 'warning';
+        } else {
+            checks.backlog.status = 'ok';
+        }
+    } catch (e) {
+        checks.backlog = { status: 'error', error: e.message };
+        // Backlog query failure is non-critical — DB probe already checks connectivity
+    }
 
     const httpStatus = status === 'ok' || status === 'warning' ? 200 : 503;
     res.setHeader('Cache-Control', 'no-cache, no-store');
