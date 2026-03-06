@@ -14,10 +14,17 @@ set -o pipefail
 
 SCRIPT_DIR="/home/ubuntu/apps/api-manager"
 LOCK_FILE="/tmp/cricket-scraper.lock"
-SCRAPER_TIMEOUT=300  # 5 minutes max per scraper (increased to accommodate retries)
-BBC_TIMEOUT=420      # 7 minutes for BBC (slower page loads)
+SCRAPER_TIMEOUT=120  # 2 minutes max per scraper (actual: ~10s, this is safety net)
+BBC_TIMEOUT=180      # 3 minutes for BBC (scrolling + slower page loads)
 
 cd "$SCRIPT_DIR"
+
+# Prevent overlapping runs (PM2 cron may fire while previous run is still active)
+exec 200>"$LOCK_FILE"
+if ! flock -n 200; then
+  echo "⚠️ Previous scraper run still active — skipping this cycle"
+  exit 0
+fi
 
 # Load environment variables
 export $(grep -v '^#' .env | xargs)
@@ -159,44 +166,60 @@ echo "🧹 Cleaning up stale articles..."
 timeout 30 node scripts/cleanup-stale.js 2>&1 || echo "⚠️ Cleanup skipped or failed"
 
 # Run Cricbuzz scraper (with timeout)
+CRICBUZZ_START=$(date +%s)
 echo "📰 Running Cricbuzz scraper..."
-if CRICBUZZ_OUTPUT=$(timeout $SCRAPER_TIMEOUT node scrapers/run-cricbuzz-scraper.js 2>&1); then
+if CRICBUZZ_OUTPUT=$(timeout --kill-after=10s $SCRAPER_TIMEOUT node scrapers/run-cricbuzz-scraper.js 2>&1); then
   CRICBUZZ_STATUS="✅ Success"
   CRICBUZZ_NEW=$(echo "$CRICBUZZ_OUTPUT" | grep -oP "New articles saved:\s*\K\d+" || echo "0")
   CRICBUZZ_UPDATED=$(echo "$CRICBUZZ_OUTPUT" | grep -oP "Updated articles:\s*\K\d+" || echo "0")
   CRICBUZZ_SKIPPED=$(echo "$CRICBUZZ_OUTPUT" | grep -oP "Skipped.*duplicate.*:\s*\K\d+" || echo "0")
 else
   exit_code=$?
-  if [ $exit_code -eq 124 ]; then
+  if [ $exit_code -eq 124 ] || [ $exit_code -eq 137 ]; then
     SCRAPER_ERRORS="${SCRAPER_ERRORS}Cricbuzz timed out (>${SCRAPER_TIMEOUT}s)\\n"
     echo "⚠️ Cricbuzz scraper timed out after ${SCRAPER_TIMEOUT}s"
   else
     SCRAPER_ERRORS="${SCRAPER_ERRORS}Cricbuzz failed (exit: $exit_code)\\n"
   fi
 fi
+CRICBUZZ_DURATION=$(( $(date +%s) - CRICBUZZ_START ))
 echo "$CRICBUZZ_OUTPUT"
 
-# Run ESPN Cricinfo scraper (Puppeteer - with timeout)
-echo "📰 Running ESPN Cricinfo scraper..."
-if ESPN_OUTPUT=$(timeout $SCRAPER_TIMEOUT node scrapers/run-espncricinfo-scraper.js 2>&1); then
+# Check WARP proxy status before ESPN (ESPN uses Akamai which blocks VPS datacenter IPs)
+echo "🔀 Checking Cloudflare WARP proxy..."
+if WARP_IP=$(curl --proxy socks5://127.0.0.1:40000 --connect-timeout 5 -s https://api.ipify.org 2>/dev/null); then
+  echo "   ✅ WARP proxy active (exit IP: $WARP_IP)"
+else
+  echo "   ⚠️ WARP proxy not available — ESPN will use direct connection"
+  WARNINGS="${WARNINGS}WARP proxy down — ESPN may be blocked\\n"
+  # Try to reconnect WARP
+  warp-cli connect 2>/dev/null || true
+fi
+
+# Run ESPN Cricinfo scraper (Puppeteer + WARP proxy - with timeout)
+ESPN_START=$(date +%s)
+echo "📰 Running ESPN Cricinfo scraper (via WARP proxy)..."
+if ESPN_OUTPUT=$(timeout --kill-after=10s $SCRAPER_TIMEOUT node scrapers/run-espncricinfo-scraper.js 2>&1); then
   ESPN_STATUS="✅ Success"
   ESPN_NEW=$(echo "$ESPN_OUTPUT" | grep -oP "New articles saved:\s*\K\d+" || echo "0")
   ESPN_UPDATED=$(echo "$ESPN_OUTPUT" | grep -oP "Updated articles:\s*\K\d+" || echo "0")
   ESPN_SKIPPED=$(echo "$ESPN_OUTPUT" | grep -oP "Skipped.*duplicate.*:\s*\K\d+" || echo "0")
 else
   exit_code=$?
-  if [ $exit_code -eq 124 ]; then
+  if [ $exit_code -eq 124 ] || [ $exit_code -eq 137 ]; then
     SCRAPER_ERRORS="${SCRAPER_ERRORS}ESPN timed out (>${SCRAPER_TIMEOUT}s)\\n"
     echo "⚠️ ESPN scraper timed out after ${SCRAPER_TIMEOUT}s"
   else
     SCRAPER_ERRORS="${SCRAPER_ERRORS}ESPN failed (exit: $exit_code)\\n"
   fi
 fi
+ESPN_DURATION=$(( $(date +%s) - ESPN_START ))
 echo "$ESPN_OUTPUT"
 
 # Run ICC Cricket scraper (Puppeteer - with timeout)
+ICC_START=$(date +%s)
 echo "📰 Running ICC Cricket scraper..."
-if ICC_OUTPUT=$(timeout $SCRAPER_TIMEOUT node scrapers/run-icc-scraper.js 2>&1); then
+if ICC_OUTPUT=$(timeout --kill-after=10s $SCRAPER_TIMEOUT node scrapers/run-icc-scraper.js 2>&1); then
   ICC_STATUS="✅ Success"
   ICC_NEW=$(echo "$ICC_OUTPUT" | grep -oP "New articles saved:\s*\K\d+" || echo "0")
   ICC_UPDATED=$(echo "$ICC_OUTPUT" | grep -oP "Updated articles:\s*\K\d+" || echo "0")
@@ -204,18 +227,20 @@ if ICC_OUTPUT=$(timeout $SCRAPER_TIMEOUT node scrapers/run-icc-scraper.js 2>&1);
   DB_TOTAL=$(echo "$ICC_OUTPUT" | grep -oP "Total articles:\s*\K\d+" || echo "?")
 else
   exit_code=$?
-  if [ $exit_code -eq 124 ]; then
+  if [ $exit_code -eq 124 ] || [ $exit_code -eq 137 ]; then
     SCRAPER_ERRORS="${SCRAPER_ERRORS}ICC timed out (>${SCRAPER_TIMEOUT}s)\\n"
     echo "⚠️ ICC scraper timed out after ${SCRAPER_TIMEOUT}s"
   else
     SCRAPER_ERRORS="${SCRAPER_ERRORS}ICC failed (exit: $exit_code)\\n"
   fi
 fi
+ICC_DURATION=$(( $(date +%s) - ICC_START ))
 echo "$ICC_OUTPUT"
 
 # Run BBC Sport scraper (Puppeteer - with timeout)
+BBC_START=$(date +%s)
 echo "📰 Running BBC Sport scraper..."
-if BBC_OUTPUT=$(timeout $BBC_TIMEOUT node scrapers/run-bbc-scraper.js 2>&1); then
+if BBC_OUTPUT=$(timeout --kill-after=10s $BBC_TIMEOUT node scrapers/run-bbc-scraper.js 2>&1); then
   BBC_STATUS="✅ Success"
   BBC_NEW=$(echo "$BBC_OUTPUT" | grep -oP "New articles saved:\s*\K\d+" || echo "0")
   BBC_UPDATED=$(echo "$BBC_OUTPUT" | grep -oP "Updated articles:\s*\K\d+" || echo "0")
@@ -223,13 +248,14 @@ if BBC_OUTPUT=$(timeout $BBC_TIMEOUT node scrapers/run-bbc-scraper.js 2>&1); the
   DB_TOTAL=$(echo "$BBC_OUTPUT" | grep -oP "Total articles:\s*\K\d+" || echo "$DB_TOTAL")
 else
   exit_code=$?
-  if [ $exit_code -eq 124 ]; then
+  if [ $exit_code -eq 124 ] || [ $exit_code -eq 137 ]; then
     SCRAPER_ERRORS="${SCRAPER_ERRORS}BBC timed out (>${BBC_TIMEOUT}s)\\n"
     echo "⚠️ BBC scraper timed out after ${BBC_TIMEOUT}s"
   else
     SCRAPER_ERRORS="${SCRAPER_ERRORS}BBC failed (exit: $exit_code)\\n"
   fi
 fi
+BBC_DURATION=$(( $(date +%s) - BBC_START ))
 echo "$BBC_OUTPUT"
 
 # --- IPL T20 scraper disabled (no longer needed) ---
@@ -303,10 +329,10 @@ fi
 # Build status line for each scraper
 
 SCRAPER_DETAILS="**Scrapers:**\\n"
-SCRAPER_DETAILS="${SCRAPER_DETAILS}• Cricbuzz: ${CRICBUZZ_STATUS} (${CRICBUZZ_NEW} new)\\n"
-SCRAPER_DETAILS="${SCRAPER_DETAILS}• ESPN: ${ESPN_STATUS} (${ESPN_NEW} new)\\n"
-SCRAPER_DETAILS="${SCRAPER_DETAILS}• ICC: ${ICC_STATUS} (${ICC_NEW} new)\\n"
-SCRAPER_DETAILS="${SCRAPER_DETAILS}• BBC: ${BBC_STATUS} (${BBC_NEW} new)\\n"
+SCRAPER_DETAILS="${SCRAPER_DETAILS}• Cricbuzz: ${CRICBUZZ_STATUS} (${CRICBUZZ_NEW} new, ${CRICBUZZ_DURATION:-?}s)\\n"
+SCRAPER_DETAILS="${SCRAPER_DETAILS}• ESPN: ${ESPN_STATUS} (${ESPN_NEW} new, ${ESPN_DURATION:-?}s)\\n"
+SCRAPER_DETAILS="${SCRAPER_DETAILS}• ICC: ${ICC_STATUS} (${ICC_NEW} new, ${ICC_DURATION:-?}s)\\n"
+SCRAPER_DETAILS="${SCRAPER_DETAILS}• BBC: ${BBC_STATUS} (${BBC_NEW} new, ${BBC_DURATION:-?}s)\\n"
 # SCRAPER_DETAILS="${SCRAPER_DETAILS}• IPL: ${IPL_STATUS} (${IPL_NEW} new)\\n"  # IPL disabled
 SCRAPER_DETAILS="${SCRAPER_DETAILS}• AI Enhance: Runs independently (pm2 logs content-enhancer)"
 
@@ -354,6 +380,23 @@ if [ -f "$STATE_FILE" ] && [ -r "$STATE_FILE" ]; then
     if [ "$CURRENT_STATUS" = "$PREV_STATUS" ] && [ "$CURRENT_HASH" = "$PREV_HASH" ]; then
       SHOULD_NOTIFY="false"
       echo "📱 State unchanged ($CURRENT_STATUS, hash=$CURRENT_HASH) — notification suppressed"
+    # Cooldown: suppress repeat critical alerts within 2 hours (prevents spam when different scrapers rotate failures)
+    elif [ "$CURRENT_STATUS" = "critical" ] && [ "$PREV_STATUS" = "critical" ]; then
+      COOLDOWN_SECONDS=7200  # 2 hours
+      PREV_NOTIFIED=$(jq -r '.last_notified_at // .timestamp // empty' "$STATE_FILE" 2>/dev/null)
+      if [ -n "$PREV_NOTIFIED" ]; then
+        PREV_EPOCH=$(date -d "$PREV_NOTIFIED" +%s 2>/dev/null || echo "0")
+        NOW_EPOCH=$(date +%s)
+        ELAPSED=$((NOW_EPOCH - PREV_EPOCH))
+        if [ "$ELAPSED" -le "$COOLDOWN_SECONDS" ]; then
+          SHOULD_NOTIFY="false"
+          echo "📱 Critical alert suppressed (cooldown: ${ELAPSED}s < ${COOLDOWN_SECONDS}s)"
+        else
+          echo "📱 Critical alert cooldown expired (${ELAPSED}s) — notifying"
+        fi
+      else
+        echo "📱 State changed: $PREV_STATUS→$CURRENT_STATUS (hash: ${PREV_HASH:0:8}→${CURRENT_HASH:0:8})"
+      fi
     else
       echo "📱 State changed: $PREV_STATUS→$CURRENT_STATUS (hash: ${PREV_HASH:0:8}→${CURRENT_HASH:0:8})"
     fi
@@ -410,11 +453,20 @@ else
 fi
 
 # Write state file AFTER send decision (crash before here = re-evaluate next run)
+# last_notified_at only updates when we actually send — this makes cooldown work correctly
+if [ "$SHOULD_NOTIFY" = "true" ]; then
+  LAST_NOTIFIED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+else
+  # Carry forward previous last_notified_at (or fall back to now for first run)
+  LAST_NOTIFIED=$(jq -r '.last_notified_at // empty' "$STATE_FILE" 2>/dev/null)
+  LAST_NOTIFIED="${LAST_NOTIFIED:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+fi
 cat > "$STATE_FILE" <<STATEEOF
 {
   "status": "$CURRENT_STATUS",
   "errors_hash": "$CURRENT_HASH",
-  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "last_notified_at": "$LAST_NOTIFIED"
 }
 STATEEOF
 echo "💾 State saved: $CURRENT_STATUS ($CURRENT_HASH)"

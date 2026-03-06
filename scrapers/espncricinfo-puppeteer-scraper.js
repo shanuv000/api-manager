@@ -62,6 +62,15 @@ class ESPNCricinfoPuppeteerScraper {
     this.baseUrl = "https://www.espncricinfo.com";
     this.newsUrl = "https://www.espncricinfo.com/cricket-news";
 
+    // Cloudflare WARP SOCKS5 proxy — bypasses Akamai IP blocking on ESPN
+    // WARP runs in proxy mode (localhost:40000), only this scraper uses it
+    this.warpProxy = options.proxy || "socks5://127.0.0.1:40000";
+    this.useProxy = options.useProxy !== false; // Default: use proxy
+
+    const proxyArgs = this.useProxy
+      ? [`--proxy-server=${this.warpProxy}`]
+      : [];
+
     this.launchOptions = {
       headless: options.headless !== false ? "new" : false,
       executablePath: options.executablePath || findChromiumPath(),
@@ -81,6 +90,7 @@ class ESPNCricinfoPuppeteerScraper {
         "--blink-settings=imagesEnabled=false",
         "--single-process", // Required for cron/systemd execution
         "--no-zygote", // Required for cron/systemd execution
+        ...proxyArgs,
       ],
       defaultViewport: { width: 1280, height: 800 },
       ...options.launchOptions,
@@ -92,6 +102,11 @@ class ESPNCricinfoPuppeteerScraper {
 
   async init() {
     if (!this.browser) {
+      if (this.useProxy) {
+        console.log(`🔀 WARP proxy enabled: ${this.warpProxy}`);
+      } else {
+        console.log("🔀 Proxy disabled — using direct connection");
+      }
       console.log("🚀 Launching Puppeteer browser (stealth mode)...");
       this.browser = await puppeteer.launch(this.launchOptions);
 

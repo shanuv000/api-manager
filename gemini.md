@@ -5,7 +5,7 @@
 > 1. **PM2 logs first:** `pm2 logs news-scraper --lines 100` and `pm2 logs content-enhancer --lines 50`
 > 2. **Uptime-Kuma monitor status:** `docker exec uptime-kuma sqlite3 /app/data/kuma.db "SELECT m.name, h.status, h.msg, h.time FROM heartbeat h JOIN monitor m ON h.monitor_id=m.id WHERE h.id IN (SELECT MAX(id) FROM heartbeat GROUP BY monitor_id) ORDER BY h.status ASC, m.name;" | head -30`
 > 3. **Recent DOWN events:** `docker exec uptime-kuma sqlite3 /app/data/kuma.db "SELECT m.name, h.msg, h.time FROM heartbeat h JOIN monitor m ON h.monitor_id=m.id WHERE h.status=0 ORDER BY h.time DESC LIMIT 10;"`
-> **Last Updated:** Mar 1, 2026 (Uptime-Kuma Hardening — Push heartbeats, DB health endpoint, AI proxy interval) | **Status:** 🟢 ACTIVE
+> **Last Updated:** Mar 6, 2026 (Scraper Reliability — flock overlap protection, reduced timeouts, Discord cooldown) | **Status:** 🟢 ACTIVE
 
 ---
 
@@ -112,12 +112,15 @@ Run completes → Classify status (healthy/critical)
 ```
 
 - **Healthy → Critical:** Sends "🚨 Issues" (red embed)
-- **Critical → Healthy:** Sends "✅ Recovered" (green embed)
+- **Critical → Healthy:** Sends "✅ Recovered" (green embed) — always sent, never suppressed
 - **Same state + same hash:** Suppressed (no spam)
-- **Critical → Critical (different error):** Sends new "Issues" (different hash)
+- **Critical → Critical (different error):** Subject to cooldown (see below)
 - **Disk/Memory alerts:** Sent independently, do not affect scraper classification
 - **Crash trap:** EXIT handler sends "CRASHED" notification with duration + exit code
-- **Timeout thresholds:** Cricbuzz/ESPN/ICC = 300s, BBC = 420s
+- **Timeout thresholds:** Cricbuzz/ESPN/ICC = 120s, BBC = 180s (with `--kill-after=10s` hard SIGKILL)
+- **Exit code handling:** Both 124 (SIGTERM timeout) and 137 (SIGKILL from `--kill-after`) are classified as timeouts
+- **Overlap protection:** `flock -n` at script start prevents concurrent PM2 cron runs. Exit before trap registration → no crash notification on skip.
+- **Alert cooldown (Mar 6):** Critical alerts use a `last_notified_at` field in the state file (NOT `timestamp`, which resets every run). Suppressed when `elapsed ≤ 7200s`. Result: at most 1 critical alert every 4 hours on a 2h cron.
 
 ### 2-Phase Scraper Optimization (Feb 28, 2026)
 
@@ -478,6 +481,8 @@ All 5 news scrapers (ESPN, ICC, Cricbuzz, BBC, IPL T20) hardened against bot det
 
 **ARM64 Chromium Detection (Feb 26, 2026):** All scrapers use a priority-based Chromium path detection: `CHROME_PATH` env → `/usr/bin/chromium-browser` → `/usr/bin/chromium` → Puppeteer bundled Chrome (last resort). This ensures compatibility on ARM64 VPS where Puppeteer's bundled Chrome is x86_64-only.
 
+**WARP Proxy (ESPN):** Cloudflare WARP SOCKS5 proxy (`socks5://127.0.0.1:40000`) used by ESPN scraper to bypass Akamai datacenter IP blocks. Status checked before ESPN runs; auto-reconnects via `warp-cli connect`. As of Mar 6, 2026: WARP is active and ESPN scraper works (~10s).
+
 | Component | Hardening Applied |
 |-----------|-------------------|
 | **Evasion** | `puppeteer-extra` + `stealth` plugin, `Object.defineProperty(navigator, 'webdriver')` override |
@@ -523,7 +528,10 @@ All 5 news scrapers (ESPN, ICC, Cricbuzz, BBC, IPL T20) hardened against bot det
 | Priority | Item | Notes |
 |----------|------|-------|
 | 🚨 HIGH | `scrapers/run-scraper.js` is **deprecated** | Old single-phase Cricbuzz runner. Replaced by `run-cricbuzz-scraper.js`. Delete or rename to `.deprecated` to prevent accidental use. |
-| 🟡 LOW | `degraded` state is dead code in `vps-scrape.sh` | `$WARNINGS` variable is never populated. The `degraded` branch (line ~386) never triggers. Disk/memory warnings are sent as independent alerts (correct behavior). Harmless but could be cleaned up. |
-| ✅ FIXED | Content-enhancer missing from PM2 | Was not registered. Fixed Mar 1, 2026: deployed with `exec_mode: 'fork'`, `process.exit(0)` in finally block, `pm2 save` persisted. |
-| ✅ FIXED | Content-enhancer hung in `online` state | `instances: 1` defaulted PM2 to cluster mode, keeping IPC channel alive. Changed to `exec_mode: 'fork'`. Fixed Mar 1, 2026. |
-| ✅ FIXED | Discord `ENHANCE_COUNT` undefined | Discord success message referenced undefined variable. Removed from template. Fixed Mar 1, 2026. |
+| 🟡 LOW | `degraded` state is dead code in `vps-scrape.sh` | `$WARNINGS` variable is never populated. The `degraded` branch never triggers. Disk/memory warnings are sent as independent alerts (correct behavior). Harmless but could be cleaned up. |
+| ✅ FIXED | Scraper overlapping runs | PM2 cron could launch new run while previous still running. Fixed Mar 6: `flock -n` overlap protection. |
+| ✅ FIXED | Zombie Chromium processes after timeout | `timeout` sent SIGTERM which Chromium ignored. Fixed Mar 6: `--kill-after=10s` sends SIGKILL. Exit code 137 now correctly classified as timeout. |
+| ✅ FIXED | Discord cooldown was non-functional | `timestamp` was reset every run → cooldown never triggered. Fixed Mar 6: uses `last_notified_at` (only set when notification sent) + `-le` boundary fix. |
+| ✅ FIXED | Content-enhancer missing from PM2 | Was not registered. Fixed Mar 1: `exec_mode: 'fork'`, `process.exit(0)`, `pm2 save`. |
+| ✅ FIXED | Content-enhancer hung in `online` state | `instances: 1` defaulted to cluster mode. Changed to `exec_mode: 'fork'`. Fixed Mar 1. |
+| ✅ FIXED | Discord `ENHANCE_COUNT` undefined | Referenced undefined variable. Removed from template. Fixed Mar 1. |
